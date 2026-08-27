@@ -1,5 +1,6 @@
 package com.resumethinking.platform.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.resumethinking.platform.auth.JwtService;
 import com.resumethinking.platform.matching.InternalAnalysisCallbackController;
 import com.resumethinking.platform.matching.MatchTaskService;
@@ -13,6 +14,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -64,5 +68,21 @@ class InternalCallbackSecurityTest {
                         .contentType("application/json").content("{}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
+    }
+
+    @Test
+    void placeholderConfigurationFailsClosed() throws Exception {
+        var filter = new SecurityConfig.InternalServiceTokenFilter("replace-with-shared-service-token", new ObjectMapper());
+        var request = new MockHttpServletRequest("POST", SecurityConfig.INTERNAL_CALLBACK_PATH);
+        request.addHeader(SecurityConfig.INTERNAL_TOKEN_HEADER, "replace-with-shared-service-token");
+        var response = new MockHttpServletResponse();
+        var called = new java.util.concurrent.atomic.AtomicBoolean();
+        try {
+            filter.doFilter(request, response, (req, res) -> called.set(true));
+            org.assertj.core.api.Assertions.assertThat(response.getStatus()).isEqualTo(401);
+            org.assertj.core.api.Assertions.assertThat(called).isFalse();
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
     }
 }
