@@ -149,3 +149,28 @@ $tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::Pa
 git diff --check
 => passed (only Git's LF/CRLF normalization warnings)
 ```
+
+## Fix Round 3
+
+The public v1 schema permits `sourceStart` and `sourceEnd` to be omitted.
+Evidence validation now accepts an item with neither offset, rejects a
+half-specified pair, and performs bounds/excerpt slicing only when both are
+present. Evidence identity is tracked separately from per-reference metadata:
+the same evidence UUID may be cited by multiple requirements, while changed
+metadata for that UUID is rejected.
+
+### Fix Round 3 verification
+
+```text
+C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest tests/integration/assert_mvp_flow.py -q
+=> 10 passed in 0.04s
+
+C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m py_compile tests/integration/assert_mvp_flow.py
+=> passed
+
+$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path tests/integration/run_mvp_flow.ps1),[ref]$tokens,[ref]$errors) | Out-Null; "errors=$($errors.Count)"
+=> errors=0
+
+git diff --check
+=> passed (only Git's LF/CRLF normalization warnings)
+```

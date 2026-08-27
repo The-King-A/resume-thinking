@@ -285,7 +285,9 @@ def _assert_result_evidence(result: dict[str, Any], *, source_text: str | None =
         raise AssertionError("result has no requirement evidence")
     requirement_ids: set[str] = set()
     evidence_ids: set[str] = set()
-    allowed_evidence_fields = {"id", "sourceType", "sourceLocation", "sourceStart", "sourceEnd", "excerpt", "confidence", "strength"}
+    evidence_metadata: dict[str, tuple[Any, ...]] = {}
+    required_evidence_fields = {"id", "sourceType", "sourceLocation", "excerpt", "confidence", "strength"}
+    allowed_evidence_fields = required_evidence_fields | {"sourceStart", "sourceEnd"}
     source_types = {"TXT", "DOCX"}
     requirement_types = {"MANDATORY", "PREFERRED"}
     match_statuses = {"SATISFIED", "PARTIALLY_SATISFIED", "RELATED_BUT_EVIDENCE_INSUFFICIENT", "UNMET"}
@@ -316,7 +318,7 @@ def _assert_result_evidence(result: dict[str, Any], *, source_text: str | None =
         for item in evidence:
             if not isinstance(item, dict) or set(item) - allowed_evidence_fields:
                 raise AssertionError("evidence fields are not v1")
-            if any(field not in item for field in allowed_evidence_fields):
+            if any(field not in item for field in required_evidence_fields):
                 raise AssertionError("evidence fields are incomplete")
             if not item.get("excerpt") or not item.get("sourceLocation"):
                 raise AssertionError("evidence excerpt missing")
@@ -324,22 +326,28 @@ def _assert_result_evidence(result: dict[str, Any], *, source_text: str | None =
                 evidence_id = str(uuid.UUID(str(item["id"])))
             except (KeyError, TypeError, ValueError) as exc:
                 raise AssertionError("evidence ID is not a UUID") from exc
-            if evidence_id in evidence_ids:
-                raise AssertionError("duplicate evidence ID")
             evidence_ids.add(evidence_id)
             if item.get("sourceType") not in source_types or item.get("strength") not in strengths:
                 raise AssertionError("evidence enum is invalid")
-            start, end = item["sourceStart"], item["sourceEnd"]
-            if isinstance(start, bool) or isinstance(end, bool) or not isinstance(start, int) or not isinstance(end, int):
-                raise AssertionError("evidence offsets must be integers")
-            if start < 0 or end <= start:
-                raise AssertionError("evidence offset is invalid")
             unit_number(item["confidence"], "evidence.confidence")
-            if source_text is not None:
-                if end > len(source_text):
-                    raise AssertionError("evidence offset exceeds source length")
-                if str(item["excerpt"]) != source_text[start:end]:
-                    raise AssertionError("evidence excerpt does not match source bounds")
+            metadata = (item["sourceType"], item["sourceLocation"], item["excerpt"], item["confidence"], item["strength"])
+            if evidence_id in evidence_metadata and evidence_metadata[evidence_id] != metadata:
+                raise AssertionError("evidence ID metadata changed across references")
+            evidence_metadata[evidence_id] = metadata
+            has_start, has_end = "sourceStart" in item, "sourceEnd" in item
+            if has_start != has_end:
+                raise AssertionError("evidence offsets must be supplied together")
+            if has_start:
+                start, end = item["sourceStart"], item["sourceEnd"]
+                if isinstance(start, bool) or isinstance(end, bool) or not isinstance(start, int) or not isinstance(end, int):
+                    raise AssertionError("evidence offsets must be integers")
+                if start < 0 or end <= start:
+                    raise AssertionError("evidence offset is invalid")
+                if source_text is not None:
+                    if end > len(source_text):
+                        raise AssertionError("evidence offset exceeds source length")
+                    if str(item["excerpt"]) != source_text[start:end]:
+                        raise AssertionError("evidence excerpt does not match source bounds")
             evidence_count += 1
     if evidence_count == 0:
         raise AssertionError("result contains no evidence references")
@@ -553,6 +561,40 @@ def test_score_rejects_missing_or_non_finite_components() -> None:
     }
     with pytest.raises(AssertionError):
         _assert_result_evidence(result)
+
+
+def test_v1_evidence_offsets_are_optional_when_both_are_absent() -> None:
+    evidence_id = str(uuid.uuid4())
+    result = {
+        "taskId": str(uuid.uuid4()),
+        "resumeId": str(uuid.uuid4()),
+        "score": {"skills": 0.8, "projectExperience": 0.7, "workContent": 0.6, "educationExperience": 0.5, "softSkills": 0.4, "composite": 0.675},
+        "requirements": [{
+            "requirementId": str(uuid.uuid4()), "requirementText": "Java", "requirementType": "MANDATORY",
+            "matchStatus": "SATISFIED", "matchType": "EXACT", "component": "SKILLS", "componentScore": 0.8,
+            "evidence": [{"id": evidence_id, "sourceType": "TXT", "sourceLocation": "SUMMARY", "excerpt": "Java developer", "confidence": 0.95, "strength": "HIGH"}],
+            "gap": None, "suggestionState": "NEEDS_USER_CONFIRMATION",
+        }],
+        "suggestions": [],
+    }
+    _assert_result_evidence(result)
+
+
+def test_v1_evidence_id_can_be_reused_across_requirements() -> None:
+    evidence_id = str(uuid.uuid4())
+    def requirement(text: str) -> dict[str, Any]:
+        return {
+            "requirementId": str(uuid.uuid4()), "requirementText": text, "requirementType": "MANDATORY",
+            "matchStatus": "SATISFIED", "matchType": "EXACT", "component": "SKILLS", "componentScore": 0.8,
+            "evidence": [{"id": evidence_id, "sourceType": "TXT", "sourceLocation": "SUMMARY", "excerpt": "Java developer", "confidence": 0.95, "strength": "HIGH"}],
+            "gap": None, "suggestionState": "NEEDS_USER_CONFIRMATION",
+        }
+    result = {
+        "taskId": str(uuid.uuid4()), "resumeId": str(uuid.uuid4()),
+        "score": {"skills": 0.8, "projectExperience": 0.7, "workContent": 0.6, "educationExperience": 0.5, "softSkills": 0.4, "composite": 0.675},
+        "requirements": [requirement("Java"), requirement("Spring Boot")], "suggestions": [],
+    }
+    _assert_result_evidence(result)
 
 
 class _ProviderState:
