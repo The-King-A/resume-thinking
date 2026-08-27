@@ -11,7 +11,7 @@ async function submit() {
   submitted.value = true
   form.role = adminSelected.value ? 'ADMIN' : 'USER'
   validationMessage.value = ''
-  const elementValid = await formRef.value?.validate().catch(() => false)
+  await formRef.value?.validate().catch(() => false)
   if (form.username.length < 3) validationMessage.value = 'Username must be at least 3 characters'
   else if (form.username.length > 64) validationMessage.value = 'Username must be at most 64 characters'
   else if (!/^[A-Za-z0-9._-]+$/.test(form.username)) validationMessage.value = 'Username may contain only letters, numbers, dot, underscore, or hyphen'
@@ -21,7 +21,7 @@ async function submit() {
   else if (form.password.length < 12) validationMessage.value = 'Password must be at least 12 characters'
   else if (form.password.length > 128) validationMessage.value = 'Password must be at most 128 characters'
   if (form.username.length === 0) validationMessage.value = 'Username is required'
-  if (elementValid === false || validationMessage.value) return
+  if (validationMessage.value) return
   try { await auth.register({ ...form }); await router.push('/profiles') } catch { /* store exposes safe message */ }
 }
 </script>

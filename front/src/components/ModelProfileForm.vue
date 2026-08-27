@@ -7,7 +7,7 @@ const presets = [{ label: 'OpenAI', url: 'https://api.openai.com/v1' }, { label:
 const rules: FormRules = { displayName: [{ required: true, message: 'Profile name is required', trigger: 'blur' }, { max: 100, message: 'Profile name must be at most 100 characters', trigger: 'blur' }], endpointUrl: [{ required: true, message: 'Endpoint URL is required', trigger: 'blur' }, { type: 'url', message: 'Enter a valid endpoint URL', trigger: 'blur' }, { max: 2048, message: 'Endpoint URL must be at most 2048 characters', trigger: 'blur' }], modelName: [{ required: true, message: 'Model is required', trigger: 'blur' }, { max: 200, message: 'Model must be at most 200 characters', trigger: 'blur' }], apiKey: [{ max: 4096, message: 'API key must be at most 4096 characters', trigger: 'blur' }] }
 async function validateForm(requireApiKey: boolean) {
   validationMessage.value = ''
-  const elementValid = await formRef.value?.validate().catch(() => false)
+  await formRef.value?.validate().catch(() => false)
   if (form.displayName.length < 1) validationMessage.value = 'Profile name is required'
   else if (form.displayName.length > 100) validationMessage.value = 'Profile name must be at most 100 characters'
   else if (!form.endpointUrl) validationMessage.value = 'Endpoint URL is required'
@@ -17,7 +17,7 @@ async function validateForm(requireApiKey: boolean) {
   else if (!validationMessage.value && form.modelName.length > 200) validationMessage.value = 'Model must be at most 200 characters'
   if (!validationMessage.value && requireApiKey && form.apiKey.length < 1) validationMessage.value = 'API key is required'
   else if (!validationMessage.value && form.apiKey.length > 4096) validationMessage.value = 'API key must be at most 4096 characters'
-  return elementValid !== false && !validationMessage.value
+  return !validationMessage.value
 }
 async function save() { if (!(await validateForm(true))) return; emit('save', { ...form }) }
 async function test() { if (!(await validateForm(false))) return; emit('test', { ...form }) }

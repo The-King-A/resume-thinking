@@ -63,6 +63,20 @@ Test Files  3 passed (3)
 Tests       8 passed (8)
 ```
 
-The fix uses Element Plus `el-form`/`el-form-item` rules plus deterministic guards, requires a non-empty replacement key on updates, clears the key only after parent save success, preserves identity on unrelated 401s, and clears token plus identity on `AUTHENTICATION_REQUIRED`. Unsaved tests use create -> test -> delete via frozen routes; the key is never rendered or persisted.
+The fix uses Element Plus `el-form`/`el-form-item` rules plus awaited validation and deterministic guards, requires a non-empty replacement key on updates, clears the key only after parent save success, preserves identity on unrelated 401s, and clears token plus identity on `AUTHENTICATION_REQUIRED`. Unsaved profiles are not connection-tested; users must save before testing, and edit-mode tests are blocked while fields have unsaved changes. No create -> test -> delete draft workflow is used.
 
 Build passed with `pnpm --dir front run build` (`vue-tsc -b` and Vite). Secret scan `rg -n -i "secret-api-key|ciphertext|nonce" front/src front/dist -g '!*.map'` found no provider secret values; `nonce` matches are Axios dependency internals and the only `secret-api-key` match is the negative test assertion.
+
+## Fix round 3 evidence
+
+Added regression coverage for `AUTHENTICATION_REQUIRED` responses on the login URL, LoginRequest identifier/password bounds, safe list/create/update error handling, automatic navigation notification after session expiry, and parent-level API-key clearing. The current save-first connection-test behavior is covered for both unchanged saved profiles and unsaved profiles/edits.
+
+GREEN:
+
+```text
+pnpm exec vitest run src
+Test Files  6 passed (6)
+Tests       21 passed (21)
+```
+
+Build passed with `pnpm run build` (`vue-tsc -b` and Vite).

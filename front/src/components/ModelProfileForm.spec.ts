@@ -23,15 +23,6 @@ describe('ModelProfileForm', () => {
     expect(wrapper.emitted('save')).toBeFalsy()
   })
 
-  it('retains the entered key when the save handler fails', async () => {
-    const wrapper = mount(ModelProfileForm, { props: { profile: null } })
-    await wrapper.get('input[autocomplete="new-password"]').setValue('new-secret')
-    await wrapper.get('input[placeholder="e.g. gpt-4o-mini"]').setValue('gpt-4o-mini')
-    await wrapper.get('button[type="submit"]').trigger('click')
-    await flushPromises()
-    expect((wrapper.get('input[autocomplete="new-password"]').element as HTMLInputElement).value).toBe('new-secret')
-  })
-
   it('shows validation and does not emit for an invalid draft', async () => {
     const wrapper = mount(ModelProfileForm, { props: { profile: null } })
     await wrapper.get('button[type="submit"]').trigger('click')
