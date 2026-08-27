@@ -29,6 +29,16 @@ finally { Pop-Location }
 `back/java/src/main/resources/application-local.yml` is tracked and contains
 only environment-variable references; it is activated by the `local` profile.
 
+The FastAPI worker's internal analysis route is protected by the
+`X-Internal-Service-Token` HTTP header. Configure the same locally generated
+value as `PYTHON_INTERNAL_SERVICE_TOKEN` for the Java caller and Python
+worker; the value is intentionally not part of the JSON job contract and must
+not be committed. The callback target is restricted to loopback by default,
+plus the origin/path configured by `JAVA_CALLBACK_BASE_URL`. Additional exact
+callback bases can be supplied as a comma-separated
+`PYTHON_CALLBACK_ALLOWED_BASE_URLS` value. Invalid or unconfigured targets are
+rejected before any network request.
+
 Run the local Redis-only dependency definition with Docker Compose when Docker
 Desktop is available:
 

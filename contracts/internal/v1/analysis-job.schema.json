@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://resume-thinking.local/contracts/internal/v1/analysis-job.schema.json",
   "title": "InternalAnalysisJob",
+  "$comment": "Transport requires the X-Internal-Service-Token HTTP header. callbackUrl is additionally restricted at runtime to loopback or an exact configured Java callback base; these controls are intentionally outside the JSON shape.",
   "description": "Java-owned, short-lived request to the Python analysis worker. It intentionally excludes user identity, persistence authority, host paths, and infrastructure credentials.",
   "type": "object",
   "additionalProperties": false,
