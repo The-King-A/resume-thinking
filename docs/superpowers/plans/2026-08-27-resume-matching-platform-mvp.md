@@ -4,7 +4,7 @@
 
 **Goal:** Deliver the first working, evidence-backed Java-backend resume-to-job matching vertical slice with per-user OpenAI-compatible model profiles, role-aware lifecycle controls, and Redis archival recovery.
 
-**Architecture:** Vue 3 is the operational client. Spring Boot 3 on JDK 21 is the only public API, authorization, orchestration, and persistence authority. FastAPI on Python 3.11 performs extraction, redaction, matching, and guarded model calls. MySQL holds encrypted durable records; Redis holds page cache, task progress, and idempotency state. Java owns every MySQL/Redis write, including Python callbacks.
+**Architecture:** Vue 3 is the operational client. Spring Boot 3 on JDK 21 is the only public API, authorization, orchestration, and persistence authority. FastAPI on Python 3.11 performs extraction, redaction, matching, and guarded model calls. MySQL holds encrypted durable records plus authoritative task progress, idempotency keys, callback receipts, and results; Redis holds only the derived `resume:view:{resumeId}` page cache in this MVP. Java owns every MySQL/Redis write, including Python callbacks. Redis-backed task progress/idempotency is reserved for a later slice.
 
 **Tech Stack:** Vue 3, TypeScript, Vite, Element Plus, Pinia, Vitest, Playwright, Spring Boot 3, Java 21, Maven Wrapper, Spring Security, JPA, Flyway, MySQL 8.4, Redis 7 Docker container, FastAPI, Pydantic, httpx, python-docx, pytest, OpenAPI, JSON Schema.
 

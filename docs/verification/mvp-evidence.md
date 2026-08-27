@@ -18,6 +18,10 @@ real-provider quality, fairness, or physical deletion of MySQL data.
   model calls, and callback delivery. Vue is the operational client.
 - The local target runtime is JDK 21, Maven/Spring Boot 3, Python 3.11, Vue 3,
   MySQL 8.4, and Redis 7.
+- MVP boundary: Redis currently stores only the derived `resume:view:{resumeId}`
+  page cache. Task progress, idempotency, callback receipts, and matching
+  results are stored authoritatively in MySQL; Redis-backed task state is a
+  documented future optimization, not an implemented behavior.
 
 ## Implemented Behavior
 

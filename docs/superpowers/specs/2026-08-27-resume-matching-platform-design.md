@@ -43,7 +43,7 @@ Vue 3 + TypeScript (native pnpm dev server, port 5173)
 Spring Boot 3 / JDK 21 (native, port 8080) <-> MySQL 8.4 (local, port 3306)
               |                                      |
               |                                      v
-              +----------------------------------> Redis (one Docker container, port 6379)
+              +----------------------------------> Redis resume-view cache (one Docker container, port 6379)
               |
               v
 FastAPI / Python 3.11 (native, port 8000) -> user-selected OpenAI-compatible API
@@ -51,7 +51,7 @@ FastAPI / Python 3.11 (native, port 8000) -> user-selected OpenAI-compatible API
 
 Spring Boot is the sole public API, authorization, orchestration, task-state, and persistence authority. FastAPI has no public user login, no user authorization decision, and no direct MySQL or Redis write path. It performs extraction, redaction, parsing, matching, guarded model calls, and returns structured work results only to Java.
 
-The code compiles and runs with JDK 21. Maven Wrapper is used because no global Maven is installed. Python execution is pinned to the available Python 3.11 installation, not the machine-default Python 3.13/3.14 interpreters. Docker is initially needed only for Redis; full Compose is a later deployment phase.
+The code compiles and runs with JDK 21. The local environment provides Maven 3.9.16; the Maven Wrapper remains available for reproducible commands. Python execution is pinned to the available Python 3.11 installation, not the machine-default Python 3.13/3.14 interpreters. Docker is initially needed only for Redis; full Compose is a later deployment phase.
 
 ## 4. User, Role, and Model Rules
 
@@ -72,7 +72,7 @@ Java passes a narrow, short-lived internal task configuration to Python. Python 
 
 ## 5. Data Model and Lifecycle
 
-MySQL is the durable source of truth. Resume content and sensitive parsed fields are encrypted at rest. Redis is a short-lived cache, progress, and idempotency layer; its loss cannot change the authoritative MySQL state.
+MySQL is the durable source of truth. Resume content and sensitive parsed fields are encrypted at rest. In this MVP, Redis is only a short-lived derived page-view cache (`resume:view:{resumeId}`); task progress, idempotency keys, callback receipts, and matching results remain authoritative in MySQL. Redis loss therefore cannot change task state or durable resume data. A future slice may add Redis acceleration for task progress/idempotency without changing that authority boundary.
 
 ### Principal records
 
