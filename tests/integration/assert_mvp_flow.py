@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timedelta, timezone
 import json
+import math
 import os
 import secrets
 import socket
@@ -23,6 +24,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
+
+import pytest
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -246,45 +249,125 @@ def _emit(event: str, *, identifier: str | None = None, state: str | None = None
 
 
 def _assert_result_evidence(result: dict[str, Any], *, source_text: str | None = None) -> None:
-    if result.get("taskId") is None or result.get("resumeId") is None:
-        raise AssertionError("result identifiers missing")
+    for field in ("taskId", "resumeId"):
+        try:
+            uuid.UUID(str(result[field]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AssertionError(f"result {field} is not a UUID") from exc
+
+    def unit_number(value: Any, field: str) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            raise AssertionError(f"{field} must be a finite number")
+        numeric = float(value)
+        if not 0 <= numeric <= 1:
+            raise AssertionError(f"{field} must be between 0 and 1")
+        return numeric
+
     score = result.get("score")
     if not isinstance(score, dict):
         raise AssertionError("result score missing")
+    score_fields = ("skills", "projectExperience", "workContent", "educationExperience", "softSkills", "composite")
+    if any(field not in score for field in score_fields):
+        raise AssertionError("score components are incomplete")
+    values = {field: unit_number(score[field], f"score.{field}") for field in score_fields}
     expected = (
-        0.40 * float(score.get("skills", 0))
-        + 0.25 * float(score.get("projectExperience", 0))
-        + 0.15 * float(score.get("workContent", 0))
-        + 0.10 * float(score.get("educationExperience", 0))
-        + 0.10 * float(score.get("softSkills", 0))
+        0.40 * values["skills"]
+        + 0.25 * values["projectExperience"]
+        + 0.15 * values["workContent"]
+        + 0.10 * values["educationExperience"]
+        + 0.10 * values["softSkills"]
     )
-    if abs(float(score.get("composite", -1)) - round(expected, 4)) > 1e-6:
+    if abs(values["composite"] - round(expected, 4)) > 1e-6:
         raise AssertionError("composite score is inconsistent")
+
     requirements = result.get("requirements")
     if not isinstance(requirements, list) or not requirements:
         raise AssertionError("result has no requirement evidence")
+    requirement_ids: set[str] = set()
+    evidence_ids: set[str] = set()
+    allowed_evidence_fields = {"id", "sourceType", "sourceLocation", "sourceStart", "sourceEnd", "excerpt", "confidence", "strength"}
+    source_types = {"TXT", "DOCX"}
+    requirement_types = {"MANDATORY", "PREFERRED"}
+    match_statuses = {"SATISFIED", "PARTIALLY_SATISFIED", "RELATED_BUT_EVIDENCE_INSUFFICIENT", "UNMET"}
+    match_types = {"EXACT", "SEMANTIC", "RELATED", "NO_MATCH"}
+    components = {"SKILLS", "PROJECT_EXPERIENCE", "WORK_CONTENT", "EDUCATION_EXPERIENCE", "SOFT_SKILLS"}
+    suggestion_states = {"SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED"}
+    strengths = {"NONE", "LOW", "MEDIUM", "HIGH"}
     evidence_count = 0
     for requirement in requirements:
-        if not isinstance(requirement, dict) or not requirement.get("jobRequirementText", requirement.get("requirementText")):
+        if not isinstance(requirement, dict) or not requirement.get("requirementText"):
             raise AssertionError("requirement text missing")
+        try:
+            requirement_id = str(uuid.UUID(str(requirement["requirementId"])))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AssertionError("requirement ID is not a UUID") from exc
+        if requirement_id in requirement_ids:
+            raise AssertionError("duplicate requirement ID")
+        requirement_ids.add(requirement_id)
+        for field, allowed in (("requirementType", requirement_types), ("matchStatus", match_statuses), ("matchType", match_types), ("component", components), ("suggestionState", suggestion_states)):
+            if requirement.get(field) not in allowed:
+                raise AssertionError(f"invalid requirement {field}")
+        unit_number(requirement.get("componentScore"), "requirement.componentScore")
         evidence = requirement.get("evidence")
         if not isinstance(evidence, list):
             raise AssertionError("requirement evidence missing")
+        if requirement.get("matchStatus") in {"SATISFIED", "PARTIALLY_SATISFIED"} and not evidence:
+            raise AssertionError("satisfied requirement has no evidence")
         for item in evidence:
-            if not isinstance(item, dict) or not item.get("excerpt"):
+            if not isinstance(item, dict) or set(item) - allowed_evidence_fields:
+                raise AssertionError("evidence fields are not v1")
+            if any(field not in item for field in allowed_evidence_fields):
+                raise AssertionError("evidence fields are incomplete")
+            if not item.get("excerpt") or not item.get("sourceLocation"):
                 raise AssertionError("evidence excerpt missing")
-            start = item.get("sourceStart", item.get("sourceOffset", 0))
-            end = item.get("sourceEnd", start + 1)
-            if int(start) < 0 or int(end) <= int(start):
+            try:
+                evidence_id = str(uuid.UUID(str(item["id"])))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise AssertionError("evidence ID is not a UUID") from exc
+            if evidence_id in evidence_ids:
+                raise AssertionError("duplicate evidence ID")
+            evidence_ids.add(evidence_id)
+            if item.get("sourceType") not in source_types or item.get("strength") not in strengths:
+                raise AssertionError("evidence enum is invalid")
+            start, end = item["sourceStart"], item["sourceEnd"]
+            if isinstance(start, bool) or isinstance(end, bool) or not isinstance(start, int) or not isinstance(end, int):
+                raise AssertionError("evidence offsets must be integers")
+            if start < 0 or end <= start:
                 raise AssertionError("evidence offset is invalid")
+            unit_number(item["confidence"], "evidence.confidence")
             if source_text is not None:
-                if int(end) > len(source_text):
+                if end > len(source_text):
                     raise AssertionError("evidence offset exceeds source length")
-                if str(item["excerpt"]) != source_text[int(start) : int(end)]:
+                if str(item["excerpt"]) != source_text[start:end]:
                     raise AssertionError("evidence excerpt does not match source bounds")
             evidence_count += 1
     if evidence_count == 0:
         raise AssertionError("result contains no evidence references")
+    suggestions = result.get("suggestions")
+    if not isinstance(suggestions, list):
+        raise AssertionError("result suggestions missing")
+    for suggestion in suggestions:
+        if not isinstance(suggestion, dict) or suggestion.get("state") not in suggestion_states:
+            raise AssertionError("suggestion state is invalid")
+        try:
+            uuid.UUID(str(suggestion["id"]))
+            suggestion_requirement = str(uuid.UUID(str(suggestion["requirementId"])))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AssertionError("suggestion IDs are invalid") from exc
+        if suggestion_requirement not in requirement_ids or not suggestion.get("proposedText"):
+            raise AssertionError("suggestion references are invalid")
+        refs = suggestion.get("evidenceIds")
+        if not isinstance(refs, list):
+            raise AssertionError("suggestion evidence references missing")
+        for reference in refs:
+            try:
+                reference_id = str(uuid.UUID(str(reference)))
+            except (TypeError, ValueError) as exc:
+                raise AssertionError("suggestion evidence ID is invalid") from exc
+            if reference_id not in evidence_ids:
+                raise AssertionError("suggestion references unknown evidence")
+        if suggestion["state"] in {"SUPPORTED_FACT", "WORDING_ONLY_REWRITE"} and not refs:
+            raise AssertionError("supported suggestion has no evidence")
 
 
 def _assert_callback_race_fixtures(
@@ -393,10 +476,19 @@ def test_match_result_binds_requirements_to_existing_evidence() -> None:
         "score": {"skills": 0.8, "projectExperience": 0.7, "workContent": 0.6, "educationExperience": 0.5, "softSkills": 0.4, "composite": 0.675},
         "requirements": [
             {
-                "jobRequirementText": "Java",
-                "evidence": [{"sourceStart": 0, "sourceEnd": 13, "excerpt": "Java developer"}],
+                "requirementId": str(uuid.uuid4()),
+                "requirementText": "Java",
+                "requirementType": "MANDATORY",
+                "matchStatus": "SATISFIED",
+                "matchType": "EXACT",
+                "component": "SKILLS",
+                "componentScore": 0.8,
+                "evidence": [{"id": str(uuid.uuid4()), "sourceType": "TXT", "sourceLocation": "SUMMARY", "sourceStart": 0, "sourceEnd": 14, "excerpt": "Java developer", "confidence": 0.95, "strength": "HIGH"}],
+                "gap": None,
+                "suggestionState": "NEEDS_USER_CONFIRMATION",
             }
         ],
+        "suggestions": [],
     }
     _assert_result_evidence(synthetic)
 
@@ -410,10 +502,19 @@ def test_fixture_evidence_assertion_requires_exact_source_bounds() -> None:
         "score": {"skills": 0.8, "projectExperience": 0.7, "workContent": 0.6, "educationExperience": 0.5, "softSkills": 0.4, "composite": 0.675},
         "requirements": [
             {
-                "jobRequirementText": "Java",
-                "evidence": [{"sourceStart": start, "sourceEnd": start + len("Java developer"), "excerpt": "Java developer"}],
+                "requirementId": str(uuid.uuid4()),
+                "requirementText": "Java",
+                "requirementType": "MANDATORY",
+                "matchStatus": "SATISFIED",
+                "matchType": "EXACT",
+                "component": "SKILLS",
+                "componentScore": 0.8,
+                "evidence": [{"id": str(uuid.uuid4()), "sourceType": "TXT", "sourceLocation": "SUMMARY", "sourceStart": start, "sourceEnd": start + len("Java developer"), "excerpt": "Java developer", "confidence": 0.95, "strength": "HIGH"}],
+                "gap": None,
+                "suggestionState": "NEEDS_USER_CONFIRMATION",
             }
         ],
+        "suggestions": [],
     }
     _assert_result_evidence(synthetic, source_text=source)
 
@@ -430,6 +531,28 @@ def test_callback_fixture_races_preserve_duplicate_and_stale_semantics() -> None
 def test_retention_policy_is_explicit_for_user_and_admin() -> None:
     _assert_retention_window({"createdAt": "2026-08-27T00:00:00Z", "visibleUntil": "2026-09-03T00:00:00Z"}, 7)
     _assert_retention_window({"createdAt": "2026-08-27T00:00:00Z", "visibleUntil": "2026-09-26T00:00:00Z"}, 30)
+
+
+def test_evidence_rejects_legacy_source_offset_and_missing_v1_fields() -> None:
+    result = {
+        "taskId": str(uuid.uuid4()),
+        "resumeId": str(uuid.uuid4()),
+        "score": {"skills": 0.8, "projectExperience": 0.7, "workContent": 0.6, "educationExperience": 0.5, "softSkills": 0.4, "composite": 0.675},
+        "requirements": [{"requirementText": "Java", "evidence": [{"sourceOffset": 0, "excerpt": "Java developer"}]}],
+    }
+    with pytest.raises(AssertionError):
+        _assert_result_evidence(result)
+
+
+def test_score_rejects_missing_or_non_finite_components() -> None:
+    result = {
+        "taskId": str(uuid.uuid4()),
+        "resumeId": str(uuid.uuid4()),
+        "score": {"skills": 0.8, "composite": 0.32},
+        "requirements": [{"requirementText": "Java", "evidence": [{"sourceOffset": 0, "excerpt": "Java developer"}]}],
+    }
+    with pytest.raises(AssertionError):
+        _assert_result_evidence(result)
 
 
 class _ProviderState:

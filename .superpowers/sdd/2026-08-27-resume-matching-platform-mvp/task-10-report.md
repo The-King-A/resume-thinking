@@ -120,3 +120,32 @@ No live Java/MySQL/Redis flow was claimed from this worktree: Task 7 public
 endpoints and authorized service credentials are still integration
 prerequisites. No credentials, callback tokens, resume/job text, or response
 bodies are printed.
+
+## Fix Round 2
+
+The evidence assertion was tightened to the frozen v1 public result contract.
+It now requires UUID `taskId`/`resumeId`, every score component as a finite
+number in `[0, 1]`, and the exact weighted composite. Each requirement must
+carry its v1 ID/text/enums and bounded component score. Each evidence item must
+contain only the v1 fields (`id`, `sourceType`, `sourceLocation`,
+`sourceStart`, `sourceEnd`, `excerpt`, `confidence`, `strength`), with UUID and
+enum validation, integer increasing offsets, finite confidence, unique IDs,
+and optional source-text slice equality. Legacy `evidenceId`, `sourceOffset`,
+missing fields, unknown evidence references, and unsupported suggestion states
+are rejected.
+
+### Fix Round 2 verification
+
+```text
+C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest tests/integration/assert_mvp_flow.py -q
+=> 8 passed in 0.03s
+
+C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m py_compile tests/integration/assert_mvp_flow.py
+=> passed
+
+$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path tests/integration/run_mvp_flow.ps1),[ref]$tokens,[ref]$errors) | Out-Null; "errors=$($errors.Count)"
+=> errors=0
+
+git diff --check
+=> passed (only Git's LF/CRLF normalization warnings)
+```
