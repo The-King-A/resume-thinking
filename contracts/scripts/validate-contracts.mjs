@@ -47,12 +47,48 @@ const assertValid = async (fixturePath, validator) => {
   console.log(`valid: ${fixturePath}`);
   return fixture;
 };
+const assertCallbackAfterSoftDeleteContext = async () => {
+  const context = await readJson(resolveContractPath('fixtures/v1/callback-after-soft-delete-context.json'));
+  const callback = await readJson(resolveContractPath('fixtures/v1/callback-after-soft-delete.json'));
+  const validateTask = validate('MatchTask');
+  const validateResume = validate('Resume');
+
+  if (!validateTask(context.task)) {
+    throw new Error(`callback-after-soft-delete context task must be valid: ${ajv.errorsText(validateTask.errors)}`);
+  }
+  if (!validateResume(context.resume)) {
+    throw new Error(`callback-after-soft-delete context resume must be valid: ${ajv.errorsText(validateResume.errors)}`);
+  }
+  if (context.task.id !== callback.taskId) {
+    throw new Error('callback-after-soft-delete context task ID must match the callback taskId');
+  }
+  if (context.resume.id !== context.task.resumeId) {
+    throw new Error('callback-after-soft-delete context resume ID must match the task resumeId');
+  }
+  if (context.resume.status !== 1 || context.resume.visibilityState !== 'USER_SOFT_DELETED') {
+    throw new Error('callback-after-soft-delete context must record a user-soft-deleted resume');
+  }
+  if (context.expectedJavaRejection !== 'TASK_GONE') {
+    throw new Error('callback-after-soft-delete context must expect Java rejection TASK_GONE');
+  }
+  console.log('valid: callback-after-soft-delete-context.json');
+};
+const assertCacheArchivedResume = async (fixturePath, visibilityState) => {
+  const resume = await assertValid(fixturePath, validate('Resume'));
+  if (
+    resume.status !== 0 ||
+    resume.softDeletedAt !== null ||
+    resume.visibilityState !== visibilityState
+  ) {
+    throw new Error(`${fixturePath} must retain active deletion status while cache archived`);
+  }
+};
 
 await assertValid('auth-register-valid.json', validate('RegisterRequest'));
 await assertValid('llm-profile-valid.json', validate('CreateLlmProfileRequest'));
 await assertValid('match-request-valid.json', validate('CreateMatchTaskRequest'));
-await assertValid('archive-user.json', validate('Resume'));
-await assertValid('archive-admin.json', validate('Resume'));
+await assertCacheArchivedResume('archive-user.json', 'USER_CACHE_ARCHIVED');
+await assertCacheArchivedResume('archive-admin.json', 'ADMIN_CACHE_ARCHIVED');
 await assertValid('error-envelope.json', validate('ApiError'));
 
 for (const fixturePath of [
@@ -63,6 +99,7 @@ for (const fixturePath of [
 ]) {
   await assertValid(fixturePath, validateCallback);
 }
+await assertCallbackAfterSoftDeleteContext();
 
 const invalidMatchRequest = await readJson(resolveContractPath('fixtures/v1/match-request-invalid.json'));
 const validateMatchRequest = validate('CreateMatchTaskRequest');
