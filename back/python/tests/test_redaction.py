@@ -17,3 +17,9 @@ def test_redaction_exposes_replacement_offsets():
 def test_redaction_removes_labeled_chinese_address():
     result = redact_text("\u5730\u5740\uff1a\u5317\u4eac\u5e02\u671d\u9633\u533a\u671b\u4eac\u8857\u90538\u53f7")
     assert "\u5317\u4eac\u5e02\u671d\u9633\u533a" not in result.redacted_text
+
+
+def test_redaction_keeps_ascii_period_after_labeled_address():
+    result = redact_text("\u5730\u5740\uff1a\u5317\u4eac\u5e02\u671d\u9633\u533a\u671b\u4eac\u8857\u90538\u53f7.")
+    assert "\u5317\u4eac\u5e02\u671d\u9633\u533a" not in result.redacted_text
+    assert result.redacted_text.endswith(".")

@@ -123,3 +123,35 @@ Remaining risks are unchanged: Java callback lifecycle and persistence
 integration remain outside this lane, provider authentication still requires
 the API key in the Authorization header, and DNS rebinding protection also
 depends on production network policy.
+
+## Fix Round 3
+
+### Failure reproduction
+
+Added red tests for a labeled address ending in an ASCII period. Both the
+direct redaction test and a real provider `MockTransport` test showed the
+original address remained because the previous address pattern only accepted
+whitespace or Chinese punctuation after the terminal address token.
+
+### Change
+
+The address pattern now treats ASCII and full-width comma, period, and
+semicolon as non-consuming boundaries in addition to Chinese punctuation and
+whitespace. The address body excludes those punctuation characters, so the
+following punctuation remains unchanged. The outbound provider test parses the
+nested request JSON and verifies the redacted text still ends in the ASCII
+period while containing no original address or phone number.
+
+### Verification
+
+```text
+C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest back/python/tests -q
+.............................................                            [100%]
+45 passed, 1 warning in 0.65s
+
+C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -c "import pathlib,py_compile; [py_compile.compile(str(p), doraise=True) for p in pathlib.Path('back/python/app').glob('*.py')]; print('py_compile ok')"
+py_compile ok
+
+pnpm --dir contracts validate
+all frozen fixtures valid; expected invalid fixture accepted
+```
