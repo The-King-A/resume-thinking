@@ -15,6 +15,8 @@ $pythonBase = if ($env:MVP_PYTHON_BASE_URL) { $env:MVP_PYTHON_BASE_URL.TrimEnd('
 $strict = $RequireLive -or $env:MVP_REQUIRE_LIVE -eq '1'
 $startedProcesses = @()
 $exitCode = 0
+$pythonExe = $null
+$liveAttempted = $false
 
 function Write-Flow {
     param([string]$Message)
@@ -57,6 +59,67 @@ function Test-Health {
     }
 }
 
+function Test-TcpPort {
+    param([string]$Host, [int]$Port)
+    if ([string]::IsNullOrWhiteSpace($Host) -or $Port -lt 1 -or $Port -gt 65535) { return $false }
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $pending = $client.BeginConnect($Host, $Port, $null, $null)
+        if (-not $pending.AsyncWaitHandle.WaitOne(1000)) { return $false }
+        $client.EndConnect($pending)
+        return $true
+    } catch { return $false }
+    finally { $client.Dispose() }
+}
+
+function Test-RedisPing {
+    param([string]$Host, [int]$Port)
+    if (-not (Test-TcpPort $Host $Port)) { return $false }
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $pending = $client.BeginConnect($Host, $Port, $null, $null)
+        if (-not $pending.AsyncWaitHandle.WaitOne(1000)) { return $false }
+        $client.EndConnect($pending)
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = 1000
+        $stream.WriteTimeout = 1000
+        $ping = [Text.Encoding]::ASCII.GetBytes("*1`r`n`$4`r`nPING`r`n")
+        $stream.Write($ping, 0, $ping.Length)
+        $buffer = New-Object byte[] 64
+        $count = $stream.Read($buffer, 0, $buffer.Length)
+        if ($count -lt 5) { return $false }
+        return ([Text.Encoding]::ASCII.GetString($buffer, 0, $count)).StartsWith('+PONG')
+    } catch { return $false }
+    finally { $client.Dispose() }
+}
+
+function Get-MySqlEndpoint {
+    $raw = [Environment]::GetEnvironmentVariable('MYSQL_URL', 'Process')
+    if ($raw -and $raw -match '^jdbc:mysql://(?<host>[^/:]+)(?::(?<port>\d+))?/') {
+        return @{ Host = $Matches.host; Port = if ($Matches.port) { [int]$Matches.port } else { 3306 } }
+    }
+    return $null
+}
+
+function Test-DependencyReadiness {
+    $mysql = Get-MySqlEndpoint
+    if (-not $mysql -or -not (Test-TcpPort $mysql.Host $mysql.Port)) {
+        Write-Flow 'mysql tcp=UNAVAILABLE'
+        return $false
+    }
+    Write-Flow 'mysql tcp=PASS'
+    $redisHost = [Environment]::GetEnvironmentVariable('REDIS_HOST', 'Process')
+    $redisPortRaw = [Environment]::GetEnvironmentVariable('REDIS_PORT', 'Process')
+    $redisPort = 0
+    [void][int]::TryParse($redisPortRaw, [ref]$redisPort)
+    if (-not (Test-RedisPing $redisHost $redisPort)) {
+        Write-Flow 'redis ping=UNAVAILABLE'
+        return $false
+    }
+    Write-Flow 'redis ping=PASS'
+    return $true
+}
+
 function Wait-Health {
     param([string]$Name, [string]$Url, [int]$TimeoutSeconds)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -68,14 +131,33 @@ function Wait-Health {
     return $false
 }
 
+function Test-Python311 {
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    try {
+        $version = (& $Path -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null | Select-Object -First 1).Trim()
+        return $version -eq '3.11'
+    } catch { return $false }
+}
+
 function Resolve-Python {
-    if ($env:MVP_PYTHON_EXECUTABLE -and (Test-Path -LiteralPath $env:MVP_PYTHON_EXECUTABLE -PathType Leaf)) {
+    if ($env:MVP_PYTHON_EXECUTABLE -and (Test-Python311 $env:MVP_PYTHON_EXECUTABLE)) {
         return (Resolve-Path -LiteralPath $env:MVP_PYTHON_EXECUTABLE).Path
     }
-    $command = Get-Command python.exe -ErrorAction SilentlyContinue
-    if ($command) { return $command.Source }
-    $command = Get-Command python -ErrorAction SilentlyContinue
-    if ($command) { return $command.Source }
+    $launcher = Get-Command py.exe -ErrorAction SilentlyContinue
+    if ($launcher) {
+        try {
+            $candidate = (& $launcher.Source -3.11 -c "import sys; print(sys.executable)" 2>$null | Select-Object -First 1).Trim()
+            if (Test-Python311 $candidate) { return (Resolve-Path -LiteralPath $candidate).Path }
+        } catch { }
+    }
+    $known = @(
+        (Join-Path $env:LocalAppData 'Programs\Python\Python311\python.exe'),
+        'C:\Python311\python.exe'
+    )
+    foreach ($candidate in $known) {
+        if (Test-Python311 $candidate) { return (Resolve-Path -LiteralPath $candidate).Path }
+    }
     return $null
 }
 
@@ -92,7 +174,7 @@ try {
             return
         }
 
-        $required = @('MYSQL_URL', 'MYSQL_USERNAME', 'MYSQL_PASSWORD', 'JWT_SIGNING_KEY_BASE64', 'APP_ENCRYPTION_KEY_BASE64')
+        $required = @('MYSQL_URL', 'MYSQL_USERNAME', 'MYSQL_PASSWORD', 'REDIS_HOST', 'REDIS_PORT', 'JWT_SIGNING_KEY_BASE64', 'APP_ENCRYPTION_KEY_BASE64')
         $missing = @($required | Where-Object { -not (Test-ConfiguredValue $_) })
         $pythonExe = Resolve-Python
         if (-not $hasDotEnv -and $missing.Count -gt 0) {
@@ -159,6 +241,20 @@ try {
         Write-Flow 'using existing services=PASS'
     }
 
+    if (-not $pythonExe) { $pythonExe = Resolve-Python }
+    if (-not $pythonExe) {
+        if ($strict) { throw 'Python 3.11 executable was not found' }
+        Write-Flow 'SKIP python=EXECUTABLE_MISSING'
+        $exitCode = 0
+        return
+    }
+    if (-not (Test-DependencyReadiness)) {
+        if ($strict) { throw 'MySQL or Redis readiness check failed' }
+        Write-Flow 'SKIP dependencies=UNAVAILABLE'
+        $exitCode = 0
+        return
+    }
+
     # The Python assertion runner owns the ephemeral loopback provider and
     # keeps all credentials in memory. Its output is already allow-listed.
     $previousLive = $env:MVP_LIVE
@@ -166,7 +262,8 @@ try {
     $env:MVP_LIVE = '1'
     $env:MVP_API_BASE_URL = $javaBase
     try {
-        $output = & (Resolve-Python) $assertionScript '--live' '--api-base' $javaBase '--python-base' $pythonBase 2>&1
+        $liveAttempted = $true
+        $output = & $pythonExe $assertionScript '--live' '--api-base' $javaBase '--python-base' $pythonBase 2>&1
         $flowExit = $LASTEXITCODE
         foreach ($line in $output) {
             if ($line -is [string] -and $line -match '^\[flow\] (?:[A-Za-z0-9 _-]+)(?: id=[0-9a-fA-F-]{36})?(?: state=[A-Z_]+)?(?: status=[0-9]+)?(?: code=[A-Z_]+)?$') {
@@ -182,7 +279,10 @@ try {
         if ($null -eq $previousApi) { Remove-Item Env:MVP_API_BASE_URL -ErrorAction SilentlyContinue } else { $env:MVP_API_BASE_URL = $previousApi }
     }
 } catch {
-    if ($strict) {
+    if ($liveAttempted) {
+        Write-Flow 'FAIL live=ASSERTION'
+        $exitCode = 1
+    } elseif ($strict) {
         Write-Flow 'FAIL preflight=CONFIGURATION_OR_SERVICE'
         $exitCode = 2
     } else {

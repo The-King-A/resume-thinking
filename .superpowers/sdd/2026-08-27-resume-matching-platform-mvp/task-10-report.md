@@ -62,3 +62,61 @@ about a production model. Cache-expiry clock advancement, Redis key inspection,
 duplicate callback injection, and stale-attempt injection remain explicitly
 unverified until a dedicated integration profile exposes those controls and
 authorized MySQL/Redis credentials are supplied.
+
+## Fix Round 1
+
+The controlled flow was tightened after review:
+
+- Evidence assertions can now bind `sourceStart`/`sourceEnd` to the exact
+  checked-in resume text, including bounds and excerpt equality.
+- The frozen callback fixtures are exercised offline for exact duplicate
+  replay, older-attempt stale delivery, and deleted-task `TASK_GONE` context.
+  A live callback-capture proxy is intentionally not enabled because the
+  Java Task 7 callback endpoints are not yet present in this integration HEAD.
+- Live USER uploads assert a seven-day `createdAt` to `visibleUntil` window;
+  an ADMIN-owned upload asserts the explicit 30-day window. Mutable-clock
+  archive transitions remain opt-in/unverified because no public clock control
+  is exposed.
+- The late/deleted task still must return `TASK_GONE` through the Java task and
+  result APIs. When `REDIS_HOST`/`REDIS_PORT` are configured, the runner also
+  sends a protocol-level Redis `PING` and `EXISTS resume:view:<late-id>` check;
+  otherwise it emits a sanitized `SKIP` for that optional probe.
+- The launcher verifies Java actuator health (which implies startup/Flyway
+  completed), Python `/health`, MySQL TCP reachability, and Redis RESP `PONG`
+  before submitting. It accepts an explicit `MVP_PYTHON_EXECUTABLE` only when
+  that executable reports Python 3.11, then falls back to `py -3.11` or known
+  Python311 paths. Any attempted live assertion failure exits nonzero even
+  without `-RequireLive`; missing configuration or unavailable services remain
+  `SKIP` unless strict mode is requested.
+
+### Fix Round 1 verification
+
+Commands run from the primary worktree:
+
+```text
+C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest tests/integration/assert_mvp_flow.py -q
+=> 6 passed in 0.04s
+
+C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m py_compile tests/integration/assert_mvp_flow.py
+=> passed
+
+$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path tests/integration/run_mvp_flow.ps1),[ref]$tokens,[ref]$errors) | Out-Null; "errors=$($errors.Count)"
+=> errors=0
+
+pnpm --dir front exec vitest run --passWithNoTests
+=> 6 files passed, 21 tests passed (e2e excluded)
+
+pnpm --dir front run build
+=> vite build succeeded (1658 modules transformed)
+
+powershell -ExecutionPolicy Bypass -File tests/integration/run_mvp_flow.ps1
+=> [flow] SKIP configuration=MISSING_ENV; exit=0
+
+powershell -ExecutionPolicy Bypass -File tests/integration/run_mvp_flow.ps1 -RequireLive
+=> [flow] FAIL preflight=CONFIGURATION_OR_SERVICE; exit=2
+```
+
+No live Java/MySQL/Redis flow was claimed from this worktree: Task 7 public
+endpoints and authorized service credentials are still integration
+prerequisites. No credentials, callback tokens, resume/job text, or response
+bodies are printed.

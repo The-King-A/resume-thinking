@@ -9,9 +9,11 @@ printed by this module.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import secrets
+import socket
 import sys
 import threading
 import time
@@ -243,7 +245,7 @@ def _emit(event: str, *, identifier: str | None = None, state: str | None = None
     print(" ".join(parts), flush=True)
 
 
-def _assert_result_evidence(result: dict[str, Any]) -> None:
+def _assert_result_evidence(result: dict[str, Any], *, source_text: str | None = None) -> None:
     if result.get("taskId") is None or result.get("resumeId") is None:
         raise AssertionError("result identifiers missing")
     score = result.get("score")
@@ -275,9 +277,83 @@ def _assert_result_evidence(result: dict[str, Any]) -> None:
             end = item.get("sourceEnd", start + 1)
             if int(start) < 0 or int(end) <= int(start):
                 raise AssertionError("evidence offset is invalid")
+            if source_text is not None:
+                if int(end) > len(source_text):
+                    raise AssertionError("evidence offset exceeds source length")
+                if str(item["excerpt"]) != source_text[int(start) : int(end)]:
+                    raise AssertionError("evidence excerpt does not match source bounds")
             evidence_count += 1
     if evidence_count == 0:
         raise AssertionError("result contains no evidence references")
+
+
+def _assert_callback_race_fixtures(
+    valid: dict[str, Any],
+    duplicate: dict[str, Any],
+    stale: dict[str, Any],
+    deleted: dict[str, Any],
+    context: dict[str, Any],
+) -> None:
+    if duplicate != valid:
+        raise AssertionError("duplicate callback fixture must replay the exact payload")
+    if stale.get("taskId") != valid.get("taskId") or stale.get("attempt", 0) >= valid.get("attempt", 0):
+        raise AssertionError("stale callback fixture must target the same task with an older attempt")
+    if stale.get("callbackId") == valid.get("callbackId"):
+        raise AssertionError("stale callback fixture must have a distinct callback ID")
+    if deleted.get("taskId") != context.get("task", {}).get("id"):
+        raise AssertionError("deleted callback task ID must match its context")
+    if context.get("task", {}).get("state") != "BLOCKED" or context.get("task", {}).get("resultAvailable") is not False:
+        raise AssertionError("deleted callback context must block task results")
+    if context.get("expectedJavaRejection") != "TASK_GONE":
+        raise AssertionError("deleted callback must expect TASK_GONE")
+
+
+def _assert_retention_window(payload: dict[str, Any], expected_days: int) -> None:
+    try:
+        created = datetime.fromisoformat(str(payload["createdAt"]).replace("Z", "+00:00"))
+        visible_until = datetime.fromisoformat(str(payload["visibleUntil"]).replace("Z", "+00:00"))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AssertionError("retention timestamps are missing or invalid") from exc
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    if visible_until.tzinfo is None:
+        visible_until = visible_until.replace(tzinfo=timezone.utc)
+    if visible_until - created != timedelta(days=expected_days):
+        raise AssertionError(f"retention window is not exactly {expected_days} days")
+
+
+def _redis_read_line(stream: Any) -> bytes:
+    line = bytearray()
+    while len(line) < 256:
+        byte = stream.recv(1)
+        if not byte:
+            break
+        line.extend(byte)
+        if line.endswith(b"\r\n"):
+            return bytes(line[:-2])
+    return bytes(line)
+
+
+def _assert_redis_key_absent(key: str) -> None:
+    host = os.getenv("MVP_REDIS_HOST") or os.getenv("REDIS_HOST")
+    port_raw = os.getenv("MVP_REDIS_PORT") or os.getenv("REDIS_PORT")
+    if not host or not port_raw:
+        _emit("redis result key", state="SKIP")
+        return
+    try:
+        port = int(port_raw)
+        with socket.create_connection((host, port), timeout=2) as connection:
+            connection.settimeout(2)
+            connection.sendall(b"*1\r\n$4\r\nPING\r\n")
+            if _redis_read_line(connection) != b"+PONG":
+                raise FlowError("redis ping", code="INVALID_RESPONSE")
+            encoded_key = key.encode("utf-8")
+            connection.sendall(b"*2\r\n$6\r\nEXISTS\r\n$" + str(len(encoded_key)).encode("ascii") + b"\r\n" + encoded_key + b"\r\n")
+            if _redis_read_line(connection) != b":0":
+                raise AssertionError("late result Redis key remained present")
+    except (OSError, ValueError) as exc:
+        raise FlowError("redis key probe", code="SERVICE_UNAVAILABLE") from exc
+    _emit("redis result key", state="ABSENT")
 
 
 def _docx_text(path: Path) -> str:
@@ -323,6 +399,37 @@ def test_match_result_binds_requirements_to_existing_evidence() -> None:
         ],
     }
     _assert_result_evidence(synthetic)
+
+
+def test_fixture_evidence_assertion_requires_exact_source_bounds() -> None:
+    source = RESUME_PATH.read_text(encoding="utf-8")
+    start = source.index("Java developer")
+    synthetic = {
+        "taskId": str(uuid.uuid4()),
+        "resumeId": str(uuid.uuid4()),
+        "score": {"skills": 0.8, "projectExperience": 0.7, "workContent": 0.6, "educationExperience": 0.5, "softSkills": 0.4, "composite": 0.675},
+        "requirements": [
+            {
+                "jobRequirementText": "Java",
+                "evidence": [{"sourceStart": start, "sourceEnd": start + len("Java developer"), "excerpt": "Java developer"}],
+            }
+        ],
+    }
+    _assert_result_evidence(synthetic, source_text=source)
+
+
+def test_callback_fixture_races_preserve_duplicate_and_stale_semantics() -> None:
+    valid = json.loads((Path(__file__).resolve().parents[2] / "contracts/fixtures/v1/callback-valid.json").read_text(encoding="utf-8"))
+    duplicate = json.loads((Path(__file__).resolve().parents[2] / "contracts/fixtures/v1/callback-duplicate.json").read_text(encoding="utf-8"))
+    stale = json.loads((Path(__file__).resolve().parents[2] / "contracts/fixtures/v1/callback-stale.json").read_text(encoding="utf-8"))
+    deleted = json.loads((Path(__file__).resolve().parents[2] / "contracts/fixtures/v1/callback-after-soft-delete.json").read_text(encoding="utf-8"))
+    context = json.loads((Path(__file__).resolve().parents[2] / "contracts/fixtures/v1/callback-after-soft-delete-context.json").read_text(encoding="utf-8"))
+    _assert_callback_race_fixtures(valid, duplicate, stale, deleted, context)
+
+
+def test_retention_policy_is_explicit_for_user_and_admin() -> None:
+    _assert_retention_window({"createdAt": "2026-08-27T00:00:00Z", "visibleUntil": "2026-09-03T00:00:00Z"}, 7)
+    _assert_retention_window({"createdAt": "2026-08-27T00:00:00Z", "visibleUntil": "2026-09-26T00:00:00Z"}, 30)
 
 
 class _ProviderState:
@@ -533,9 +640,13 @@ def run_live_flow(api_base: str, python_base: str | None = None, timeout: float 
 
         resume = user.upload_resume(RESUME_PATH, "MVP student resume")
         resume_id = str(resume["id"])
+        _assert_retention_window(resume, 7)
         _emit("TXT upload", identifier=resume_id, state=str(resume.get("visibilityState", "UNKNOWN")))
         docx_resume = user.upload_resume(DOCX_PATH, "MVP DOCX resume")
         _emit("DOCX upload", identifier=str(docx_resume["id"]), state=str(docx_resume.get("visibilityState", "UNKNOWN")))
+        admin_resume = admin.upload_resume(RESUME_PATH, "MVP admin retention resume")
+        _assert_retention_window(admin_resume, 30)
+        _emit("ADMIN retention", identifier=str(admin_resume["id"]), state="30_DAYS")
         try:
             user.upload_resume(PDF_PATH, "MVP PDF rejection")
         except FlowError as exc:
@@ -553,7 +664,7 @@ def run_live_flow(api_base: str, python_base: str | None = None, timeout: float 
         if terminal.get("state") != "SUCCEEDED":
             raise AssertionError("match task did not succeed")
         result = user.result(task_id)
-        _assert_result_evidence(result)
+        _assert_result_evidence(result, source_text=RESUME_PATH.read_text(encoding="utf-8"))
         _emit("match result", identifier=task_id, state="SUCCEEDED")
 
         deleted = user.delete_resume(resume_id, int(resume.get("version", 0)))
@@ -583,6 +694,7 @@ def run_live_flow(api_base: str, python_base: str | None = None, timeout: float 
                 raise AssertionError("late result did not return TASK_GONE") from exc
         else:
             raise AssertionError("late result unexpectedly available")
+        _assert_redis_key_absent(f"resume:view:{late_id}")
         _emit("late resume recovery", identifier=late_id, state=str(late_deleted.get("visibilityState", "UNKNOWN")))
 
         # Administrative deletion hides the record from the owner, including recovery.
