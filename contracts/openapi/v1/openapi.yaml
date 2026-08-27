@@ -1,0 +1,1185 @@
+openapi: 3.1.0
+info:
+  title: Resume Matching Platform Java API
+  version: 1.0.0
+  license:
+    name: UNLICENSED
+    identifier: LicenseRef-UNLICENSED
+  description: |
+    Versioned public API owned by the Java service. Resume and match data is
+    scoped to the authenticated actor and is never returned in error messages.
+servers:
+  - url: http://127.0.0.1:8080
+    description: Local development server
+tags:
+  - name: Authentication
+    description: Registration, login, and current-user identity.
+  - name: LLM Profiles
+    description: Per-user OpenAI-compatible profile management without secret re-display.
+  - name: Resumes
+    description: Active resume upload, listing, inspection, and deliberate soft deletion.
+  - name: Recovery
+    description: Owner-scoped recovery of eligible user-deleted or archived resumes.
+  - name: Administrator Recovery
+    description: Administrator-scoped cross-owner recovery and administrative soft deletion.
+  - name: Match Tasks
+    description: Asynchronous evidence-backed Java-backend job matching.
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register a user
+      operationId: registerUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Issue a JWT
+      operationId: loginUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentication succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/me:
+    get:
+      tags: [Authentication]
+      summary: Get the current user
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: Current authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /api/v1/llm-profiles:
+    get:
+      tags: [LLM Profiles]
+      summary: List the current user's model profiles
+      operationId: listLlmProfiles
+      responses:
+        '200':
+          description: User-owned profiles. API keys are never returned.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LlmProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+    post:
+      tags: [LLM Profiles]
+      summary: Create a model profile
+      operationId: createLlmProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLlmProfileRequest'
+      responses:
+        '201':
+          description: Model profile created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/llm-profiles/{profileId}:
+    parameters:
+      - $ref: '#/components/parameters/ProfileId'
+    get:
+      tags: [LLM Profiles]
+      summary: Get a model profile
+      operationId: getLlmProfile
+      responses:
+        '200':
+          description: User-owned model profile without its secret.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+    put:
+      tags: [LLM Profiles]
+      summary: Replace a model profile
+      operationId: replaceLlmProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLlmProfileRequest'
+      responses:
+        '200':
+          description: Model profile replaced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [LLM Profiles]
+      summary: Delete a model profile
+      operationId: deleteLlmProfile
+      responses:
+        '204':
+          description: Model profile deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /api/v1/llm-profiles/{profileId}/test:
+    parameters:
+      - $ref: '#/components/parameters/ProfileId'
+    post:
+      tags: [LLM Profiles]
+      summary: Test a model profile connection
+      operationId: testLlmProfile
+      responses:
+        '200':
+          description: Safe connection status and available model names.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmProfileTestResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ModelUnavailable'
+
+  /api/v1/resumes:
+    get:
+      tags: [Resumes]
+      summary: List active resumes
+      operationId: listResumes
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Active resumes visible to the authenticated actor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResumePage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+    post:
+      tags: [Resumes]
+      summary: Upload a TXT or DOCX resume
+      operationId: uploadResume
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UploadResumeRequest'
+      responses:
+        '201':
+          description: Resume uploaded and made active.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Resume'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedFile'
+
+  /api/v1/resumes/{resumeId}:
+    parameters:
+      - $ref: '#/components/parameters/ResumeId'
+    get:
+      tags: [Resumes]
+      summary: Get an active resume
+      operationId: getResume
+      responses:
+        '200':
+          description: User-owned or administrator-visible active resume metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Resume'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+    delete:
+      tags: [Resumes]
+      summary: Soft-delete an active resume
+      operationId: softDeleteResume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteResumeRequest'
+      responses:
+        '200':
+          description: Resume soft-deleted and removed from active views.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Resume'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/VersionConflict'
+
+  /api/v1/recovery/resumes:
+    get:
+      tags: [Recovery]
+      summary: List the current user's recoverable resumes
+      operationId: listUserRecoveryResumes
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Own user-soft-deleted or user-cache-archived resumes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResumePage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /api/v1/recovery/resumes/{resumeId}/restore:
+    parameters:
+      - $ref: '#/components/parameters/ResumeId'
+    post:
+      tags: [Recovery]
+      summary: Restore an eligible user resume
+      operationId: restoreUserResume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestoreResumeRequest'
+      responses:
+        '200':
+          description: Resume restored to active visibility.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Resume'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/VersionConflict'
+
+  /api/v1/admin/recovery/resumes:
+    get:
+      tags: [Administrator Recovery]
+      summary: List recoverable resumes across owners
+      operationId: listAdminRecoveryResumes
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: ownerId
+          in: query
+          required: false
+          description: Optional owner filter for an administrator.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Recoverable resumes with owner context.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResumePage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /api/v1/admin/recovery/resumes/{resumeId}:
+    parameters:
+      - $ref: '#/components/parameters/ResumeId'
+    delete:
+      tags: [Administrator Recovery]
+      summary: Soft-delete a resume as an administrator
+      operationId: adminSoftDeleteResume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteResumeRequest'
+      responses:
+        '200':
+          description: Resume hidden by administrator soft deletion.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Resume'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/VersionConflict'
+
+  /api/v1/admin/recovery/resumes/{resumeId}/restore:
+    parameters:
+      - $ref: '#/components/parameters/ResumeId'
+    post:
+      tags: [Administrator Recovery]
+      summary: Restore a resume as an administrator
+      operationId: adminRestoreResume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestoreResumeRequest'
+      responses:
+        '200':
+          description: Resume restored to active visibility by an administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Resume'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/VersionConflict'
+
+  /api/v1/match-tasks:
+    post:
+      tags: [Match Tasks]
+      summary: Create an evidence-backed match task
+      operationId: createMatchTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMatchTaskRequest'
+      responses:
+        '202':
+          description: Match task accepted for asynchronous processing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchTask'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ModelUnavailable'
+
+  /api/v1/match-tasks/{taskId}:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [Match Tasks]
+      summary: Get match task state
+      operationId: getMatchTask
+      responses:
+        '200':
+          description: Current asynchronous task state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchTask'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '410':
+          $ref: '#/components/responses/TaskGone'
+
+  /api/v1/match-tasks/{taskId}/result:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [Match Tasks]
+      summary: Get a completed match result
+      operationId: getMatchTaskResult
+      responses:
+        '200':
+          description: Evidence-backed result for a succeeded task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/TaskNotReady'
+        '410':
+          $ref: '#/components/responses/TaskGone'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ProfileId:
+      name: profileId
+      in: path
+      required: true
+      description: Model profile identifier.
+      schema:
+        type: string
+        format: uuid
+    ResumeId:
+      name: resumeId
+      in: path
+      required: true
+      description: Resume identifier.
+      schema:
+        type: string
+        format: uuid
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      description: Match task identifier.
+      schema:
+        type: string
+        format: uuid
+    Page:
+      name: page
+      in: query
+      required: false
+      description: One-based page number.
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      description: Number of records per page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+  responses:
+    BadRequest:
+      description: The request is invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: Authentication is required or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Forbidden:
+      description: The authenticated actor lacks the required role.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    ResourceNotFound:
+      description: The resource does not exist or is not visible to this actor. Unknown and foreign IDs use this same envelope.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          example:
+            code: RESOURCE_NOT_FOUND
+            message: Resource not found.
+            correlationId: 00000000-0000-4000-8000-000000000001
+            retryable: false
+    Conflict:
+      description: The request conflicts with existing account state.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    VersionConflict:
+      description: The optimistic-lock version is stale.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    IdempotencyConflict:
+      description: The idempotency key was reused with different request data.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    UnprocessableEntity:
+      description: The request cannot be processed under the current resource state.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    UnsupportedFile:
+      description: The uploaded file type is unsupported in this slice.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    PayloadTooLarge:
+      description: The uploaded file exceeds the configured size limit.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    ModelUnavailable:
+      description: The selected model endpoint is unavailable or timed out.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    TaskGone:
+      description: The task was archived, deleted, or otherwise stopped before completion.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    TaskNotReady:
+      description: The task has not produced a result.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+  schemas:
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      properties:
+        code:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - AUTHENTICATION_REQUIRED
+            - FORBIDDEN
+            - DUPLICATE_RESOURCE
+            - INVALID_CONFIRMATION
+            - VERSION_CONFLICT
+            - RESOURCE_NOT_FOUND
+            - RESUME_ARCHIVED
+            - RESUME_SOFT_DELETED
+            - TASK_GONE
+            - STALE_ATTEMPT
+            - IDEMPOTENCY_CONFLICT
+            - MODEL_UNAVAILABLE
+            - MODEL_OUTPUT_INVALID
+            - MODEL_ENDPOINT_REJECTED
+            - UNSUPPORTED_FILE
+            - PAYLOAD_TOO_LARGE
+            - TASK_NOT_READY
+          example: RESUME_ARCHIVED
+        message:
+          type: string
+          minLength: 1
+          example: The resume is archived and must be restored first.
+        correlationId:
+          type: string
+          format: uuid
+        retryable:
+          type: boolean
+        details:
+          type: array
+          description: Safe validation details without protected content.
+          items:
+            $ref: '#/components/schemas/ValidationDetail'
+    ValidationDetail:
+      type: object
+      additionalProperties: false
+      required: [field, reason]
+      properties:
+        field:
+          type: string
+          minLength: 1
+        reason:
+          type: string
+          minLength: 1
+    UserRole:
+      type: string
+      enum: [USER, ADMIN]
+    VisibilityState:
+      type: string
+      enum: [ACTIVE, USER_SOFT_DELETED, ADMIN_SOFT_DELETED, USER_CACHE_ARCHIVED, ADMIN_CACHE_ARCHIVED]
+    TaskState:
+      type: string
+      enum: [QUEUED, PROCESSING, SUCCEEDED, FAILED, TIMED_OUT, BLOCKED]
+    SourceType:
+      type: string
+      enum: [TXT, DOCX]
+    RequirementType:
+      type: string
+      enum: [MANDATORY, PREFERRED]
+    MatchStatus:
+      type: string
+      enum: [SATISFIED, PARTIALLY_SATISFIED, RELATED_BUT_EVIDENCE_INSUFFICIENT, UNMET]
+    MatchType:
+      type: string
+      enum: [EXACT, SEMANTIC, RELATED, NO_MATCH]
+    EvidenceStrength:
+      type: string
+      enum: [NONE, LOW, MEDIUM, HIGH]
+    SuggestionState:
+      type: string
+      enum: [SUPPORTED_FACT, WORDING_ONLY_REWRITE, NEEDS_USER_CONFIRMATION, RISKY_OR_UNSUPPORTED]
+    ScoreComponent:
+      type: string
+      enum: [SKILLS, PROJECT_EXPERIENCE, WORK_CONTENT, EDUCATION_EXPERIENCE, SOFT_SKILLS]
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [username, email, password, role]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+          pattern: '^[A-Za-z0-9._-]+$'
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 128
+        role:
+          $ref: '#/components/schemas/UserRole'
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [identifier, password]
+      properties:
+        identifier:
+          type: string
+          minLength: 1
+          maxLength: 254
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 128
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, username, email, role, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/UserRole'
+        createdAt:
+          type: string
+          format: date-time
+    AuthResponse:
+      type: object
+      additionalProperties: false
+      required: [accessToken, tokenType, expiresIn, user]
+      properties:
+        accessToken:
+          type: string
+          minLength: 1
+        tokenType:
+          type: string
+          const: Bearer
+        expiresIn:
+          type: integer
+          minimum: 1
+          description: Token lifetime in seconds.
+        user:
+          $ref: '#/components/schemas/User'
+    CreateLlmProfileRequest:
+      type: object
+      additionalProperties: false
+      required: [displayName, endpointUrl, modelName, apiKey]
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        endpointUrl:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: OpenAI-compatible endpoint base URL; private targets are rejected in production.
+        modelName:
+          type: string
+          minLength: 1
+          maxLength: 200
+        apiKey:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          writeOnly: true
+        selected:
+          type: boolean
+          default: false
+    UpdateLlmProfileRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateLlmProfileRequest'
+    LlmProfile:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, endpointUrl, modelName, hasApiKey, selected, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        endpointUrl:
+          type: string
+          format: uri
+        modelName:
+          type: string
+        hasApiKey:
+          type: boolean
+          description: Indicates whether a key is stored; the key itself is never returned.
+        selected:
+          type: boolean
+        lastTestStatus:
+          type: [string, 'null']
+          enum: [SUCCEEDED, FAILED, 'null']
+        lastTestedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    LlmProfileTestResponse:
+      type: object
+      additionalProperties: false
+      required: [available, testedAt]
+      properties:
+        available:
+          type: boolean
+        testedAt:
+          type: string
+          format: date-time
+        models:
+          type: array
+          items:
+            type: string
+        diagnostic:
+          type: [string, 'null']
+          description: Sanitized diagnostic only; never provider secrets or raw response content.
+    UploadResumeRequest:
+      type: object
+      additionalProperties: false
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+          description: UTF-8 TXT or DOCX document. PDF is unsupported in v1.
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+    Resume:
+      type: object
+      additionalProperties: false
+      required: [id, ownerId, title, sourceType, status, visibilityState, version, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        ownerId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        sourceType:
+          $ref: '#/components/schemas/SourceType'
+        status:
+          type: integer
+          enum: [0, 1]
+          description: 0 means not soft-deleted; 1 means soft deletion completed.
+        visibilityState:
+          $ref: '#/components/schemas/VisibilityState'
+        version:
+          type: integer
+          minimum: 0
+        visibleUntil:
+          type: [string, 'null']
+          format: date-time
+        softDeletedAt:
+          type: [string, 'null']
+          format: date-time
+        archivedAt:
+          type: [string, 'null']
+          format: date-time
+        restoredAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ResumePage:
+      type: object
+      additionalProperties: false
+      required: [items, page, pageSize, totalItems, totalPages]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Resume'
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        totalItems:
+          type: integer
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+    DeleteResumeRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmationText, expectedVersion]
+      properties:
+        confirmationText:
+          type: string
+          const: '确认删除简历'
+        expectedVersion:
+          type: integer
+          minimum: 0
+    RestoreResumeRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion:
+          type: integer
+          minimum: 0
+    CreateMatchTaskRequest:
+      type: object
+      additionalProperties: false
+      required: [resumeId, llmProfileId, jobDescriptionText, idempotencyKey]
+      properties:
+        resumeId:
+          type: string
+          format: uuid
+        llmProfileId:
+          type: string
+          format: uuid
+        jobDescriptionText:
+          type: string
+          minLength: 20
+          maxLength: 20000
+        idempotencyKey:
+          type: string
+          minLength: 16
+          maxLength: 128
+    MatchTask:
+      type: object
+      additionalProperties: false
+      required: [id, resumeId, llmProfileId, state, attempt, resumeVersion, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        resumeId:
+          type: string
+          format: uuid
+        llmProfileId:
+          type: string
+          format: uuid
+        state:
+          $ref: '#/components/schemas/TaskState'
+        attempt:
+          type: integer
+          minimum: 1
+        resumeVersion:
+          type: integer
+          minimum: 0
+        failureCode:
+          type: [string, 'null']
+          enum: [MODEL_UNAVAILABLE, MODEL_OUTPUT_INVALID, MODEL_ENDPOINT_REJECTED, UNSUPPORTED_FILE, TASK_GONE, STALE_ATTEMPT, 'null']
+        resultAvailable:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Evidence:
+      type: object
+      additionalProperties: false
+      required: [id, sourceType, sourceLocation, excerpt, confidence, strength]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sourceType:
+          $ref: '#/components/schemas/SourceType'
+        sourceLocation:
+          type: string
+          minLength: 1
+          description: Stable section, paragraph, or experience location in the resume.
+        sourceStart:
+          type: integer
+          minimum: 0
+        sourceEnd:
+          type: integer
+          minimum: 0
+        excerpt:
+          type: string
+          minLength: 1
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        strength:
+          $ref: '#/components/schemas/EvidenceStrength'
+    RequirementMatch:
+      type: object
+      additionalProperties: false
+      required: [requirementId, requirementText, requirementType, matchStatus, matchType, component, componentScore, evidence, gap, suggestionState]
+      properties:
+        requirementId:
+          type: string
+          format: uuid
+        requirementText:
+          type: string
+          minLength: 1
+        requirementType:
+          $ref: '#/components/schemas/RequirementType'
+        matchStatus:
+          $ref: '#/components/schemas/MatchStatus'
+        matchType:
+          $ref: '#/components/schemas/MatchType'
+        component:
+          $ref: '#/components/schemas/ScoreComponent'
+        componentScore:
+          type: number
+          minimum: 0
+          maximum: 1
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/Evidence'
+        gap:
+          type: [string, 'null']
+        suggestionState:
+          $ref: '#/components/schemas/SuggestionState'
+    MatchSuggestion:
+      type: object
+      additionalProperties: false
+      required: [id, requirementId, state, proposedText, evidenceIds]
+      properties:
+        id:
+          type: string
+          format: uuid
+        requirementId:
+          type: string
+          format: uuid
+        state:
+          $ref: '#/components/schemas/SuggestionState'
+        originalText:
+          type: [string, 'null']
+        proposedText:
+          type: string
+          minLength: 1
+        evidenceIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        requiresUserConfirmation:
+          type: boolean
+          default: false
+    ScoreBreakdown:
+      type: object
+      additionalProperties: false
+      required: [skills, projectExperience, workContent, educationExperience, softSkills, composite]
+      properties:
+        skills:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Fixed weight 0.40.
+        projectExperience:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Fixed weight 0.25.
+        workContent:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Fixed weight 0.15.
+        educationExperience:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Fixed weight 0.10.
+        softSkills:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Fixed weight 0.10.
+        composite:
+          type: number
+          minimum: 0
+          maximum: 1
+    MatchResult:
+      type: object
+      additionalProperties: false
+      required: [taskId, resumeId, resumeVersion, jobDescriptionText, score, requirements, suggestions, completedAt]
+      properties:
+        taskId:
+          type: string
+          format: uuid
+        resumeId:
+          type: string
+          format: uuid
+        resumeVersion:
+          type: integer
+          minimum: 0
+        jobDescriptionText:
+          type: string
+          minLength: 20
+          maxLength: 20000
+        score:
+          $ref: '#/components/schemas/ScoreBreakdown'
+        requirements:
+          type: array
+          items:
+            $ref: '#/components/schemas/RequirementMatch'
+        suggestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/MatchSuggestion'
+        completedAt:
+          type: string
+          format: date-time
