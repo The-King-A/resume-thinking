@@ -16,7 +16,7 @@ vi.mock('../stores/llmProfiles', () => ({ useLlmProfileStore: () => store }))
 
 const ModelProfileFormStub = {
   props: ['profile'],
-  template: '<div><button class="test-saved" @click="$emit(\'test\', { displayName: profile?.displayName || \'Draft\', endpointUrl: profile?.endpointUrl || \'https://api.example.com/v1\', modelName: profile?.modelName || \'gpt\', apiKey: \'\', selected: profile?.selected || false })">Test saved</button><button class="test-changed" @click="$emit(\'test\', { displayName: profile?.displayName || \'Draft\', endpointUrl: profile?.endpointUrl || \'https://api.example.com/v1\', modelName: \'changed\', apiKey: \'new-key\', selected: profile?.selected || false })">Test changed</button><button class="save-draft" @click="$emit(\'save\', { displayName: profile?.displayName || \'Draft\', endpointUrl: profile?.endpointUrl || \'https://api.example.com/v1\', modelName: profile?.modelName || \'gpt\', apiKey: \'new-key\', selected: profile?.selected || false })">Save</button></div>',
+  template: '<div><button class="test-saved" @click="$emit(\'test\', { displayName: profile?.displayName || \'Draft\', endpointUrl: profile?.endpointUrl || \'https://api.example.com/v1\', modelName: profile?.modelName || \'gpt\', apiKey: \'\', selected: profile?.selected || false })">Test saved</button><button class="test-changed" @click="$emit(\'test\', { displayName: profile?.displayName || \'Draft\', endpointUrl: profile?.endpointUrl || \'https://api.example.com/v1\', modelName: \'changed\', apiKey: \'new-key\', selected: profile?.selected || false })">Test changed</button><button class="save-draft" @click="$emit(\'save\', { displayName: profile?.displayName || \'Draft\', endpointUrl: profile?.endpointUrl || \'https://api.example.com/v1\', modelName: profile?.modelName || \'gpt\', apiKey: \'new-key\', selected: profile?.selected || false })">Save</button><button class="save-unchanged" @click="$emit(\'save\', { displayName: profile?.displayName || \'Draft\', endpointUrl: profile?.endpointUrl || \'https://api.example.com/v1\', modelName: profile?.modelName || \'gpt\', selected: profile?.selected || false })">Save unchanged</button></div>',
   emits: ['test', 'save'],
   setup() { return { setModels: vi.fn(), setTesting: vi.fn(), clearApiKey: vi.fn() } },
 }
@@ -78,6 +78,15 @@ describe('ModelProfilesView connection testing', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Unable to save profile.')
     expect(wrapper.text()).not.toContain('backend details')
+  })
+
+  it('updates a saved profile when the key is intentionally omitted', async () => {
+    const wrapper = mount(ModelProfilesView, { global: { stubs: { ModelProfileForm: ModelProfileFormStub } } })
+    await wrapper.get('.profile-row button').trigger('click')
+    await wrapper.get('.save-unchanged').trigger('click')
+    await flushPromises()
+    expect(store.update).toHaveBeenCalledTimes(1)
+    expect(store.update.mock.calls[0]?.[1]).not.toHaveProperty('apiKey')
   })
 
   it('clears the password only after a successful parent save', async () => {

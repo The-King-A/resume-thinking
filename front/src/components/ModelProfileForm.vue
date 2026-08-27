@@ -20,7 +20,7 @@ async function validateForm(requireApiKey: boolean) {
   else if (!validationMessage.value && form.apiKey.length > 4096) validationMessage.value = 'API key must be at most 4096 characters'
   return !validationMessage.value
 }
-function payload(): ProfileFormPayload { const value: Record<string, unknown> = { ...form }; if (props.profile && !form.apiKey) delete value.apiKey; return value as ProfileFormPayload }
+function payload(): ProfileFormPayload { const value: Record<string, unknown> = { ...form }; if (props.profile && !form.apiKey) delete value.apiKey; return value as unknown as ProfileFormPayload }
 async function save() { if (!(await validateForm(!props.profile?.hasApiKey))) return; emit('save', payload()) }
 async function test() { if (!(await validateForm(false))) return; emit('test', payload()) }
 function choose(url: string) { form.endpointUrl = url }
