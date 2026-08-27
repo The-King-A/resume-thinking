@@ -47,8 +47,9 @@ class MatchTaskServiceTest {
         var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()),
                 new TestProfileService(userId, profileId), new MatchTaskRepository.InMemory(), capture,
                 new AnalysisResultRepository.InMemory(), new CallbackReceiptRepository.InMemory(), new AnalysisEvidenceRepository.InMemory(), crypto);
-        service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
+        var task = service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
                 "Build reliable software with clear communication and practical testing.", "plain-key-0000001"));
+        assertThat(task.state()).isEqualTo(MatchTask.State.PROCESSING);
         assertThat(new String(java.util.Base64.getDecoder().decode(capture.job.document().contentBase64()), StandardCharsets.UTF_8)).isEqualTo("Java\nTesting");
         assertThat(capture.job.allowedEvidence()).allSatisfy(e -> assertThat(e.sourceEnd()).isLessThanOrEqualTo(12));
     }
@@ -61,6 +62,71 @@ class MatchTaskServiceTest {
         var repo = new MatchTaskRepository.InMemory(); repo.save(task);
         var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()), null, repo, new PythonAnalysisClient.Noop());
         assertThatThrownBy(() -> service.getTask(task.id(), userId, UserRole.USER)).isInstanceOf(TaskGoneException.class);
+    }
+
+    @Test
+    void rejectsJobDescriptionAndIdempotencyKeysAboveContractBounds() {
+        var resumes = new ResumeRepository.InMemory();
+        resumes.save(Resume.active(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER, Instant.now(), 0L));
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()),
+                null, new MatchTaskRepository.InMemory(), new PythonAnalysisClient.Noop());
+        assertThatThrownBy(() -> service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
+                "x".repeat(20_001), "valid-key-00000001")))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("VALIDATION_ERROR");
+        assertThatThrownBy(() -> service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
+                "Build reliable software with clear communication and practical testing.", "k".repeat(129))))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("VALIDATION_ERROR");
+    }
+
+    @Test
+    void txtEvidenceCoordinatesNormalizeCrLfForPython() {
+        var crypto = new com.resumethinking.platform.crypto.AesGcmCryptoService("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
+        var encrypted = crypto.encrypt("Java\r\nTesting");
+        var resumes = new ResumeRepository.InMemory();
+        resumes.save(new Resume(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER, encrypted.ciphertext(), encrypted.nonce(), Instant.now(), "v1"));
+        var capture = new CapturingClient();
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()),
+                new TestProfileService(userId, profileId), new MatchTaskRepository.InMemory(), capture,
+                new AnalysisResultRepository.InMemory(), new CallbackReceiptRepository.InMemory(), new AnalysisEvidenceRepository.InMemory(), crypto);
+        service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
+                "Build reliable software with clear communication and practical testing.", "crlf-key-00000001"));
+        assertThat(capture.job.allowedEvidence()).extracting(PythonAnalysisClient.AllowedEvidence::sourceStart)
+                .containsExactly(0, 5);
+        assertThat(capture.job.allowedEvidence()).extracting(PythonAnalysisClient.AllowedEvidence::sourceEnd)
+                .containsExactly(4, 12);
+    }
+
+    @Test
+    void forgedEvidenceExcerptIsRejectedEvenWhenRangeAndIdAreValid() {
+        var crypto = new com.resumethinking.platform.crypto.AesGcmCryptoService("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
+        var encrypted = crypto.encrypt("Java\nTesting");
+        var resumes = new ResumeRepository.InMemory();
+        resumes.save(new Resume(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER, encrypted.ciphertext(), encrypted.nonce(), Instant.now(), "v1"));
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()),
+                null, new MatchTaskRepository.InMemory(), new PythonAnalysisClient.Noop(),
+                new AnalysisResultRepository.InMemory(), new CallbackReceiptRepository.InMemory(), new AnalysisEvidenceRepository.InMemory(), crypto);
+        var task = service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
+                "Build reliable software with clear communication and practical testing.", "evidence-key-00001"));
+        var evidenceId = service.evidenceForTask(task.id()).getFirst().getId();
+        var requirement = new AnalysisCallbackRequest.RequirementMatch(UUID.randomUUID(), "Java", "MANDATORY", "SATISFIED", "EXACT", "SKILLS", .8,
+                java.util.List.of(new AnalysisCallbackRequest.EvidenceReference(evidenceId, 0, 4, "Forged", .9)), "HIGH", null, "SUPPORTED_FACT");
+        var result = new AnalysisCallbackRequest.AnalysisResultPayload(new AnalysisCallbackRequest.ScoreBreakdown(.8,.8,.8,.8,.8,.8), java.util.List.of(requirement), java.util.List.of());
+        var callback = new AnalysisCallbackRequest(task.id(), 1, UUID.randomUUID(), task.callbackTokenForTests(), "", "SUCCEEDED", result, null, UUID.randomUUID()).withComputedPayloadHash();
+        assertThat(service.acceptCallback(callback).code()).isEqualTo("MODEL_OUTPUT_INVALID");
+    }
+
+    @Test
+    void rejectsCompositeScoreThatIsNotRoundedWeightedValue() {
+        var resumes = new ResumeRepository.InMemory();
+        resumes.save(Resume.active(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER, Instant.now(), 0L));
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()),
+                null, new MatchTaskRepository.InMemory(), new PythonAnalysisClient.Noop());
+        var task = service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
+                "Build reliable software with clear communication and practical testing.", "score-key-000001"));
+        var score = new AnalysisCallbackRequest.ScoreBreakdown(.1111,.2222,.3333,.4444,.5555,.9999);
+        var result = new AnalysisCallbackRequest.AnalysisResultPayload(score, java.util.List.of(), java.util.List.of());
+        var callback = new AnalysisCallbackRequest(task.id(), 1, UUID.randomUUID(), task.callbackTokenForTests(), "", "SUCCEEDED", result, null, UUID.randomUUID()).withComputedPayloadHash();
+        assertThat(service.acceptCallback(callback).code()).isEqualTo("MODEL_OUTPUT_INVALID");
     }
 
     private static final class CapturingClient extends PythonAnalysisClient {

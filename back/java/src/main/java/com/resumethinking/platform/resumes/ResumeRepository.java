@@ -2,6 +2,10 @@ package com.resumethinking.platform.resumes;
 
 import com.resumethinking.platform.auth.UserRole;
 import org.springframework.data.repository.Repository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.*;
 import java.time.Instant;
 import java.util.*;
@@ -9,6 +13,7 @@ import java.util.*;
 public interface ResumeRepository extends Repository<Resume, UUID> {
     Resume save(Resume resume);
     Optional<Resume> findById(UUID id);
+    @Lock(LockModeType.PESSIMISTIC_WRITE) @Query("select r from Resume r where r.id = :id") Optional<Resume> findByIdForUpdate(@Param("id") UUID id);
     Page<Resume> findByVisibilityStateAndVisibleUntilLessThanEqual(VisibilityState state, Instant at, Pageable pageable);
     Page<Resume> findByOwnerIdAndVisibilityState(UUID ownerId, VisibilityState state, Pageable pageable);
     Page<Resume> findByOwnerIdAndVisibilityStateIn(UUID ownerId, Collection<VisibilityState> states, Pageable pageable);
@@ -26,6 +31,7 @@ public interface ResumeRepository extends Repository<Resume, UUID> {
         private final Map<UUID,Resume> values=new LinkedHashMap<>();
         public Resume save(Resume r){if(values.containsKey(r.getId())) r.advanceVersionForPersistence(); values.put(r.getId(),r); return r;}
         public Optional<Resume> findById(UUID id){return Optional.ofNullable(values.get(id));}
+        public Optional<Resume> findByIdForUpdate(UUID id){return findById(id);}
         public Page<Resume> findByVisibilityStateAndVisibleUntilLessThanEqual(VisibilityState s,Instant at,Pageable p){return page(values.values().stream().filter(r->r.getVisibilityState()==s && r.getVisibleUntil()!=null && !r.getVisibleUntil().isAfter(at)).toList(),p);}
         public Page<Resume> findByOwnerIdAndVisibilityState(UUID owner,VisibilityState s,Pageable p){return page(values.values().stream().filter(r->r.getOwnerId().equals(owner)&&r.getVisibilityState()==s).toList(),p);}
         public Page<Resume> findByOwnerIdAndVisibilityStateIn(UUID owner,Collection<VisibilityState> states,Pageable p){return page(values.values().stream().filter(r->r.getOwnerId().equals(owner)&&states.contains(r.getVisibilityState())).toList(),p);}

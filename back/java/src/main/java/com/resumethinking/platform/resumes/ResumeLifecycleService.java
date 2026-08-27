@@ -44,8 +44,9 @@ public class ResumeLifecycleService {
         Page<Resume> due;
         do {
             due=repository.findActiveDue(at,PageRequest.of(0,100,Sort.by("id")));
-            for (Resume resume : due) {
-                if (resume.getVisibilityState()!=VisibilityState.ACTIVE) continue;
+            for (Resume candidate : due) {
+                Resume resume = repository.findByIdForUpdate(candidate.getId()).orElse(null);
+                if (resume == null || resume.getVisibilityState()!=VisibilityState.ACTIVE || resume.getVisibleUntil() == null || resume.getVisibleUntil().isAfter(at)) continue;
                 VisibilityState prior=resume.getVisibilityState(); resume.archive(at); repository.save(resume); cache.evict(resume.getId());
                 audit.save(newAudit(resume.getId(),null,"ARCHIVED",prior,resume.getVisibilityState(),at)); count++;
             }
@@ -67,6 +68,8 @@ public class ResumeLifecycleService {
     }
     @Transactional(readOnly=true)
     public boolean isActiveAtVersion(UUID resumeId,long version){return repository.findById(resumeId).map(r -> r.getVisibilityState()==VisibilityState.ACTIVE && r.getVersion()==version).orElse(false);}
+    @Transactional
+    public Optional<Resume> lockActiveAtVersion(UUID resumeId,long version){return repository.findByIdForUpdate(resumeId).filter(r -> r.getVisibilityState()==VisibilityState.ACTIVE && r.getVersion()==version);}
     @Transactional(readOnly=true)
     public Optional<Resume> findActiveForAnalysis(UUID resumeId,long version){return repository.findById(resumeId).filter(r -> r.getVisibilityState()==VisibilityState.ACTIVE && r.getVersion()==version);}
     private ResumeAuditRepository.ResumeLifecycleAudit newAudit(UUID resumeId,UUID actorId,String action,VisibilityState prior,VisibilityState next,Instant at){return new ResumeAuditRepository.ResumeLifecycleAudit(resumeId,actorId,action,prior,next,at,UUID.randomUUID());}

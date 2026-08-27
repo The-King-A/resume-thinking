@@ -7,6 +7,7 @@ import com.resumethinking.platform.resumes.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import java.net.URI;
 import java.util.zip.*;
 import java.nio.charset.StandardCharsets;
@@ -50,8 +51,8 @@ public class MatchTaskService {
     @Transactional
     public synchronized MatchTask createTask(CreateMatchTaskCommand command) {
         if (command == null || command.actorId() == null || command.resumeId() == null || command.llmProfileId() == null
-                || command.jobDescriptionText() == null || command.jobDescriptionText().length() < 20
-                || command.idempotencyKey() == null || command.idempotencyKey().length() < 16) throw new IllegalArgumentException("VALIDATION_ERROR");
+                || command.jobDescriptionText() == null || command.jobDescriptionText().length() < 20 || command.jobDescriptionText().length() > 20_000
+                || command.idempotencyKey() == null || command.idempotencyKey().length() < 16 || command.idempotencyKey().length() > 128) throw new IllegalArgumentException("VALIDATION_ERROR");
         var existing = tasks.findByCreatorIdAndIdempotencyKey(command.actorId(), command.idempotencyKey());
         if (existing.isPresent()) {
             if (!existing.get().getResumeId().equals(command.resumeId()) || !existing.get().getLlmProfileId().equals(command.llmProfileId())
@@ -73,8 +74,15 @@ public class MatchTaskService {
         Set<UUID> evidenceIds = evidenceSpecs.stream().map(EvidenceSpec::id).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         MatchTask task = new MatchTask(UUID.randomUUID(), reservation.resumeId(), command.llmProfileId(), command.actorId(), reservation.resumeVersion(),
                 command.jobDescriptionText(), command.idempotencyKey(), callbackToken, evidenceIds, Instant.now());
+        try { tasks.save(task); }
+        catch (DataIntegrityViolationException duplicate) {
+            var raced = tasks.findByCreatorIdAndIdempotencyKey(command.actorId(), command.idempotencyKey()).orElseThrow(() -> duplicate);
+            if (!sameSubmission(raced, command)) throw new IdempotencyConflictException();
+            return raced;
+        }
+        evidenceSpecs.forEach(e -> evidenceRepository.save(new AnalysisEvidence(e.id(), task.getId(), reservation.sourceType().name(), e.location(), e.start(), e.end(), e.excerpt())));
+        task.markProcessing();
         tasks.save(task);
-        evidenceSpecs.forEach(e -> evidenceRepository.save(new AnalysisEvidence(e.id(), task.getId(), reservation.sourceType().name(), e.location(), e.start(), e.end())));
         if (profile != null && documentBytes.length == 0 && resume.getRawContentNonce() == null) { task.markFailed("MODEL_OUTPUT_INVALID"); tasks.save(task); return task; }
         if (profile != null) {
             var source = reservation.sourceType().name();
@@ -115,7 +123,7 @@ public class MatchTaskService {
         MatchTask task = tasks.lockById(request.taskId()).orElseThrow(TaskGoneException::new);
         if (task.getState() == MatchTask.State.SUCCEEDED || task.getState() == MatchTask.State.FAILED || task.getState() == MatchTask.State.TIMED_OUT) return CallbackResponse.error("TASK_GONE");
         if (request.attempt() < task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
-        if (!lifecycle.isActiveAtVersion(task.getResumeId(), task.getResumeVersion())) {
+        if (lifecycle.lockActiveAtVersion(task.getResumeId(), task.getResumeVersion()).isEmpty()) {
             task.markBlocked(); tasks.save(task); return CallbackResponse.error("TASK_GONE");
         }
         if (request.attempt() != task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
@@ -132,7 +140,14 @@ public class MatchTaskService {
             try { validateResultSchema(request.result()); validateEvidence(task, request.result()); }
             catch (RuntimeException invalid) { return CallbackResponse.error("MODEL_OUTPUT_INVALID"); }
         }
-        receipts.save(new CallbackReceipt(request.callbackId(), request.payloadHash(), Instant.now()));
+        try { receipts.save(new CallbackReceipt(request.callbackId(), request.payloadHash(), Instant.now())); }
+        catch (DataIntegrityViolationException duplicate) {
+            var raced = receipts.findByCallbackId(request.callbackId()).orElseThrow(() -> duplicate);
+            return raced.payloadHash().equals(request.payloadHash()) ? CallbackResponse.acceptedReplay() : CallbackResponse.error("IDEMPOTENCY_CONFLICT");
+        }
+        if (lifecycle.lockActiveAtVersion(task.getResumeId(), task.getResumeVersion()).isEmpty()) {
+            task.markBlocked(); tasks.save(task); return CallbackResponse.error("TASK_GONE");
+        }
         if ("SUCCEEDED".equals(request.outcome())) { results.save(AnalysisResult.from(task.getId(), task.getResumeId(), task.getResumeVersion(), task.getJobDescriptionText(), request)); task.markSucceeded(); }
         else if ("TIMED_OUT".equals(request.outcome())) task.markTimedOut(request.errorCode());
         else task.markFailed(request.errorCode());
@@ -147,11 +162,19 @@ public class MatchTaskService {
             if (evidenceRepository.findByTaskId(task.getId()).stream().noneMatch(e -> e.getId().equals(id))) throw new EvidenceReferenceException();
     }
     private void validateEvidence(MatchTask task, AnalysisCallbackRequest.EvidenceReference evidence) {
-        var allowed = evidenceRepository.findByTaskId(task.getId()).stream().filter(e -> e.getId().equals(evidence.evidenceId())).findFirst().orElse(null);
-        if (evidence == null || allowed == null || evidence.sourceStart() < allowed.getSourceStart() || evidence.sourceEnd() < evidence.sourceStart() || evidence.sourceEnd() > allowed.getSourceEnd() || evidence.excerpt() == null || evidence.excerpt().isBlank() || evidence.confidence() < 0 || evidence.confidence() > 1) throw new EvidenceReferenceException();
+        var allowed = evidence == null ? null : evidenceRepository.findByTaskId(task.getId()).stream().filter(e -> e.getId().equals(evidence.evidenceId())).findFirst().orElse(null);
+        if (evidence == null || allowed == null || evidence.sourceStart() < allowed.getSourceStart() || evidence.sourceEnd() < evidence.sourceStart() || evidence.sourceEnd() > allowed.getSourceEnd() || evidence.excerpt() == null || evidence.excerpt().isBlank() || evidence.confidence() < 0 || evidence.confidence() > 1 || allowed.getSourceExcerpt() == null || !evidence.excerpt().equals(allowed.getSourceExcerpt().substring(evidence.sourceStart() - allowed.getSourceStart(), evidence.sourceEnd() - allowed.getSourceStart()))) throw new EvidenceReferenceException();
     }
     private static void validateResultSchema(AnalysisCallbackRequest.AnalysisResultPayload result) {
         if (!finiteBetween(result.score().skills()) || !finiteBetween(result.score().projectExperience()) || !finiteBetween(result.score().workContent()) || !finiteBetween(result.score().educationExperience()) || !finiteBetween(result.score().softSkills()) || !finiteBetween(result.score().composite())) throw new EvidenceReferenceException();
+        java.math.BigDecimal expectedDecimal = java.math.BigDecimal.valueOf(result.score().skills()).multiply(java.math.BigDecimal.valueOf(.40))
+                .add(java.math.BigDecimal.valueOf(result.score().projectExperience()).multiply(java.math.BigDecimal.valueOf(.25)))
+                .add(java.math.BigDecimal.valueOf(result.score().workContent()).multiply(java.math.BigDecimal.valueOf(.15)))
+                .add(java.math.BigDecimal.valueOf(result.score().educationExperience()).multiply(java.math.BigDecimal.valueOf(.10)))
+                .add(java.math.BigDecimal.valueOf(result.score().softSkills()).multiply(java.math.BigDecimal.valueOf(.10)))
+                .setScale(4, java.math.RoundingMode.HALF_UP);
+        double expected = expectedDecimal.doubleValue();
+        if (Double.compare(expected, result.score().composite()) != 0) throw new EvidenceReferenceException();
         for (var requirement : result.requirements()) {
             if (requirement == null || requirement.requirementId() == null || blank(requirement.jobRequirementText()) || !Set.of("MANDATORY", "PREFERRED").contains(requirement.requirementType()) || !Set.of("SATISFIED", "PARTIALLY_SATISFIED", "RELATED_BUT_EVIDENCE_INSUFFICIENT", "UNMET").contains(requirement.matchStatus()) || !Set.of("EXACT", "SEMANTIC", "RELATED", "NO_MATCH").contains(requirement.matchType()) || !Set.of("SKILLS", "PROJECT_EXPERIENCE", "WORK_CONTENT", "EDUCATION_EXPERIENCE", "SOFT_SKILLS").contains(requirement.component()) || requirement.evidence() == null || !Set.of("NONE", "LOW", "MEDIUM", "HIGH").contains(requirement.evidenceStrength()) || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(requirement.suggestionState()) || !finiteBetween(requirement.componentScore())) throw new EvidenceReferenceException();
             if (("SATISFIED".equals(requirement.matchStatus()) || "PARTIALLY_SATISFIED".equals(requirement.matchStatus())) && requirement.evidence().isEmpty()) throw new EvidenceReferenceException();
@@ -163,13 +186,14 @@ public class MatchTaskService {
     private static boolean finiteBetween(double value) { return Double.isFinite(value) && value >= 0 && value <= 1; }
     private static String randomToken() { byte[] bytes = new byte[48]; new java.security.SecureRandom().nextBytes(bytes); return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes); }
     private static URI callbackUri() { return URI.create(System.getProperty("matching.callback-url", System.getProperty("app.matching-callback-url", System.getenv().getOrDefault("MATCHING_CALLBACK_URL", "http://127.0.0.1:8080/internal/v1/analysis-results")))); }
-    private record EvidenceSpec(UUID id, String location, int start, int end) {}
+    private record EvidenceSpec(UUID id, String location, int start, int end, String excerpt) {}
     private static List<EvidenceSpec> evidenceSpecs(Resume.SourceType type, byte[] bytes) {
         String text = new String(bytes, StandardCharsets.UTF_8); List<EvidenceSpec> out = new ArrayList<>();
-        if (type == Resume.SourceType.TXT) { int offset=0; String[] lines=text.split("\\R", -1); for (int i=0;i<lines.length;i++){int end=offset+lines[i].length(); out.add(new EvidenceSpec(UUID.randomUUID(),"txt:"+i,offset,end)); offset=end+1;} }
-        else { List<String> paragraphs = docxParagraphs(bytes); int offset=0; for(int i=0;i<paragraphs.size();i++){int end=offset+paragraphs.get(i).length(); out.add(new EvidenceSpec(UUID.randomUUID(),"paragraph:"+i,offset,end)); offset=end+1;} }
-        if (out.isEmpty()) out.add(new EvidenceSpec(UUID.randomUUID(), type == Resume.SourceType.TXT ? "txt:0" : "paragraph:0", 0, 0)); return out;
+        if (type == Resume.SourceType.TXT) { text = text.replace("\r\n", "\n").replace('\r', '\n'); int offset=0; String[] lines=text.split("\\n", -1); for (int i=0;i<lines.length;i++){int end=offset+lines[i].length(); out.add(new EvidenceSpec(UUID.randomUUID(),"txt:"+i,offset,end,lines[i])); offset=end+1;} }
+        else { List<String> paragraphs = docxParagraphs(bytes); int offset=0; for(int i=0;i<paragraphs.size();i++){int end=offset+paragraphs.get(i).length(); out.add(new EvidenceSpec(UUID.randomUUID(),"paragraph:"+i,offset,end,paragraphs.get(i))); offset=end+1;} }
+        if (out.isEmpty()) out.add(new EvidenceSpec(UUID.randomUUID(), type == Resume.SourceType.TXT ? "txt:0" : "paragraph:0", 0, 0, "")); return out;
     }
+    private static boolean sameSubmission(MatchTask task, CreateMatchTaskCommand command) { return task.getResumeId().equals(command.resumeId()) && task.getLlmProfileId().equals(command.llmProfileId()) && task.getJobDescriptionText().equals(command.jobDescriptionText()); }
     private static List<String> docxParagraphs(byte[] bytes) {
         try (var zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
             ZipEntry entry; while ((entry = zip.getNextEntry()) != null) if ("word/document.xml".equals(entry.getName())) {
