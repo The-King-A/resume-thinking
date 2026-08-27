@@ -65,7 +65,7 @@ class InternalAnalysisCallbackControllerTest {
         var task = service.createTask(new CreateMatchTaskCommand(owner, resumeId, UUID.randomUUID(),
                 "Build reliable software with clear communication and practical testing.", "stale-key-000001"));
         var stale = new AnalysisCallbackRequest(task.id(), 0, UUID.randomUUID(), task.callbackTokenForTests(), "", "FAILED", null, "MODEL_UNAVAILABLE", UUID.randomUUID()).withComputedPayloadHash();
-        assertThat(service.acceptCallback(stale).code()).isEqualTo("STALE_ATTEMPT");
+        assertThat(service.acceptCallback(stale).code()).isEqualTo("VALIDATION_ERROR");
         assertThat(resultRepo.countByTaskId(task.id())).isZero();
     }
 }
