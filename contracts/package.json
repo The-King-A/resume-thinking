@@ -5,7 +5,8 @@
   "packageManager": "pnpm@10.15.1",
   "scripts": {
     "lint": "redocly lint openapi/v1/openapi.yaml",
-    "lint:openapi": "redocly lint openapi/v1/openapi.yaml"
+    "lint:openapi": "redocly lint openapi/v1/openapi.yaml",
+    "validate": "node scripts/validate-contracts.mjs"
   },
   "devDependencies": {
     "@redocly/cli": "^1.27.2",

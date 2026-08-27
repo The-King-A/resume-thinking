@@ -1,0 +1,6 @@
+{
+  "resumeId": "not-a-uuid",
+  "llmProfileId": "not-a-uuid",
+  "jobDescriptionText": "",
+  "idempotencyKey": ""
+}
