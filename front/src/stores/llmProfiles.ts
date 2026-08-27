@@ -8,6 +8,5 @@ export const useLlmProfileStore = defineStore('llmProfiles', {
     async create(payload: CreateLlmProfileRequest) { const result = await request<LlmProfile>({ method: 'POST', url: '/api/v1/llm-profiles', data: payload }); this.profiles.push(result); return result },
     async update(id: string, payload: UpdateLlmProfileRequest) { const result = await request<LlmProfile>({ method: 'PUT', url: `/api/v1/llm-profiles/${id}`, data: payload }); const index = this.profiles.findIndex((item) => item.id === id); if (index >= 0) this.profiles[index] = result; return result },
     async testConnection(id: string) { return request<LlmProfileTestResponse>({ method: 'POST', url: `/api/v1/llm-profiles/${id}/test` }) },
-    async testDraft(payload: CreateLlmProfileRequest) { const created = await this.create(payload); try { return await this.testConnection(created.id) } finally { await request<void>({ method: 'DELETE', url: `/api/v1/llm-profiles/${created.id}` }); this.profiles = this.profiles.filter((profile) => profile.id !== created.id) } },
   },
 })

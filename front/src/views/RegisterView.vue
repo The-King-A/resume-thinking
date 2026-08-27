@@ -6,8 +6,24 @@ import { useAuthStore } from '../stores/auth'
 import type { UserRole } from '../api/contracts'
 const router = useRouter(); const auth = useAuthStore(); const submitted = ref(false)
 const form = reactive({ username: '', email: '', password: '', role: 'USER' as UserRole })
-const adminSelected = ref(false); const formRef = ref<FormInstance>(); const validationMessage = ref(''); const rules: FormRules = { username: [{ required: true, message: 'Username is required', trigger: 'blur' }, { min: 3, message: 'Username must be at least 3 characters', trigger: 'blur' }], email: [{ required: true, message: 'Email is required', trigger: 'blur' }, { type: 'email', message: 'Enter a valid email', trigger: 'blur' }], password: [{ required: true, message: 'Password is required', trigger: 'blur' }, { min: 12, message: 'Password must be at least 12 characters', trigger: 'blur' }] }
-async function submit() { submitted.value = true; form.role = adminSelected.value ? 'ADMIN' : 'USER'; if (!form.username) { validationMessage.value = 'Username is required'; return } if (form.username.length < 3) { validationMessage.value = 'Username must be at least 3 characters'; return } if (!form.email) { validationMessage.value = 'Email is required'; return } if (!form.email.includes('@')) { validationMessage.value = 'Enter a valid email'; return } if (!form.password) { validationMessage.value = 'Password is required'; return } if (form.password.length < 12) { validationMessage.value = 'Password must be at least 12 characters'; return } validationMessage.value = ''; void formRef.value?.validate(); try { await auth.register({ ...form }); await router.push('/profiles') } catch { /* store exposes safe message */ } }
+const adminSelected = ref(false); const formRef = ref<FormInstance>(); const validationMessage = ref(''); const rules: FormRules = { username: [{ required: true, message: 'Username is required', trigger: 'blur' }, { min: 3, message: 'Username must be at least 3 characters', trigger: 'blur' }, { max: 64, message: 'Username must be at most 64 characters', trigger: 'blur' }, { pattern: /^[A-Za-z0-9._-]+$/, message: 'Username may contain only letters, numbers, dot, underscore, or hyphen', trigger: 'blur' }], email: [{ required: true, message: 'Email is required', trigger: 'blur' }, { type: 'email', message: 'Enter a valid email', trigger: 'blur' }, { max: 254, message: 'Email must be at most 254 characters', trigger: 'blur' }], password: [{ required: true, message: 'Password is required', trigger: 'blur' }, { min: 12, message: 'Password must be at least 12 characters', trigger: 'blur' }, { max: 128, message: 'Password must be at most 128 characters', trigger: 'blur' }] }
+async function submit() {
+  submitted.value = true
+  form.role = adminSelected.value ? 'ADMIN' : 'USER'
+  validationMessage.value = ''
+  const elementValid = await formRef.value?.validate().catch(() => false)
+  if (form.username.length < 3) validationMessage.value = 'Username must be at least 3 characters'
+  else if (form.username.length > 64) validationMessage.value = 'Username must be at most 64 characters'
+  else if (!/^[A-Za-z0-9._-]+$/.test(form.username)) validationMessage.value = 'Username may contain only letters, numbers, dot, underscore, or hyphen'
+  else if (!form.email) validationMessage.value = 'Email is required'
+  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) validationMessage.value = 'Enter a valid email'
+  else if (form.email.length > 254) validationMessage.value = 'Email must be at most 254 characters'
+  else if (form.password.length < 12) validationMessage.value = 'Password must be at least 12 characters'
+  else if (form.password.length > 128) validationMessage.value = 'Password must be at most 128 characters'
+  if (form.username.length === 0) validationMessage.value = 'Username is required'
+  if (elementValid === false || validationMessage.value) return
+  try { await auth.register({ ...form }); await router.push('/profiles') } catch { /* store exposes safe message */ }
+}
 </script>
 <template>
   <main class="auth-page"><section class="auth-panel"><p class="eyebrow">Resume Matching</p><h1>Create account</h1><p class="muted">Set up your workspace and model access.</p>

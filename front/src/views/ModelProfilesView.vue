@@ -3,6 +3,12 @@ import { onMounted, ref } from 'vue'; import ModelProfileForm from '../component
 const store = useLlmProfileStore(); const editing = ref<LlmProfile | null>(null); const notice = ref(''); const form = ref<InstanceType<typeof ModelProfileForm> | null>(null)
 onMounted(() => store.list())
 async function save(payload: CreateLlmProfileRequest) { if (editing.value) await store.update(editing.value.id, payload); else await store.create(payload); form.value?.clearApiKey(); editing.value = null; notice.value = 'Profile saved.' }
-async function testConnection(payload: CreateLlmProfileRequest) { const result = editing.value ? await store.testConnection(editing.value.id) : await store.testDraft(payload); form.value?.setModels(result.models ?? []); notice.value = result.available ? 'Connection available.' : 'Connection unavailable.' }
+async function testConnection(payload: CreateLlmProfileRequest) {
+  if (!editing.value) { notice.value = 'Save the profile before testing the connection.'; return }
+  const unchanged = payload.displayName === editing.value.displayName && payload.endpointUrl === editing.value.endpointUrl && payload.modelName === editing.value.modelName && payload.selected === editing.value.selected && payload.apiKey === ''
+  if (!unchanged) { notice.value = 'Save changes before testing the connection.'; return }
+  form.value?.setTesting(true)
+  try { const result = await store.testConnection(editing.value.id); form.value?.setModels(result.models ?? []); notice.value = result.available ? 'Connection available.' : 'Connection unavailable.' } catch { notice.value = 'Connection test failed.' } finally { form.value?.setTesting(false) }
+}
 </script>
 <template><main class="workspace"><header><div><p class="eyebrow">Workspace settings</p><h1>Model profiles</h1><p class="muted">Configure OpenAI-compatible providers for matching tasks.</p></div><RouterLink to="/">Dashboard</RouterLink></header><p class="notice">API keys are write-only. Saved keys are never shown again.</p><div class="profile-grid"><section><h2>{{ editing ? 'Edit profile' : 'Add a profile' }}</h2><ModelProfileForm ref="form" :profile="editing" @save="save" @test="testConnection" /></section><section><h2>Your profiles</h2><p v-if="notice" class="success">{{ notice }}</p><article v-for="profile in store.profiles" :key="profile.id" class="profile-row"><div><strong>{{ profile.displayName }}</strong><span>{{ profile.endpointUrl }} · {{ profile.modelName }}</span></div><span>{{ profile.selected ? 'Default' : '' }}</span><button type="button" @click="editing = profile">Edit</button></article><p v-if="!store.profiles.length" class="muted">No profiles configured yet.</p></section></div></main></template>

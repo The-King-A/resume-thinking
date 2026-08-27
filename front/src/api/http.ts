@@ -2,7 +2,9 @@ import axios, { type AxiosRequestConfig } from 'axios'
 import { ApiError, type ApiErrorPayload } from './contracts'
 
 const TOKEN_KEY = 'resume-matching.token'
+let clearSession: (() => void) | null = null
 export const http = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080' })
+export const registerAuthSessionClearer = (clearer: () => void) => { clearSession = clearer }
 export const tokenStorage = {
   get: () => localStorage.getItem(TOKEN_KEY),
   set: (token: string) => localStorage.setItem(TOKEN_KEY, token),
@@ -20,6 +22,7 @@ http.interceptors.response.use(undefined, (error) => {
     if (status === 401 && data.code === 'AUTHENTICATION_REQUIRED' && error.config?.url !== '/api/v1/auth/login') {
       tokenStorage.clear()
       localStorage.removeItem('resume-matching.identity')
+      clearSession?.()
     }
     return Promise.reject(new ApiError(data as ApiErrorPayload, status))
   }
