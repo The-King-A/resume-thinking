@@ -9,10 +9,13 @@ import jakarta.validation.constraints.NotBlank;
 import java.time.Instant; import java.util.*;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.web.multipart.MultipartFile;
+import com.resumethinking.platform.crypto.AesGcmCryptoService;
 
 @RestController @RequestMapping("/api/v1")
 public class ResumeController {
- private final ResumeLifecycleService service; public ResumeController(ResumeLifecycleService service){this.service=service;}
+ private final ResumeLifecycleService service; private final AesGcmCryptoService crypto; public ResumeController(ResumeLifecycleService service){this(service,null);} public ResumeController(ResumeLifecycleService service,AesGcmCryptoService crypto){this.service=service;this.crypto=crypto;}
+ @PostMapping(value="/resumes", consumes=MediaType.MULTIPART_FORM_DATA_VALUE) public ResponseEntity<Response> upload(@RequestAttribute("actorId") UUID actor,@RequestAttribute("role") UserRole role,@RequestPart("file") MultipartFile file,@RequestParam(required=false) String title) throws java.io.IOException { String name=file.getOriginalFilename()==null?"resume.txt":file.getOriginalFilename(); String lower=name.toLowerCase(java.util.Locale.ROOT); Resume.SourceType type; if(lower.endsWith(".txt")) type=Resume.SourceType.TXT; else if(lower.endsWith(".docx")) type=Resume.SourceType.DOCX; else throw new IllegalArgumentException("UNSUPPORTED_FILE"); if(file.getSize()>5_000_000) throw new IllegalArgumentException("PAYLOAD_TOO_LARGE"); if(crypto==null) throw new IllegalStateException("encryption unavailable"); String safeTitle=(title==null||title.isBlank())?name.substring(0,Math.min(200,name.length())):title; if(safeTitle.length()>200) throw new IllegalArgumentException("VALIDATION_ERROR"); var encrypted=crypto.encryptBytes(file.getBytes()); return ResponseEntity.status(HttpStatus.CREATED).body(Response.from(service.upload(actor,role,safeTitle,type,encrypted.ciphertext(),encrypted.nonce()))); }
  @GetMapping("/resumes") public Page list(@RequestAttribute("actorId") UUID actorId,@RequestAttribute("role") UserRole role,@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int pageSize){int p=normalizedPage(page),s=normalizedSize(pageSize); return Page.from(service.listActive(actorId,role,PageRequest.of(p-1,s,Sort.by("id"))),p,s);}
  @GetMapping("/resumes/{id}") public Response get(@RequestAttribute("actorId") UUID actorId,@RequestAttribute("role") UserRole role,@PathVariable UUID id){return Response.from(service.getActive(id,actorId,role));}
  @DeleteMapping("/resumes/{id}") public Response delete(@RequestAttribute("actorId") UUID actorId,@RequestAttribute("role") UserRole role,@PathVariable UUID id,@Valid @RequestBody DeleteRequest body){return Response.from(service.softDelete(new DeleteResumeCommand(id,actorId,role,body.confirmationText(),body.expectedVersion())));}

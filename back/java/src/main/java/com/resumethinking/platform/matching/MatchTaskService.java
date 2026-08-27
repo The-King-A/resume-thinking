@@ -62,7 +62,7 @@ public class MatchTaskService {
         if (resume.getRawContentNonce() == null || crypto == null) {
             documentBytes = resume.getRawContentNonce() == null ? new byte[0] : resume.getEncryptedRawContent();
         } else {
-            try { documentBytes = crypto.decrypt(resume.getEncryptedRawContent(), resume.getRawContentNonce()).getBytes(StandardCharsets.UTF_8); }
+            try { documentBytes = crypto.decryptBytes(resume.getEncryptedRawContent(), resume.getRawContentNonce()); }
             catch (RuntimeException ex) { documentBytes = new byte[0]; }
         }
         List<EvidenceSpec> evidenceSpecs = evidenceSpecs(reservation.sourceType(), documentBytes);

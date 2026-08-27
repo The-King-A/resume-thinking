@@ -14,5 +14,7 @@ public class AesGcmCryptoService {
     }
     public EncryptedValue encrypt(String plaintext) { try { byte[] nonce = new byte[12]; random.nextBytes(nonce); Cipher c = Cipher.getInstance("AES/GCM/NoPadding"); c.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, nonce)); return new EncryptedValue(c.doFinal(plaintext.getBytes(StandardCharsets.UTF_8)), nonce); } catch (Exception e) { throw new IllegalStateException("Encryption failed", e); } }
     public String decrypt(byte[] ciphertext, byte[] nonce) { try { Cipher c = Cipher.getInstance("AES/GCM/NoPadding"); c.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(128, nonce)); return new String(c.doFinal(ciphertext), StandardCharsets.UTF_8); } catch (Exception e) { throw new IllegalArgumentException("Invalid encrypted value", e); } }
+    public EncryptedValue encryptBytes(byte[] plaintext) { try { byte[] nonce = new byte[12]; random.nextBytes(nonce); Cipher c = Cipher.getInstance("AES/GCM/NoPadding"); c.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, nonce)); return new EncryptedValue(c.doFinal(plaintext), nonce); } catch (Exception e) { throw new IllegalStateException("Encryption failed", e); } }
+    public byte[] decryptBytes(byte[] ciphertext, byte[] nonce) { try { Cipher c = Cipher.getInstance("AES/GCM/NoPadding"); c.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(128, nonce)); return c.doFinal(ciphertext); } catch (Exception e) { throw new IllegalArgumentException("Invalid encrypted value", e); } }
     public record EncryptedValue(byte[] ciphertext, byte[] nonce) {}
 }

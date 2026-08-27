@@ -37,6 +37,9 @@ public class Resume {
     public Resume(UUID ownerId, String title, SourceType sourceType, UserRole creatorRole, byte[] encryptedRawContent, Instant now) {
         this(UUID.randomUUID(), ownerId, title, sourceType, creatorRole, encryptedRawContent, now, "v1");
     }
+    public Resume(UUID ownerId, String title, SourceType sourceType, UserRole creatorRole, byte[] encryptedRawContent, byte[] rawContentNonce, Instant now, String parserVersion) {
+        this(UUID.randomUUID(), ownerId, title, sourceType, creatorRole, encryptedRawContent, rawContentNonce, now, parserVersion);
+    }
     public Resume(UUID id, UUID ownerId, String title, SourceType sourceType, UserRole creatorRole, byte[] encryptedRawContent, Instant now) {
         this(id, ownerId, title, sourceType, creatorRole, encryptedRawContent, now, "v1");
     }

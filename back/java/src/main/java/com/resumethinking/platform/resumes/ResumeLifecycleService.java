@@ -54,6 +54,8 @@ public class ResumeLifecycleService {
     }
     public Page<Resume> listActive(UUID actorId, UserRole role, Pageable pageable){ return role==UserRole.ADMIN ? repository.findByVisibilityStateIn(List.of(VisibilityState.ACTIVE),pageable) : repository.findByOwnerIdAndVisibilityState(actorId,VisibilityState.ACTIVE,pageable); }
     public Resume getActive(UUID id, UUID actorId, UserRole role){ return repository.findById(id).filter(r -> r.getVisibilityState()==VisibilityState.ACTIVE && (role==UserRole.ADMIN || r.getOwnerId().equals(actorId))).orElseThrow(ResourceNotFoundException::new); }
+    @Transactional
+    public Resume upload(UUID ownerId, UserRole role, String title, Resume.SourceType sourceType, byte[] ciphertext, byte[] nonce) { if (ciphertext == null || ciphertext.length == 0 || nonce == null || nonce.length != 12) throw new IllegalArgumentException("VALIDATION_ERROR"); Resume r = new Resume(ownerId, title, sourceType, role, ciphertext, nonce, clock.instant(), "v1"); repository.save(r); cache.put(r); return r; }
     public Page<Resume> listRecoverable(UUID actorId, UserRole role, UUID ownerId, Pageable pageable){
         var states=List.of(VisibilityState.USER_SOFT_DELETED,VisibilityState.ADMIN_SOFT_DELETED,VisibilityState.USER_CACHE_ARCHIVED,VisibilityState.ADMIN_CACHE_ARCHIVED);
         if (role==UserRole.USER) return repository.findByOwnerIdAndVisibilityStateIn(actorId,List.of(VisibilityState.USER_SOFT_DELETED,VisibilityState.USER_CACHE_ARCHIVED),pageable);
