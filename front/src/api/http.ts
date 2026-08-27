@@ -17,7 +17,10 @@ http.interceptors.response.use(undefined, (error) => {
   const status = error.response?.status ?? 0
   const data = error.response?.data
   if (data && typeof data.code === 'string' && typeof data.message === 'string' && typeof data.correlationId === 'string' && typeof data.retryable === 'boolean') {
-    if (status === 401 && error.config?.url !== '/api/v1/auth/login') tokenStorage.clear()
+    if (status === 401 && data.code === 'AUTHENTICATION_REQUIRED' && error.config?.url !== '/api/v1/auth/login') {
+      tokenStorage.clear()
+      localStorage.removeItem('resume-matching.identity')
+    }
     return Promise.reject(new ApiError(data as ApiErrorPayload, status))
   }
   return Promise.reject(error)

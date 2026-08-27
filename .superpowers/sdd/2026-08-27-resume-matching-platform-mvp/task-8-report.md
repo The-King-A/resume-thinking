@@ -50,3 +50,19 @@ No provider key, ciphertext, or nonce value exists in source or built assets. Th
 - This lane intentionally does not add resume lifecycle views; those belong to Task 9.
 - The API base URL defaults to the contract's local server and can be overridden with `VITE_API_BASE_URL`.
 - ADMIN registration is exposed because the product decision permits it; the UI explicitly discloses its cross-owner recovery scope and deployment risk.
+
+## Fix round 1 evidence
+
+RED: added tests for empty-key update rejection, failed-save key retention, invalid registration/profile validation, confirmed-vs-unrelated 401 handling, and pre-save draft testing. The pre-fix run failed 3 assertions.
+
+GREEN:
+
+```text
+pnpm --dir front exec vitest run src/views/RegisterView.spec.ts src/components/ModelProfileForm.spec.ts src/api/http.spec.ts
+Test Files  3 passed (3)
+Tests       8 passed (8)
+```
+
+The fix uses Element Plus `el-form`/`el-form-item` rules plus deterministic guards, requires a non-empty replacement key on updates, clears the key only after parent save success, preserves identity on unrelated 401s, and clears token plus identity on `AUTHENTICATION_REQUIRED`. Unsaved tests use create -> test -> delete via frozen routes; the key is never rendered or persisted.
+
+Build passed with `pnpm --dir front run build` (`vue-tsc -b` and Vite). Secret scan `rg -n -i "secret-api-key|ciphertext|nonce" front/src front/dist -g '!*.map'` found no provider secret values; `nonce` matches are Axios dependency internals and the only `secret-api-key` match is the negative test assertion.
