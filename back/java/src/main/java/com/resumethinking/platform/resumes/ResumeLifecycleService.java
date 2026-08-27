@@ -4,6 +4,8 @@ import com.resumethinking.platform.auth.UserRole;
 import com.resumethinking.platform.profiles.ResourceNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.data.domain.*;
 import java.time.*;
 import java.util.*;
@@ -29,7 +31,8 @@ public class ResumeLifecycleService {
         }
         requireVersion(resume, command.expectedVersion());
         VisibilityState prior=resume.getVisibilityState(); Instant at=clock.instant();
-        resume.softDelete(command.actorId(), command.role(), at); repository.save(resume); cache.evict(resume.getId());
+        resume.softDelete(command.actorId(), command.role(), at); repository.save(resume);
+        cacheAfterCommit(() -> cache.evict(resume.getId()));
         audit.save(newAudit(resume.getId(),command.actorId(),"SOFT_DELETED",prior,resume.getVisibilityState(),at)); return resume;
     }
 
@@ -38,7 +41,8 @@ public class ResumeLifecycleService {
         Resume resume = repository.findRecoverable(resumeId,actorId,role).orElseThrow(ResourceNotFoundException::new);
         if (resume.getVisibilityState()==VisibilityState.ACTIVE) return ResumeView.from(resume);
         requireVersion(resume, expectedVersion); VisibilityState prior=resume.getVisibilityState(); Instant at=clock.instant();
-        resume.restore(at); repository.save(resume); cache.put(resume);
+        resume.restore(at); repository.save(resume);
+        cacheAfterCommit(() -> cache.put(resume));
         audit.save(newAudit(resumeId,actorId,"RESTORED",prior,resume.getVisibilityState(),at)); return ResumeView.from(resume);
     }
 
@@ -51,16 +55,27 @@ public class ResumeLifecycleService {
             for (Resume candidate : due) {
                 Resume resume = repository.findByIdForUpdate(candidate.getId()).orElse(null);
                 if (resume == null || resume.getVisibilityState()!=VisibilityState.ACTIVE || resume.getVisibleUntil() == null || resume.getVisibleUntil().isAfter(at)) continue;
-                VisibilityState prior=resume.getVisibilityState(); resume.archive(at); repository.save(resume); cache.evict(resume.getId());
+                VisibilityState prior=resume.getVisibilityState(); resume.archive(at); repository.save(resume);
+                cacheAfterCommit(() -> cache.evict(resume.getId()));
                 audit.save(newAudit(resume.getId(),null,"ARCHIVED",prior,resume.getVisibilityState(),at)); count++;
             }
         } while (due.hasContent());
         return count;
     }
-    public Page<Resume> listActive(UUID actorId, UserRole role, Pageable pageable){ return role==UserRole.ADMIN ? repository.findByVisibilityStateIn(List.of(VisibilityState.ACTIVE),pageable) : repository.findByOwnerIdAndVisibilityState(actorId,VisibilityState.ACTIVE,pageable); }
-    public Resume getActive(UUID id, UUID actorId, UserRole role){ return repository.findById(id).filter(r -> r.getVisibilityState()==VisibilityState.ACTIVE && (role==UserRole.ADMIN || r.getOwnerId().equals(actorId))).orElseThrow(ResourceNotFoundException::new); }
+    public Page<Resume> listActive(UUID actorId, UserRole role, Pageable pageable){
+        Instant at = clock.instant();
+        return role==UserRole.ADMIN
+                ? repository.findByVisibilityStateInAndVisibleUntilAfter(List.of(VisibilityState.ACTIVE),at,pageable)
+                : repository.findByOwnerIdAndVisibilityStateAndVisibleUntilAfter(actorId,VisibilityState.ACTIVE,at,pageable);
+    }
+    public Resume getActive(UUID id, UUID actorId, UserRole role){
+        Instant at = clock.instant();
+        return repository.findById(id).filter(r -> r.getVisibilityState()==VisibilityState.ACTIVE
+                && r.getVisibleUntil()!=null && r.getVisibleUntil().isAfter(at)
+                && (role==UserRole.ADMIN || r.getOwnerId().equals(actorId))).orElseThrow(ResourceNotFoundException::new);
+    }
     @Transactional
-    public Resume upload(UUID ownerId, UserRole role, String title, Resume.SourceType sourceType, byte[] ciphertext, byte[] nonce) { if (ciphertext == null || ciphertext.length == 0 || nonce == null || nonce.length != 12) throw new IllegalArgumentException("VALIDATION_ERROR"); Resume r = new Resume(ownerId, title, sourceType, role, ciphertext, nonce, clock.instant(), "v1"); repository.save(r); cache.put(r); return r; }
+    public Resume upload(UUID ownerId, UserRole role, String title, Resume.SourceType sourceType, byte[] ciphertext, byte[] nonce) { if (ciphertext == null || ciphertext.length == 0 || nonce == null || nonce.length != 12) throw new IllegalArgumentException("VALIDATION_ERROR"); Resume r = new Resume(ownerId, title, sourceType, role, ciphertext, nonce, clock.instant(), "v1"); repository.save(r); cacheAfterCommit(() -> cache.put(r)); return r; }
     public Page<Resume> listRecoverable(UUID actorId, UserRole role, UUID ownerId, Pageable pageable){
         var states=List.of(VisibilityState.USER_SOFT_DELETED,VisibilityState.ADMIN_SOFT_DELETED,VisibilityState.USER_CACHE_ARCHIVED,VisibilityState.ADMIN_CACHE_ARCHIVED);
         if (role==UserRole.USER) return repository.findByOwnerIdAndVisibilityStateIn(actorId,List.of(VisibilityState.USER_SOFT_DELETED,VisibilityState.USER_CACHE_ARCHIVED),pageable);
@@ -71,11 +86,43 @@ public class ResumeLifecycleService {
         Resume resume=getActive(resumeId,actorId,role); return new ResumeAnalysisReservation(resume.getId(),resume.getVersion(),resume.getSourceType());
     }
     @Transactional(readOnly=true)
-    public boolean isActiveAtVersion(UUID resumeId,long version){return repository.findById(resumeId).map(r -> r.getVisibilityState()==VisibilityState.ACTIVE && r.getVersion()==version).orElse(false);}
+    public boolean isActiveAtVersion(UUID resumeId,long version){
+        Instant at = clock.instant();
+        return repository.findById(resumeId).map(r -> r.getVisibilityState()==VisibilityState.ACTIVE
+                && r.getVisibleUntil()!=null && r.getVisibleUntil().isAfter(at) && r.getVersion()==version).orElse(false);
+    }
     @Transactional
-    public Optional<Resume> lockActiveAtVersion(UUID resumeId,long version){return repository.findByIdForUpdate(resumeId).filter(r -> r.getVisibilityState()==VisibilityState.ACTIVE && r.getVersion()==version);}
+    public Optional<Resume> lockActiveAtVersion(UUID resumeId,long version){
+        Instant at = clock.instant();
+        return repository.findByIdForUpdate(resumeId).filter(r -> r.getVisibilityState()==VisibilityState.ACTIVE
+                && r.getVisibleUntil()!=null && r.getVisibleUntil().isAfter(at) && r.getVersion()==version);
+    }
     @Transactional(readOnly=true)
-    public Optional<Resume> findActiveForAnalysis(UUID resumeId,long version){return repository.findById(resumeId).filter(r -> r.getVisibilityState()==VisibilityState.ACTIVE && r.getVersion()==version);}
+    public Optional<Resume> findActiveForAnalysis(UUID resumeId,long version){
+        Instant at = clock.instant();
+        return repository.findById(resumeId).filter(r -> r.getVisibilityState()==VisibilityState.ACTIVE
+                && r.getVisibleUntil()!=null && r.getVisibleUntil().isAfter(at) && r.getVersion()==version);
+    }
+    /**
+     * Cache is a derived, best-effort view. Register mutations after a
+     * successful database commit so a rollback cannot leave stale state, and
+     * isolate cache outages from the lifecycle transaction.
+     */
+    private void cacheAfterCommit(Runnable mutation) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { runCacheMutation(mutation); }
+            });
+            return;
+        }
+        // Direct callers (including unit tests and non-proxied embeddings) do
+        // not have a transaction boundary; still preserve best-effort cache semantics.
+        runCacheMutation(mutation);
+    }
+
+    private void runCacheMutation(Runnable mutation) {
+        try { mutation.run(); } catch (RuntimeException ignored) { /* cache is non-authoritative */ }
+    }
     private ResumeAuditRepository.ResumeLifecycleAudit newAudit(UUID resumeId,UUID actorId,String action,VisibilityState prior,VisibilityState next,Instant at){return new ResumeAuditRepository.ResumeLifecycleAudit(resumeId,actorId,action,prior,next,at,UUID.randomUUID());}
     private void requireVersion(Resume resume,long expected){if(resume.getVersion()!=expected) throw new VersionConflictException();}
 }

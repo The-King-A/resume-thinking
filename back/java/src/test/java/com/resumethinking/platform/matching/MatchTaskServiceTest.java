@@ -26,7 +26,8 @@ class MatchTaskServiceTest {
                 Instant.parse("2026-01-01T00:00:00Z"), 0L));
         var profiles = new TestProfileService(userId, profileId);
         var tasks = new MatchTaskRepository.InMemory();
-        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.InMemory(), new ResumeAuditRepository.InMemory()),
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.InMemory(), new ResumeAuditRepository.InMemory(),
+                        Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC)),
                 profiles, tasks, new PythonAnalysisClient.Noop());
 
         var first = service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
