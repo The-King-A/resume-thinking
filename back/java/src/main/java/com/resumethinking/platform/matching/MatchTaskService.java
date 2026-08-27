@@ -113,6 +113,7 @@ public class MatchTaskService {
         if (request.outcome().equals("SUCCEEDED") && request.result() == null) return CallbackResponse.error("MODEL_OUTPUT_INVALID");
         if (!request.outcome().equals("SUCCEEDED") && (request.errorCode() == null || request.errorCode().isBlank())) return CallbackResponse.error("VALIDATION_ERROR");
         if (request.payloadHash() == null || !request.payloadHash().matches("[a-f0-9]{64}")) return CallbackResponse.error("VALIDATION_ERROR");
+        if (!request.payloadHash().equals(CallbackPayloadHash.compute(request))) return CallbackResponse.error("VALIDATION_ERROR");
         if ("SUCCEEDED".equals(request.outcome())) validateEvidence(task, request.result());
         receipts.save(new CallbackReceipt(request.callbackId(), request.payloadHash(), Instant.now()));
         if ("SUCCEEDED".equals(request.outcome())) { results.save(AnalysisResult.from(task.getId(), task.getResumeId(), task.getResumeVersion(), task.getJobDescriptionText(), request)); task.markSucceeded(); }

@@ -47,7 +47,7 @@ class InternalAnalysisCallbackControllerTest {
         var task = service.createTask(new CreateMatchTaskCommand(owner, resumeId, UUID.randomUUID(),
                 "Build reliable software with clear communication and practical testing.", "callback-key-00001"));
         UUID callbackId = UUID.randomUUID();
-        var first = new AnalysisCallbackRequest(task.id(), 1, callbackId, task.callbackTokenForTests(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "FAILED", null, "MODEL_UNAVAILABLE", UUID.randomUUID());
+        var first = new AnalysisCallbackRequest(task.id(), 1, callbackId, task.callbackTokenForTests(), "", "FAILED", null, "MODEL_UNAVAILABLE", UUID.randomUUID()).withComputedPayloadHash();
         assertThat(service.acceptCallback(first).code()).isEqualTo("ACCEPTED");
         assertThat(service.acceptCallback(first).code()).isEqualTo("ACCEPTED_REPLAY");
         var conflict = new AnalysisCallbackRequest(task.id(), 1, callbackId, task.callbackTokenForTests(), "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "FAILED", null, "MODEL_UNAVAILABLE", UUID.randomUUID());
@@ -64,7 +64,7 @@ class InternalAnalysisCallbackControllerTest {
         var service = new MatchTaskService(lifecycle, null, taskRepo, new PythonAnalysisClient.Noop(), resultRepo);
         var task = service.createTask(new CreateMatchTaskCommand(owner, resumeId, UUID.randomUUID(),
                 "Build reliable software with clear communication and practical testing.", "stale-key-000001"));
-        var stale = new AnalysisCallbackRequest(task.id(), 0, UUID.randomUUID(), task.callbackTokenForTests(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "FAILED", null, "MODEL_UNAVAILABLE", UUID.randomUUID());
+        var stale = new AnalysisCallbackRequest(task.id(), 0, UUID.randomUUID(), task.callbackTokenForTests(), "", "FAILED", null, "MODEL_UNAVAILABLE", UUID.randomUUID()).withComputedPayloadHash();
         assertThat(service.acceptCallback(stale).code()).isEqualTo("STALE_ATTEMPT");
         assertThat(resultRepo.countByTaskId(task.id())).isZero();
     }
