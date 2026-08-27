@@ -16,7 +16,8 @@ import com.resumethinking.platform.matching.*;
  @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class) ResponseEntity<ApiError> forbidden(){return error(HttpStatus.FORBIDDEN,"FORBIDDEN");}
  @ExceptionHandler(MethodArgumentNotValidException.class) ResponseEntity<ApiError> validation(){return error(HttpStatus.BAD_REQUEST,"VALIDATION_ERROR");}
  @ExceptionHandler({HttpMessageNotReadableException.class,MethodArgumentTypeMismatchException.class}) ResponseEntity<ApiError> malformed(){return error(HttpStatus.BAD_REQUEST,"VALIDATION_ERROR");}
- @ExceptionHandler(IllegalArgumentException.class) ResponseEntity<ApiError> illegalArgument(IllegalArgumentException exception){if(exception.getMessage()!=null&&exception.getMessage().contains("MODEL_ENDPOINT_REJECTED"))return error(HttpStatus.UNPROCESSABLE_ENTITY,"MODEL_ENDPOINT_REJECTED"); return error(HttpStatus.BAD_REQUEST,"VALIDATION_ERROR");}
+ @ExceptionHandler(IllegalArgumentException.class) ResponseEntity<ApiError> illegalArgument(IllegalArgumentException exception){String code=exception.getMessage(); if("MODEL_ENDPOINT_REJECTED".equals(code))return error(HttpStatus.UNPROCESSABLE_ENTITY,"MODEL_ENDPOINT_REJECTED"); if("UNSUPPORTED_FILE".equals(code))return error(HttpStatus.UNSUPPORTED_MEDIA_TYPE,"UNSUPPORTED_FILE"); if("PAYLOAD_TOO_LARGE".equals(code))return error(HttpStatus.PAYLOAD_TOO_LARGE,"PAYLOAD_TOO_LARGE"); return error(HttpStatus.BAD_REQUEST,"VALIDATION_ERROR");}
+ @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class) ResponseEntity<ApiError> maxUploadSize(){return error(HttpStatus.PAYLOAD_TOO_LARGE,"PAYLOAD_TOO_LARGE");}
  private ResponseEntity<ApiError> error(HttpStatus status,String code){return ResponseEntity.status(status).body(new ApiError(code,code,UUID.randomUUID(),false));}
  public record ApiError(String code,String message,UUID correlationId,boolean retryable){}
 }
