@@ -36,3 +36,17 @@ request because its public compatibility range has moved to Spring Boot 4. The
 committed shell therefore preserves the required Spring Boot 3.4.3/JDK 21
 coordinates and Maven wrapper, while the compile verification used the local
 Maven fallback after the wrapper's external distribution download stalled.
+
+## Fix Round 1
+
+- Added tracked `application-local.yml` with `local` profile activation and
+  environment-variable references only.
+- Updated README local startup instructions to export `.env` assignments before
+  launching `mvnw.cmd` with the `local` profile.
+- Focused config check initially failed because the profile and export step were
+  absent, then passed after the fix.
+- `mvnw.cmd -q -DskipTests compile` again stalled without output and was stopped;
+  the equivalent local Maven 3.9.16 compile passed.
+- Python health test and frontend production build passed after the fix.
+- The Unix `back/java/mvnw` entrypoint is marked executable in Git; the Windows
+  `mvnw.cmd` path remains the documented command on this host.
