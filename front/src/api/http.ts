@@ -4,7 +4,15 @@ import { ApiError, type ApiErrorPayload } from './contracts'
 const TOKEN_KEY = 'resume-matching.token'
 let clearSession: (() => void) | null = null
 let sessionExpired: (() => void) | null = null
-export const http = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080' })
+export const DEFAULT_API_BASE_URL = 'http://127.0.0.1:8080'
+
+/** Keep the Axios base URL stable when it comes from a local .env file. */
+export const normalizeApiBaseUrl = (value: string | undefined | null) => {
+  const configured = value?.trim().replace(/\/+$/, '')
+  return configured || DEFAULT_API_BASE_URL
+}
+
+export const http = axios.create({ baseURL: normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL) })
 export const registerAuthSessionClearer = (clearer: () => void) => { clearSession = clearer }
 export const registerAuthSessionExpiredHandler = (handler: () => void) => { sessionExpired = handler }
 export const tokenStorage = {

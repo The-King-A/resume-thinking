@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ApiError } from './contracts'
-import { http, registerAuthSessionExpiredHandler, tokenStorage } from './http'
+import { DEFAULT_API_BASE_URL, http, normalizeApiBaseUrl, registerAuthSessionExpiredHandler, tokenStorage } from './http'
 import { useAuthStore } from '../stores/auth'
 
 describe('http auth failure handling', () => {
@@ -27,5 +27,21 @@ describe('http auth failure handling', () => {
     expect(localStorage.getItem('resume-matching.identity')).toBeNull()
     expect(auth.user).toBeNull()
     expect(expired).toHaveBeenCalledOnce()
+  })
+})
+
+describe('API base URL configuration', () => {
+  it('uses the local Java API when the setting is empty', () => {
+    expect(normalizeApiBaseUrl(undefined)).toBe(DEFAULT_API_BASE_URL)
+    expect(normalizeApiBaseUrl('   ')).toBe(DEFAULT_API_BASE_URL)
+    expect(normalizeApiBaseUrl('/')).toBe(DEFAULT_API_BASE_URL)
+  })
+
+  it('trims whitespace and trailing slashes from a configured origin', () => {
+    expect(normalizeApiBaseUrl('  http://localhost:8080///  ')).toBe('http://localhost:8080')
+  })
+
+  it('configures Axios with the normalized base URL', () => {
+    expect(http.defaults.baseURL).toBe(normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL))
   })
 })
