@@ -3,8 +3,10 @@ from __future__ import annotations
 from io import BytesIO
 from dataclasses import dataclass
 from uuid import uuid4
+from zipfile import BadZipFile
 
 from docx import Document as DocxDocument
+from docx.opc.exceptions import PackageNotFoundError
 
 
 class UnsupportedFile(Exception):
@@ -33,7 +35,10 @@ def extract_resume(source_type: str, content: bytes) -> ExtractedResume:
         text = content.decode("utf-8", errors="replace")
         return _result(text, "txt")
     if source_type == "DOCX":
-        document = DocxDocument(BytesIO(content))
+        try:
+            document = DocxDocument(BytesIO(content))
+        except (BadZipFile, PackageNotFoundError, ValueError) as exc:
+            raise UnsupportedFile("invalid DOCX") from exc
         paragraphs = [p.text for p in document.paragraphs]
         text = "\n".join(paragraphs)
         return _result(text, "paragraph")

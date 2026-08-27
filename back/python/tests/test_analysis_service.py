@@ -7,7 +7,7 @@ from app.analysis_service import analyze_job
 
 
 @pytest.mark.asyncio
-async def test_unsupported_document_returns_explicit_failure():
+async def test_malformed_provider_or_document_returns_failure():
     job = {
         "taskId": str(uuid4()), "attempt": 1, "resumeVersion": 0, "sourceType": "TXT",
         "document": {"contentBase64": base64.b64encode(b"resume text").decode(), "originalFilename": "resume.txt"},
@@ -17,4 +17,5 @@ async def test_unsupported_document_returns_explicit_failure():
         "provider": {"baseUrl": "https://api.example.test/v1", "model": "model", "apiKey": "secret"}, "correlationId": str(uuid4()),
     }
     callback = await analyze_job(job)
-    assert callback["outcome"] == "MODEL_OUTPUT_INVALID" or callback["outcome"] in {"FAILED", "TIMED_OUT"}
+    assert callback["outcome"] in {"FAILED", "TIMED_OUT"}
+    assert callback.get("errorCode") in {"MODEL_OUTPUT_INVALID", "MODEL_UNAVAILABLE"}

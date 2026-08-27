@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class StrictModel(BaseModel):
@@ -23,9 +23,9 @@ class AllowedEvidence(StrictModel):
 
 
 class Provider(StrictModel):
-    base_url: str = Field(alias="baseUrl", min_length=1)
+    base_url: str = Field(alias="baseUrl", min_length=1, max_length=2048)
     model: str = Field(min_length=1, max_length=200)
-    api_key: str = Field(alias="apiKey", min_length=1)
+    api_key: str = Field(alias="apiKey", min_length=1, max_length=4096)
 
 
 class AnalysisJob(StrictModel):
@@ -37,10 +37,19 @@ class AnalysisJob(StrictModel):
     allowed_evidence: list[AllowedEvidence] = Field(alias="allowedEvidence", min_length=1)
     job_description_text: str = Field(alias="jobDescriptionText", min_length=20, max_length=20000)
     redaction_required: Literal[True] = Field(alias="redactionRequired")
-    callback_url: str = Field(alias="callbackUrl")
+    callback_url: str = Field(alias="callbackUrl", min_length=1, max_length=2048)
     callback_token: str = Field(alias="callbackToken", min_length=32, max_length=1024)
     provider: Provider
     correlation_id: UUID = Field(alias="correlationId")
+
+    @field_validator("callback_url")
+    @classmethod
+    def callback_uri(cls, value: str) -> str:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("callbackUrl must be a URI")
+        return value
 
 
 class EvidenceReference(StrictModel):
@@ -134,4 +143,3 @@ class AnalysisRequest(StrictModel):
     resume_text: str = Field(alias="resumeText")
     job_description_text: str = Field(alias="jobDescriptionText")
     evidence: list[ExtractedEvidence] = Field(default_factory=list)
-
