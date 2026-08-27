@@ -6,7 +6,10 @@ import org.junit.jupiter.api.Test;
 import java.time.*;
 import java.util.*;
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.*;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 class ResumeLifecycleServiceTest {
  private final UUID userId=UUID.randomUUID(), otherUserId=UUID.randomUUID(), adminId=UUID.randomUUID();
@@ -40,6 +43,16 @@ class ResumeLifecycleServiceTest {
   Resume r=Resume.active(UUID.randomUUID(),userId,"x",Resume.SourceType.TXT,UserRole.USER,now,4L);repo.save(r);
   assertThatThrownBy(()->lifecycleService.softDelete(new DeleteResumeCommand(r.getId(),userId,UserRole.USER,"删除",4L))).isInstanceOf(IllegalArgumentException.class);
   assertThatThrownBy(()->lifecycleService.softDelete(new DeleteResumeCommand(r.getId(),userId,UserRole.USER,"确认删除简历",3L))).isInstanceOf(VersionConflictException.class);
+ }
+
+ @Test void softDeleteUsesTheSamePessimisticLookupAsCallbacks(){
+  ResumeRepository lockedRepository=mock(ResumeRepository.class);
+  Resume r=Resume.active(UUID.randomUUID(),userId,"locked",Resume.SourceType.TXT,UserRole.USER,now,0L);
+  when(lockedRepository.findByIdForUpdate(r.getId())).thenReturn(Optional.of(r));
+  var service=new ResumeLifecycleService(lockedRepository,new ResumeCache.Noop(),new ResumeAuditRepository.InMemory(),Clock.fixed(now,ZoneOffset.UTC));
+  service.softDelete(new DeleteResumeCommand(r.getId(),userId,UserRole.USER,"确认删除简历",0L));
+  verify(lockedRepository).findByIdForUpdate(r.getId());
+  verify(lockedRepository,never()).findById(r.getId());
  }
 
  @Test void repeatedRestoreOfAuthorizedActiveRecordIsIdempotent(){
@@ -86,6 +99,82 @@ class ResumeLifecycleServiceTest {
   Resume archived=Resume.active(UUID.randomUUID(),userId,"archived",Resume.SourceType.TXT,UserRole.ADMIN,now.minus(Duration.ofDays(31)),0L); repo.save(archived);
   lifecycleService.archiveDue(now);
   assertThat(archived.getVisibilityState()).isEqualTo(VisibilityState.ADMIN_CACHE_ARCHIVED);
-  assertThatThrownBy(()->lifecycleService.softDelete(new DeleteResumeCommand(archived.getId(),userId,UserRole.USER,"确认删除简历",1L))).isInstanceOf(ResourceNotFoundException.class);
+   assertThatThrownBy(()->lifecycleService.softDelete(new DeleteResumeCommand(archived.getId(),userId,UserRole.USER,"确认删除简历",1L))).isInstanceOf(ResourceNotFoundException.class);
+ }
+
+ @Test void activeReadsAndAnalysisReservationsExcludeTheVisibilityBoundary(){
+  Resume visible=Resume.active(UUID.randomUUID(),userId,"visible",Resume.SourceType.TXT,UserRole.USER,now.minus(Duration.ofDays(1)),0L);
+  Resume boundary=Resume.active(UUID.randomUUID(),userId,"boundary",Resume.SourceType.TXT,UserRole.USER,now.minus(Duration.ofDays(7)),0L);
+  Resume adminExpired=Resume.active(UUID.randomUUID(),adminId,"admin-expired",Resume.SourceType.TXT,UserRole.ADMIN,now.minus(Duration.ofDays(31)),0L);
+  repo.save(visible); repo.save(boundary); repo.save(adminExpired);
+
+  assertThat(lifecycleService.listActive(userId,UserRole.USER,PageRequest.of(0,20)).getContent()).containsExactly(visible);
+  assertThat(lifecycleService.listActive(adminId,UserRole.ADMIN,PageRequest.of(0,20)).getContent()).containsExactly(visible);
+  assertThatThrownBy(() -> lifecycleService.getActive(boundary.getId(),userId,UserRole.USER)).isInstanceOf(ResourceNotFoundException.class);
+  assertThatThrownBy(() -> lifecycleService.reserveForAnalysis(boundary.getId(),userId,UserRole.USER)).isInstanceOf(ResourceNotFoundException.class);
+  assertThat(lifecycleService.isActiveAtVersion(boundary.getId(),0L)).isFalse();
+  assertThat(lifecycleService.lockActiveAtVersion(boundary.getId(),0L)).isEmpty();
+  assertThat(lifecycleService.findActiveForAnalysis(boundary.getId(),0L)).isEmpty();
+ }
+
+ @Test void cacheMutationsRunOnlyAfterCommitAndCacheFailuresAreBestEffort(){
+  RecordingCache recording = new RecordingCache();
+  ResumeLifecycleService service = new ResumeLifecycleService(repo,recording,audit,Clock.fixed(now,ZoneOffset.UTC));
+  Resume resume=Resume.active(UUID.randomUUID(),userId,"cache",Resume.SourceType.TXT,UserRole.USER,now,0L); repo.save(resume);
+  TransactionSynchronizationManager.initSynchronization();
+  try {
+   service.softDelete(new DeleteResumeCommand(resume.getId(),userId,UserRole.USER,"确认删除简历",0L));
+   assertThat(recording.events).isEmpty();
+   fireAfterCommit();
+   assertThat(recording.events).containsExactly("evict:resume:view:"+resume.getId());
+  } finally {
+   if (TransactionSynchronizationManager.isSynchronizationActive()) TransactionSynchronizationManager.clearSynchronization();
+  }
+
+  RecordingCache failing = new RecordingCache(); failing.fail = true;
+  ResumeLifecycleService failingService = new ResumeLifecycleService(repo,failing,audit,Clock.fixed(now,ZoneOffset.UTC));
+  Resume second=Resume.active(UUID.randomUUID(),userId,"failure",Resume.SourceType.TXT,UserRole.USER,now,0L);
+  repo.save(second);
+  assertThatCode(() -> failingService.softDelete(new DeleteResumeCommand(second.getId(),userId,UserRole.USER,"确认删除简历",0L))).doesNotThrowAnyException();
+  assertThat(second.getVisibilityState()).isEqualTo(VisibilityState.USER_SOFT_DELETED);
+ }
+
+ @Test void restoreAndUploadCacheWritesAreAlsoDeferredUntilCommit(){
+  RecordingCache recording = new RecordingCache();
+  ResumeLifecycleService service = new ResumeLifecycleService(repo,recording,audit,Clock.fixed(now,ZoneOffset.UTC));
+  Resume deleted=Resume.active(UUID.randomUUID(),userId,"restore",Resume.SourceType.TXT,UserRole.USER,now,0L); repo.save(deleted);
+  service.softDelete(new DeleteResumeCommand(deleted.getId(),userId,UserRole.USER,"确认删除简历",0L));
+  recording.events.clear();
+  TransactionSynchronizationManager.initSynchronization();
+  try {
+   service.recover(deleted.getId(),userId,UserRole.USER,1L);
+   assertThat(recording.events).isEmpty();
+   fireAfterCommit();
+   assertThat(recording.events).containsExactly("put:"+deleted.getId());
+  } finally {
+   if (TransactionSynchronizationManager.isSynchronizationActive()) TransactionSynchronizationManager.clearSynchronization();
+  }
+
+  recording.events.clear();
+  TransactionSynchronizationManager.initSynchronization();
+  try {
+   Resume uploaded=service.upload(userId,UserRole.USER,"uploaded",Resume.SourceType.TXT,new byte[]{1},new byte[12]);
+   assertThat(recording.events).isEmpty();
+   fireAfterCommit();
+   assertThat(recording.events).containsExactly("put:"+uploaded.getId());
+  } finally {
+   if (TransactionSynchronizationManager.isSynchronizationActive()) TransactionSynchronizationManager.clearSynchronization();
+  }
+ }
+
+ private static void fireAfterCommit(){
+  for (TransactionSynchronization synchronization : TransactionSynchronizationManager.getSynchronizations()) synchronization.afterCommit();
+ }
+
+ private static final class RecordingCache implements ResumeCache {
+  final List<String> events = new ArrayList<>();
+  boolean fail;
+  public void put(Resume resume){ if (fail) throw new IllegalStateException("cache down"); events.add("put:"+resume.getId()); }
+  public void evict(String key){ if (fail) throw new IllegalStateException("cache down"); events.add("evict:"+key); }
  }
 }

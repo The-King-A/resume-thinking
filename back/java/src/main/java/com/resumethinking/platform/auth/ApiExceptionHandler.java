@@ -1,7 +1,13 @@
 package com.resumethinking.platform.auth;
 import com.resumethinking.platform.profiles.ResourceNotFoundException; import com.resumethinking.platform.resumes.VersionConflictException; import com.resumethinking.platform.resumes.InvalidConfirmationException; import jakarta.persistence.OptimisticLockException; import org.springframework.dao.OptimisticLockingFailureException; import org.springframework.orm.ObjectOptimisticLockingFailureException; import org.springframework.http.*; import org.springframework.web.bind.annotation.*; import org.springframework.web.bind.MethodArgumentNotValidException; import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException; import org.springframework.http.converter.HttpMessageNotReadableException; import java.util.*;
+import com.resumethinking.platform.matching.*;
 @RestControllerAdvice public class ApiExceptionHandler {
  @ExceptionHandler(DuplicateResourceException.class) ResponseEntity<ApiError> duplicate(){return error(HttpStatus.CONFLICT,"DUPLICATE_RESOURCE");}
+ @ExceptionHandler(IdempotencyConflictException.class) ResponseEntity<ApiError> idempotencyConflict(){return error(HttpStatus.CONFLICT,"IDEMPOTENCY_CONFLICT");}
+ @ExceptionHandler(TaskGoneException.class) ResponseEntity<ApiError> taskGone(){return error(HttpStatus.GONE,"TASK_GONE");}
+ @ExceptionHandler(TaskNotReadyException.class) ResponseEntity<ApiError> taskNotReady(){return error(HttpStatus.CONFLICT,"TASK_NOT_READY");}
+ @ExceptionHandler(StaleAttemptException.class) ResponseEntity<ApiError> staleAttempt(){return error(HttpStatus.CONFLICT,"STALE_ATTEMPT");}
+ @ExceptionHandler(EvidenceReferenceException.class) ResponseEntity<ApiError> evidenceReference(){return error(HttpStatus.BAD_REQUEST,"MODEL_OUTPUT_INVALID");}
  @ExceptionHandler(AuthenticationException.class) ResponseEntity<ApiError> auth(){return error(HttpStatus.UNAUTHORIZED,"AUTHENTICATION_REQUIRED");}
  @ExceptionHandler(ResourceNotFoundException.class) ResponseEntity<ApiError> notFound(){return error(HttpStatus.NOT_FOUND,"RESOURCE_NOT_FOUND");}
  @ExceptionHandler(VersionConflictException.class) ResponseEntity<ApiError> versionConflict(){return error(HttpStatus.CONFLICT,"VERSION_CONFLICT");}
