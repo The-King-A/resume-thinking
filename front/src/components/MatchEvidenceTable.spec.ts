@@ -1,0 +1,26 @@
+// @vitest-environment jsdom
+import { mount } from '@vue/test-utils'
+import { describe, expect, it } from 'vitest'
+import MatchEvidenceTable from './MatchEvidenceTable.vue'
+
+describe('MatchEvidenceTable', () => {
+  it('shows every evidence field and keeps insufficient evidence non-positive', () => {
+    const wrapper = mount(MatchEvidenceTable, { props: { requirements: [{
+      requirementId: 'requirement-1', requirementText: 'Production Redis experience', requirementType: 'MANDATORY',
+      matchStatus: 'RELATED_BUT_EVIDENCE_INSUFFICIENT', matchType: 'RELATED', component: 'WORK_CONTENT', componentScore: 0.35,
+      evidence: [{ id: 'evidence-1', sourceType: 'DOCX', sourceLocation: 'Projects / paragraph 2', sourceStart: 120, sourceEnd: 164, excerpt: 'Used a cache in a course project', confidence: 0.62, strength: 'LOW' }],
+      gap: 'No production context is evidenced.', suggestionState: 'NEEDS_USER_CONFIRMATION',
+    }] } })
+
+    for (const heading of ['Requirement', 'Evidence', 'Location', 'Type', 'Score', 'Strength', 'Gap']) expect(wrapper.text()).toContain(heading)
+    expect(wrapper.text()).toContain('Production Redis experience')
+    expect(wrapper.text()).toContain('requirement-1')
+    expect(wrapper.text()).toContain('Used a cache in a course project')
+    expect(wrapper.text()).toContain('Projects / paragraph 2')
+    expect(wrapper.text()).toContain('DOCX')
+    expect(wrapper.text()).toContain('evidence-1')
+    expect(wrapper.text()).toContain('Characters 120-164')
+    expect(wrapper.text()).toContain('35%')
+    expect(wrapper.get('tbody tr').attributes('data-positive')).toBe('false')
+  })
+})
