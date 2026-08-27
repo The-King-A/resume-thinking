@@ -11,7 +11,7 @@ class AuthServiceTest {
     @Test
     void registersSelectedAdminRoleWithoutPersistingPlaintextPassword() {
         var repository = new InMemoryUserRepository();
-        var authService = new AuthService(repository, new BCryptPasswordEncoder(), new JwtService("test-signing-key-test-signing-key-test-signing-key"));
+        var authService = new AuthService(repository, new BCryptPasswordEncoder(), new JwtService("MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI="));
 
         var result = authService.register(new RegisterCommand("admin1", "admin1@example.test", "StrongPassphrase1", UserRole.ADMIN));
 

@@ -9,9 +9,9 @@ import org.springframework.beans.factory.annotation.Value; import org.springfram
 public class JwtService {
     private final byte[] key; private final long ttl;
     public JwtService(@Value("${app.jwt-signing-key-base64:}") String configured) {
-        String value = configured == null || configured.isBlank() ? "resume-platform-development-signing-key-please-configure" : configured;
-        byte[] decoded; try { decoded = Base64.getDecoder().decode(value); } catch (IllegalArgumentException e) { decoded = value.getBytes(StandardCharsets.UTF_8); }
-        if (decoded.length < 32) decoded = Arrays.copyOf(decoded, 32); this.key = decoded; this.ttl = 3600;
+        if (configured == null || configured.isBlank()) throw new IllegalStateException("app.jwt-signing-key-base64 must be configured");
+        try { this.key = Base64.getDecoder().decode(configured); } catch (IllegalArgumentException e) { throw new IllegalStateException("app.jwt-signing-key-base64 must be valid base64", e); }
+        if (key.length != 32) throw new IllegalStateException("app.jwt-signing-key-base64 must decode to 256 bits"); this.ttl = 3600;
     }
     public String issue(User user) { long now = Instant.now().getEpochSecond(); String h = b64("{\"alg\":\"HS256\",\"typ\":\"JWT\"}"); String p = b64("{\"sub\":\""+user.getId()+"\",\"role\":\""+user.getRole()+"\",\"iat\":"+now+",\"exp\":"+(now+ttl)+"}"); return h+"."+p+"."+sign(h+"."+p); }
     public long expiresInSeconds() { return ttl; }

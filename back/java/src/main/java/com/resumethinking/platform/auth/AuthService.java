@@ -18,5 +18,6 @@ public class AuthService {
         if (!encoder.matches(command.password(), user.getPasswordHash())) throw new AuthenticationException();
         return result(user);
     }
+    public User current(java.util.UUID id) { return users.findById(id).orElseThrow(com.resumethinking.platform.profiles.ResourceNotFoundException::new); }
     private AuthResult result(User user) { long expires = jwt.expiresInSeconds(); return new AuthResult(user.getId(), user.getUsername(), user.getEmail(), user.getRole(), jwt.issue(user), "Bearer", expires, user.getCreatedAt()); }
 }
