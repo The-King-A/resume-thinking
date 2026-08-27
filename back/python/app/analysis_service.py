@@ -18,6 +18,24 @@ def _hash_payload(payload: dict) -> str:
     return hashlib.sha256(rfc8785.dumps(body)).hexdigest()
 
 
+def _finalize_callback(callback: dict, callback_base: dict) -> dict:
+    """Hash and return the exact schema-shaped object that will be sent."""
+    try:
+        payload = Callback.model_validate({**callback, "payloadHash": "0" * 64}).model_dump(by_alias=True, mode="json", exclude_none=True)
+        payload["payloadHash"] = _hash_payload(payload)
+        return Callback.model_validate(payload).model_dump(by_alias=True, mode="json", exclude_none=True)
+    except (ValueError, TypeError, UnicodeError):
+        payload = {
+            **callback_base,
+            "outcome": "FAILED",
+            "errorCode": "MODEL_OUTPUT_INVALID",
+            "payloadHash": "0" * 64,
+        }
+        payload = Callback.model_validate(payload).model_dump(by_alias=True, mode="json", exclude_none=True)
+        payload["payloadHash"] = _hash_payload(payload)
+        return payload
+
+
 def _redacted_range(text: str, redaction, start: int, end: int) -> str:
     chunks: list[str] = []
     cursor = start
@@ -56,13 +74,16 @@ async def analyze_job(job: AnalysisJob | dict) -> dict:
             safe_excerpt = _redacted_range(extracted.text, redacted, allowed.source_start, allowed.source_end)
             evidence_payload.append({"evidenceId": str(allowed.evidence_id), "sourceLocation": allowed.source_location, "sourceStart": allowed.source_start, "sourceEnd": allowed.source_end, "excerpt": safe_excerpt})
         request = AnalysisRequest(resumeText=redacted.redacted_text, jobDescriptionText=redacted_job.redacted_text, evidence=evidence_payload)
-        result = await OpenAICompatibleClient(job.provider).complete_structured(request)
+        result = await OpenAICompatibleClient(job.provider, blocked_secrets=(job.callback_token,)).complete_structured(request)
         allowed_ids = {e.evidence_id for e in job.allowed_evidence}
         requirement_ids = {req.requirement_id for req in result.requirements}
         for req in result.requirements:
             for evidence in req.evidence:
                 allowed = next((item for item in job.allowed_evidence if item.evidence_id == evidence.evidence_id), None)
-                if allowed is None or not (allowed.source_start <= evidence.source_start <= evidence.source_end <= allowed.source_end):
+                if allowed is None or not (allowed.source_start <= evidence.source_start < evidence.source_end <= allowed.source_end):
+                    raise ModelOutputInvalid("model output invalid")
+                expected_excerpt = _redacted_range(extracted.text, redacted, evidence.source_start, evidence.source_end)
+                if evidence.excerpt != expected_excerpt:
                     raise ModelOutputInvalid("model output invalid")
         for suggestion in result.suggestions:
             if suggestion.requirement_id not in requirement_ids or any(eid not in allowed_ids for eid in suggestion.evidence_ids):
@@ -79,9 +100,4 @@ async def analyze_job(job: AnalysisJob | dict) -> dict:
         callback = {**callback_base, "outcome": "FAILED", "errorCode": "MODEL_ENDPOINT_REJECTED"}
     except (ModelOutputInvalid, ValueError, AttributeError):
         callback = {**callback_base, "outcome": "FAILED", "errorCode": "MODEL_OUTPUT_INVALID"}
-    try:
-        callback["payloadHash"] = _hash_payload(callback)
-    except (ValueError, TypeError, UnicodeError):
-        callback = {**callback_base, "outcome": "FAILED", "errorCode": "MODEL_OUTPUT_INVALID"}
-        callback["payloadHash"] = _hash_payload(callback)
-    return Callback.model_validate(callback).model_dump(by_alias=True, mode="json")
+    return _finalize_callback(callback, callback_base)

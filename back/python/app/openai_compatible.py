@@ -10,6 +10,7 @@ import httpx
 from pydantic import ValidationError
 
 from .models import AnalysisRequest, AnalysisResult, Provider
+from .redaction import redact_text
 from .settings import settings
 
 
@@ -26,9 +27,16 @@ class ModelEndpointRejected(Exception):
 
 
 class OpenAICompatibleClient:
-    def __init__(self, provider: Provider | dict[str, Any], *, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        provider: Provider | dict[str, Any],
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        blocked_secrets: tuple[str, ...] = (),
+    ):
         self.provider = provider if isinstance(provider, Provider) else Provider.model_validate(provider)
         self.transport = transport
+        self.blocked_secrets = tuple(secret for secret in blocked_secrets if secret)
         self._validate_endpoint(self.provider.base_url)
 
     @staticmethod
@@ -61,13 +69,35 @@ class OpenAICompatibleClient:
                     addresses = [ipaddress.ip_address(item[4][0]) for item in resolved]
                 except (OSError, ValueError, UnicodeError) as exc:
                     raise ModelEndpointRejected("provider endpoint rejected") from exc
-            if not addresses or any(not item.is_global for item in addresses):
+            if not addresses or any(
+                not item.is_global
+                or item.is_multicast
+                or item.is_unspecified
+                or item.is_reserved
+                for item in addresses
+            ):
                 raise ModelEndpointRejected("provider endpoint rejected")
         else:
             raise ModelEndpointRejected("provider endpoint rejected")
 
     async def complete_structured(self, request: AnalysisRequest | dict[str, Any]) -> AnalysisResult:
         req = request if isinstance(request, AnalysisRequest) else AnalysisRequest.model_validate(request)
+
+        def sanitize(value: str) -> str:
+            redacted = redact_text(value).redacted_text
+            for secret in (self.provider.api_key, *self.blocked_secrets):
+                redacted = redacted.replace(secret, "[REDACTED_SECRET]")
+            return redacted
+
+        safe_evidence = [
+            evidence.model_copy(update={"excerpt": sanitize(evidence.excerpt)})
+            for evidence in req.evidence
+        ]
+        req = req.model_copy(update={
+            "resume_text": sanitize(req.resume_text),
+            "job_description_text": sanitize(req.job_description_text),
+            "evidence": safe_evidence,
+        })
         base = self.provider.base_url.rstrip("/")
         payload = {"model": self.provider.model, "messages": [{"role": "user", "content": req.model_dump_json(by_alias=True)}], "response_format": {"type": "json_object"}}
         timeout = httpx.Timeout(settings.read_timeout, connect=settings.connect_timeout)

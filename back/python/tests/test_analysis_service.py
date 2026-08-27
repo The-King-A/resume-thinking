@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from app.analysis_service import analyze_job
 from app.models import AnalysisJob, AnalysisResult
+from app.analysis_service import _hash_payload
 
 
 class CapturingClient:
@@ -86,6 +87,34 @@ async def test_evidence_source_location_must_match(monkeypatch):
 @pytest.mark.asyncio
 async def test_composite_score_must_match_frozen_weights(monkeypatch):
     monkeypatch.setattr("app.analysis_service.OpenAICompatibleClient", WrongCompositeClient)
+    callback = await analyze_job(_job("alpha", 0, 5))
+    assert callback["outcome"] == "FAILED"
+    assert callback["errorCode"] == "MODEL_OUTPUT_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_callback_hash_covers_exact_schema_payload(monkeypatch):
+    monkeypatch.setattr("app.analysis_service.OpenAICompatibleClient", CapturingClient)
+    callback = await analyze_job(_job("alpha", 0, 5))
+    assert "errorCode" not in callback
+    assert "result" in callback
+    assert callback["payloadHash"] == _hash_payload(callback)
+
+
+@pytest.mark.asyncio
+async def test_model_evidence_must_have_non_empty_range_and_rebuilt_excerpt(monkeypatch):
+    class InvalidEvidenceClient(CapturingClient):
+        async def complete_structured(self, request):
+            return AnalysisResult.model_validate({
+                "score": {"skills": 0, "projectExperience": 0, "workContent": 0, "educationExperience": 0, "softSkills": 0, "composite": 0},
+                "requirements": [{
+                    "requirementId": str(uuid4()), "jobRequirementText": "x", "requirementType": "MANDATORY",
+                    "matchStatus": "SATISFIED", "matchType": "EXACT", "component": "SKILLS", "componentScore": 0,
+                    "evidence": [{"evidenceId": request.evidence[0].evidence_id, "sourceStart": 0, "sourceEnd": 0, "excerpt": "forged", "confidence": 1}],
+                    "evidenceStrength": "HIGH", "gap": None, "suggestionState": "NEEDS_USER_CONFIRMATION",
+                }], "suggestions": [],
+            })
+    monkeypatch.setattr("app.analysis_service.OpenAICompatibleClient", InvalidEvidenceClient)
     callback = await analyze_job(_job("alpha", 0, 5))
     assert callback["outcome"] == "FAILED"
     assert callback["errorCode"] == "MODEL_OUTPUT_INVALID"

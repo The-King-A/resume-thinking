@@ -22,7 +22,7 @@ class CallbackClient:
             try:
                 async with httpx.AsyncClient(timeout=timeout, transport=self.transport) as client:
                     response = await client.post(url, json=callback)
-            except (httpx.TimeoutException, httpx.NetworkError):
+            except httpx.TransportError:
                 response = None
             if response is not None:
                 if 200 <= response.status_code < 300:

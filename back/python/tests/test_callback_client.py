@@ -28,3 +28,18 @@ async def test_callback_stops_on_task_gone():
 
     assert not await CallbackClient(transport=httpx.MockTransport(handler), attempts=3).post("http://127.0.0.1/callback", {})
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_callback_retries_protocol_transport_errors():
+    calls = 0
+
+    async def handler(_request):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.ProtocolError("connection dropped")
+        return httpx.Response(200)
+
+    assert await CallbackClient(transport=httpx.MockTransport(handler), attempts=2, backoff_seconds=0).post("http://127.0.0.1/callback", {})
+    assert calls == 2
