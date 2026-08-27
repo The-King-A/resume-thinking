@@ -86,7 +86,9 @@ public class MatchTaskService {
 
     @Transactional(readOnly = true)
     public MatchTask getTask(UUID taskId, UUID actorId, UserRole role) {
-        return tasks.findById(taskId).filter(t -> role == UserRole.ADMIN || t.getCreatorId().equals(actorId)).orElseThrow(ResourceNotFoundException::new);
+        MatchTask task = tasks.findById(taskId).filter(t -> role == UserRole.ADMIN || t.getCreatorId().equals(actorId)).orElseThrow(ResourceNotFoundException::new);
+        if (task.getState() == MatchTask.State.BLOCKED) throw new TaskGoneException();
+        return task;
     }
     @Transactional(readOnly = true)
     public AnalysisResult getResult(UUID taskId, UUID actorId, UserRole role) {

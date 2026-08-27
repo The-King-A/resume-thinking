@@ -9,8 +9,10 @@ import java.time.*;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MatchTaskServiceTest {
     private final UUID userId = UUID.randomUUID();
@@ -49,6 +51,16 @@ class MatchTaskServiceTest {
                 "Build reliable software with clear communication and practical testing.", "plain-key-0000001"));
         assertThat(new String(java.util.Base64.getDecoder().decode(capture.job.document().contentBase64()), StandardCharsets.UTF_8)).isEqualTo("Java\nTesting");
         assertThat(capture.job.allowedEvidence()).allSatisfy(e -> assertThat(e.sourceEnd()).isLessThanOrEqualTo(12));
+    }
+
+    @Test
+    void blockedTaskIsGoneFromTaskAndResultReads() {
+        var resumes = new ResumeRepository.InMemory();
+        var resume = Resume.active(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER, Instant.now(), 0L); resumes.save(resume);
+        var task = new MatchTask(UUID.randomUUID(), resumeId, profileId, userId, 0L, "Build reliable software with clear communication and practical testing.", "blocked-key-00001", "token-token-token-token-token-token", Set.of(UUID.randomUUID()), Instant.now()); task.markBlocked();
+        var repo = new MatchTaskRepository.InMemory(); repo.save(task);
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()), null, repo, new PythonAnalysisClient.Noop());
+        assertThatThrownBy(() -> service.getTask(task.id(), userId, UserRole.USER)).isInstanceOf(TaskGoneException.class);
     }
 
     private static final class CapturingClient extends PythonAnalysisClient {
