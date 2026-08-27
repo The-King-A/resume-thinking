@@ -18,9 +18,10 @@ class InternalAnalysisCallbackControllerTest {
         Resume resume = Resume.active(resumeId, owner, "CV", Resume.SourceType.TXT, UserRole.USER,
                 Instant.parse("2026-01-01T00:00:00Z"), 0L);
         resumes.save(resume);
-        var lifecycle = new ResumeLifecycleService(resumes, new ResumeCache.InMemory(), new ResumeAuditRepository.InMemory(),
-                Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
         var taskRepo = new MatchTaskRepository.InMemory();
+        var lifecycle = new ResumeLifecycleService(resumes, new ResumeCache.InMemory(), new ResumeAuditRepository.InMemory(),
+                Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC),
+                new MatchTaskResumeTaskBlocker(taskRepo));
         var resultRepo = new AnalysisResultRepository.InMemory();
         var service = new MatchTaskService(lifecycle, null, taskRepo, new PythonAnalysisClient.Noop(), resultRepo);
         var task = service.createTask(new CreateMatchTaskCommand(owner, resumeId, UUID.randomUUID(),
@@ -28,9 +29,40 @@ class InternalAnalysisCallbackControllerTest {
         task.markProcessing();
         lifecycle.archiveDue(Instant.parse("2026-01-08T00:00:00Z"));
 
+        assertThat(task.getState()).isEqualTo(MatchTask.State.BLOCKED);
+
         var response = new InternalAnalysisCallbackController(service).accept(new AnalysisCallbackRequest(
-                task.id(), 1, UUID.randomUUID(), task.callbackTokenForTests(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "SUCCEEDED", null, null, UUID.randomUUID()));
+                task.id(), 1, UUID.randomUUID(), task.callbackTokenForTests(), "",
+                "FAILED", null, "MODEL_UNAVAILABLE", UUID.randomUUID()).withComputedPayloadHash());
+
+        assertThat(response.code()).isEqualTo("TASK_GONE");
+        assertThat(resultRepo.countByTaskId(task.id())).isZero();
+    }
+
+    @Test
+    void callbackAfterSoftDeleteIsBlockedImmediatelyAndCannotPersistResult() {
+        UUID owner = UUID.randomUUID();
+        UUID resumeId = UUID.randomUUID();
+        Instant createdAt = Instant.parse("2026-01-01T00:00:00Z");
+        ResumeRepository resumes = new ResumeRepository.InMemory();
+        Resume resume = Resume.active(resumeId, owner, "CV", Resume.SourceType.TXT, UserRole.USER,
+                createdAt, 0L);
+        resumes.save(resume);
+        var taskRepo = new MatchTaskRepository.InMemory();
+        var lifecycle = new ResumeLifecycleService(resumes, new ResumeCache.InMemory(), new ResumeAuditRepository.InMemory(),
+                Clock.fixed(createdAt, ZoneOffset.UTC), new MatchTaskResumeTaskBlocker(taskRepo));
+        var resultRepo = new AnalysisResultRepository.InMemory();
+        var service = new MatchTaskService(lifecycle, null, taskRepo, new PythonAnalysisClient.Noop(), resultRepo);
+        var task = service.createTask(new CreateMatchTaskCommand(owner, resumeId, UUID.randomUUID(),
+                "Build reliable software with clear communication and practical testing.", "delete-key-0000001"));
+
+        lifecycle.softDelete(new DeleteResumeCommand(resumeId, owner, UserRole.USER,
+                ResumeLifecycleService.CONFIRMATION, resume.getVersion()));
+
+        assertThat(task.getState()).isEqualTo(MatchTask.State.BLOCKED);
+        var response = service.acceptCallback(new AnalysisCallbackRequest(
+                task.id(), 1, UUID.randomUUID(), task.callbackTokenForTests(), "",
+                "FAILED", null, "MODEL_UNAVAILABLE", UUID.randomUUID()).withComputedPayloadHash());
 
         assertThat(response.code()).isEqualTo("TASK_GONE");
         assertThat(resultRepo.countByTaskId(task.id())).isZero();

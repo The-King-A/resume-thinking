@@ -17,6 +17,7 @@ export interface LlmProfile { id: string; displayName: string; endpointUrl: stri
 export interface LlmProfileTestResponse { available: boolean; testedAt: string; models?: string[]; diagnostic?: string | null }
 
 export type SourceType = 'TXT' | 'DOCX'
+export type JobFamily = 'JAVA_BACKEND'
 export type VisibilityState = 'ACTIVE' | 'USER_SOFT_DELETED' | 'ADMIN_SOFT_DELETED' | 'USER_CACHE_ARCHIVED' | 'ADMIN_CACHE_ARCHIVED'
 export type TaskState = 'QUEUED' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED' | 'TIMED_OUT' | 'BLOCKED'
 export type RequirementType = 'MANDATORY' | 'PREFERRED'
@@ -44,11 +45,12 @@ export interface Resume {
 export interface ResumePage { items: Resume[]; page: number; pageSize: number; totalItems: number; totalPages: number }
 export interface DeleteResumeRequest { confirmationText: '确认删除简历'; expectedVersion: number }
 export interface RestoreResumeRequest { expectedVersion: number }
-export interface CreateMatchTaskRequest { resumeId: string; llmProfileId: string; jobDescriptionText: string; idempotencyKey: string }
+export interface CreateMatchTaskRequest { resumeId: string; llmProfileId: string; jobFamily: JobFamily; jobDescriptionText: string; idempotencyKey: string }
 export interface MatchTask {
   id: string
   resumeId: string
   llmProfileId: string
+  jobFamily: JobFamily
   state: TaskState
   attempt: number
   resumeVersion: number

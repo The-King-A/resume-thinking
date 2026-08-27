@@ -1,6 +1,8 @@
 package com.resumethinking.platform.matching;
 
 import java.util.Optional;
+import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Repository;
 
@@ -20,4 +22,7 @@ public class JpaMatchTaskRepository implements MatchTaskRepository {
         return delegate.findByCreatorIdAndIdempotencyKey(owner, key);
     }
     @Override public Optional<MatchTask> findByIdForUpdate(UUID id) { return delegate.findByIdForUpdate(id); }
+    @Override public List<MatchTask> findByResumeIdAndStateInForUpdate(UUID resumeId, Collection<MatchTask.State> states) {
+        return delegate.findByResumeIdAndStateInForUpdate(resumeId, states);
+    }
 }

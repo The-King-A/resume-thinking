@@ -26,6 +26,22 @@ class ModelEndpointRejected(Exception):
     code = "MODEL_ENDPOINT_REJECTED"
 
 
+def _sanitize_model_value(value: Any, secrets: tuple[str, ...]) -> Any:
+    """Redact sensitive strings in provider output before it crosses the boundary."""
+    if isinstance(value, str):
+        safe = redact_text(value).redacted_text
+        for secret in secrets:
+            safe = safe.replace(secret, "[REDACTED_SECRET]")
+        return safe
+    if isinstance(value, dict):
+        return {key: _sanitize_model_value(item, secrets) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_model_value(item, secrets) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_model_value(item, secrets) for item in value)
+    return value
+
+
 class OpenAICompatibleClient:
     def __init__(
         self,
@@ -101,6 +117,10 @@ class OpenAICompatibleClient:
         base = self.provider.base_url.rstrip("/")
         payload = {"model": self.provider.model, "messages": [{"role": "user", "content": req.model_dump_json(by_alias=True)}], "response_format": {"type": "json_object"}}
         timeout = httpx.Timeout(settings.read_timeout, connect=settings.connect_timeout)
+        # Resolve and classify the provider again immediately before egress.
+        # The constructor check protects configuration, while this check
+        # limits the DNS-rebinding window between validation and the request.
+        self._validate_endpoint(self.provider.base_url)
         try:
             async with httpx.AsyncClient(timeout=timeout, transport=self.transport) as client:
                 response = await client.post(f"{base}/chat/completions", headers={"Authorization": f"Bearer {self.provider.api_key}", "Content-Type": "application/json"}, json=payload, follow_redirects=False)
@@ -114,7 +134,11 @@ class OpenAICompatibleClient:
             body = response.json()
             content = body.get("choices", [{}])[0].get("message", {}).get("content", body)
             parsed = json.loads(content) if isinstance(content, str) else content
-            return AnalysisResult.model_validate(parsed)
+            safe_parsed = _sanitize_model_value(
+                parsed,
+                (self.provider.api_key, *self.blocked_secrets),
+            )
+            return AnalysisResult.model_validate(safe_parsed)
         except (ValueError, KeyError, IndexError, TypeError, AttributeError, ValidationError, json.JSONDecodeError) as exc:
             raise ModelOutputInvalid("model output invalid") from exc
 

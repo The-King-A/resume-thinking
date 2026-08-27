@@ -112,6 +112,13 @@ archived data from MySQL. Recovery is an explicit, indexed, owner- or
 administrator-scoped query. Physical database deletion has no public API and
 is an operator-only direct MySQL procedure.
 
+`USER_CACHE_ARCHIVED` and `ADMIN_CACHE_ARCHIVED` are cache-expiry archive
+states, not soft-deleted states. A record in either state has no Redis view,
+keeps `status = 0`, and cannot be soft-deleted again through any page/API
+delete route. It must first be explicitly restored by its owner (`USER`) or an
+administrator (`ADMIN`) according to the authorization rules above; only after
+that restore returns it to `ACTIVE` may a subsequent delete be requested.
+
 Every successful restore recomputes `visible_until` from the restore timestamp
 and the original creator role: seven days for a `USER` creator and thirty days
 for an `ADMIN` creator. A restored record therefore cannot immediately
@@ -219,6 +226,7 @@ pnpm --dir contracts run lint
 ```
 
 Task 2 adds a validator and shared fixtures for valid registration/profile/task
-requests, invalid matching input, valid/duplicate/stale/deleted callbacks, both
-archive policies, and the error envelope. Java and Python tests consume those
-same fixtures; they do not hand-maintain competing examples.
+requests, a valid internal analysis job, invalid matching input,
+valid/duplicate/stale/deleted callbacks, both archive policies, and the error
+envelope. Java and Python tests consume those same fixtures; they do not
+hand-maintain competing examples.

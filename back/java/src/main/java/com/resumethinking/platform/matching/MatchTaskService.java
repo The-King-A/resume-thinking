@@ -22,6 +22,16 @@ import java.util.*;
 
 @Service
 public class MatchTaskService {
+    // DOCX is a ZIP container. Bound both the metadata surface and the
+    // uncompressed bytes consumed from it so a tiny compressed payload cannot
+    // force an unbounded allocation or decompression pass.
+    private static final int MAX_DOCX_ENTRY_COUNT = 256;
+    private static final long MAX_DOCX_ENTRY_UNCOMPRESSED_BYTES = 8L * 1024 * 1024;
+    private static final long MAX_DOCX_ENTRY_COMPRESSED_BYTES = 8L * 1024 * 1024;
+    private static final long MAX_DOCX_XML_BYTES = 8L * 1024 * 1024;
+    private static final long MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES = 16L * 1024 * 1024;
+    private static final int DOCX_READ_BUFFER_BYTES = 8192;
+
     private final ResumeLifecycleService lifecycle;
     private final LlmProfileService profiles;
     private final MatchTaskRepository tasks;
@@ -95,7 +105,7 @@ public class MatchTaskService {
         List<EvidenceSpec> evidenceSpecs = evidenceSpecs(reservation.sourceType(), documentBytes);
         Set<UUID> evidenceIds = evidenceSpecs.stream().map(EvidenceSpec::id).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         MatchTask task = new MatchTask(UUID.randomUUID(), reservation.resumeId(), command.llmProfileId(), command.actorId(), reservation.resumeVersion(),
-                command.jobDescriptionText(), command.idempotencyKey(), callbackToken, evidenceIds, Instant.now());
+                command.jobFamily(), command.jobDescriptionText(), command.idempotencyKey(), callbackToken, evidenceIds, Instant.now());
         tasks.saveAndFlush(task);
         evidenceSpecs.forEach(e -> evidenceRepository.save(new AnalysisEvidence(e.id(), task.getId(), reservation.sourceType().name(), e.location(), e.start(), e.end(), e.excerpt())));
         task.markProcessing();
@@ -105,6 +115,7 @@ public class MatchTaskService {
             var source = reservation.sourceType().name();
             var allowed = evidenceSpecs.stream().map(e -> new PythonAnalysisClient.AllowedEvidence(e.id(), e.location(), e.start(), e.end())).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
             var job = new PythonAnalysisClient.InternalAnalysisJob(task.getId(), task.getAttempt(), task.getResumeVersion(), source,
+                    command.jobFamily(),
                     new PythonAnalysisClient.Document(Base64.getEncoder().encodeToString(documentBytes), "resume." + source.toLowerCase(Locale.ROOT)),
                     allowed, command.jobDescriptionText(), true, callbackUri(), callbackToken,
                     new PythonAnalysisClient.Provider(profile.baseUrl(), profile.model(), profile.apiKey()), UUID.randomUUID());
@@ -122,6 +133,7 @@ public class MatchTaskService {
 
     private void validateCreateCommand(CreateMatchTaskCommand command) {
         if (command == null || command.actorId() == null || command.resumeId() == null || command.llmProfileId() == null
+                || command.jobFamily() == null
                 || command.jobDescriptionText() == null || command.jobDescriptionText().length() < 20 || command.jobDescriptionText().length() > 20_000
                 || command.idempotencyKey() == null || command.idempotencyKey().length() < 16 || command.idempotencyKey().length() > 128) throw new IllegalArgumentException("VALIDATION_ERROR");
     }
@@ -137,6 +149,7 @@ public class MatchTaskService {
     public MatchTask getTask(UUID taskId, UUID actorId, UserRole role) {
         MatchTask task = tasks.findById(taskId).filter(t -> role == UserRole.ADMIN || t.getCreatorId().equals(actorId)).orElseThrow(ResourceNotFoundException::new);
         if (task.getState() == MatchTask.State.BLOCKED) throw new TaskGoneException();
+        if (!lifecycle.isActiveAtVersion(task.getResumeId(), task.getResumeVersion())) throw new TaskGoneException();
         return task;
     }
     @Transactional(readOnly = true)
@@ -178,12 +191,19 @@ public class MatchTaskService {
         if (computedPayloadHash == null) return CallbackResponse.error("VALIDATION_ERROR");
         final boolean hashMatches = request.payloadHash().equals(computedPayloadHash);
 
-        // Lock task and resume before consulting the receipt.  This prevents a
-        // reused callback ID from bypassing token, attempt, or visibility checks.
+        // Lock resume and task in the same order as soft-delete/archive.  The
+        // first task read is deliberately unlocked and only supplies the
+        // immutable resume identity; the task is reloaded with a write lock
+        // before any state, token, or attempt decision is made.  Keeping one
+        // lock order prevents a delete holding the resume row from deadlocking
+        // with a late callback holding the task row.
+        MatchTask taskSnapshot = tasks.findById(request.taskId()).orElseThrow(TaskGoneException::new);
+        boolean resumeActive = lifecycle.lockActiveAtVersion(taskSnapshot.getResumeId(), taskSnapshot.getResumeVersion()).isPresent();
         MatchTask task = tasks.lockById(request.taskId()).orElseThrow(TaskGoneException::new);
         if (request.attempt() < task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
-        if (lifecycle.lockActiveAtVersion(task.getResumeId(), task.getResumeVersion()).isEmpty()) {
-            task.markBlocked(); tasks.saveAndFlush(task); return CallbackResponse.error("TASK_GONE");
+        if (!resumeActive) {
+            blockIfInFlight(task);
+            return CallbackResponse.error("TASK_GONE");
         }
         if (request.attempt() != task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
         if (!task.tokenMatches(request.callbackToken())) return CallbackResponse.error("TASK_GONE");
@@ -251,11 +271,12 @@ public class MatchTaskService {
             throw new IllegalStateException("callback receipt persistence failed", failure);
         }
 
+        MatchTask taskSnapshot = tasks.findById(request.taskId()).orElseThrow(TaskGoneException::new);
+        boolean resumeActive = lifecycle.lockActiveAtVersion(taskSnapshot.getResumeId(), taskSnapshot.getResumeVersion()).isPresent();
         MatchTask task = tasks.lockById(request.taskId()).orElseThrow(TaskGoneException::new);
         if (request.attempt() < task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
-        if (lifecycle.lockActiveAtVersion(task.getResumeId(), task.getResumeVersion()).isEmpty()) {
-            task.markBlocked();
-            tasks.saveAndFlush(task);
+        if (!resumeActive) {
+            blockIfInFlight(task);
             return CallbackResponse.error("TASK_GONE");
         }
         if (request.attempt() != task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
@@ -266,9 +287,16 @@ public class MatchTaskService {
                 ? CallbackResponse.acceptedReplay() : CallbackResponse.error("IDEMPOTENCY_CONFLICT");
     }
 
+    private void blockIfInFlight(MatchTask task) {
+        if (task.getState() == MatchTask.State.QUEUED || task.getState() == MatchTask.State.PROCESSING) {
+            task.markBlocked();
+            tasks.saveAndFlush(task);
+        }
+    }
+
     private static boolean validCallbackEnvelope(AnalysisCallbackRequest request) {
         return request != null && request.callbackId() != null && request.taskId() != null
-                && request.callbackToken() != null && request.callbackToken().length() >= 32
+                && request.callbackToken() != null && request.callbackToken().length() >= 32 && request.callbackToken().length() <= 1024
                 && request.correlationId() != null && request.attempt() >= 1;
     }
 
@@ -279,13 +307,40 @@ public class MatchTaskService {
 
     private void validateEvidence(MatchTask task, AnalysisCallbackRequest.AnalysisResultPayload result) {
         if (result == null || result.score() == null || result.requirements() == null || result.suggestions() == null) throw new EvidenceReferenceException();
-        for (var requirement : result.requirements()) for (var evidence : requirement.evidence()) validateEvidence(task, evidence);
+        String sourceText = null;
+        for (var requirement : result.requirements()) {
+            if (requirement == null || requirement.evidence() == null) throw new EvidenceReferenceException();
+            for (var evidence : requirement.evidence()) {
+                if (sourceText == null) sourceText = sourceTextForTask(task);
+                validateEvidence(task, evidence, sourceText);
+            }
+        }
         for (var suggestion : result.suggestions()) for (var id : suggestion.evidenceIds())
             if (evidenceRepository.findByTaskId(task.getId()).stream().noneMatch(e -> e.getId().equals(id))) throw new EvidenceReferenceException();
     }
-    private void validateEvidence(MatchTask task, AnalysisCallbackRequest.EvidenceReference evidence) {
+    private void validateEvidence(MatchTask task, AnalysisCallbackRequest.EvidenceReference evidence, String sourceText) {
         var allowed = evidence == null ? null : evidenceRepository.findByTaskId(task.getId()).stream().filter(e -> e.getId().equals(evidence.evidenceId())).findFirst().orElse(null);
-        if (evidence == null || allowed == null || evidence.sourceStart() < allowed.getSourceStart() || evidence.sourceEnd() <= evidence.sourceStart() || evidence.sourceEnd() > allowed.getSourceEnd() || evidence.excerpt() == null || evidence.excerpt().isBlank() || evidence.confidence() < 0 || evidence.confidence() > 1 || allowed.getSourceExcerpt() == null || !evidence.excerpt().equals(codePointSlice(allowed.getSourceExcerpt(), evidence.sourceStart() - allowed.getSourceStart(), evidence.sourceEnd() - allowed.getSourceStart()))) throw new EvidenceReferenceException();
+        int sourceLength = sourceText == null ? -1 : sourceText.codePointCount(0, sourceText.length());
+        if (evidence == null || allowed == null || allowed.getSourceStart() < 0 || allowed.getSourceEnd() <= allowed.getSourceStart() || allowed.getSourceEnd() > sourceLength || evidence.sourceStart() < allowed.getSourceStart() || evidence.sourceEnd() <= evidence.sourceStart() || evidence.sourceEnd() > allowed.getSourceEnd() || evidence.excerpt() == null || evidence.excerpt().isBlank() || evidence.excerpt().length() > 5000 || !Double.isFinite(evidence.confidence()) || evidence.confidence() < 0 || evidence.confidence() > 1) throw new EvidenceReferenceException();
+        String redactedExcerpt;
+        try { redactedExcerpt = ResumeTextRedactor.redactedSlice(sourceText, evidence.sourceStart(), evidence.sourceEnd()); }
+        catch (RuntimeException invalidRange) { throw new EvidenceReferenceException(); }
+        // Python always returns the redacted representation.  Requiring that
+        // exact value keeps PII out of the durable result and public response.
+        if (!evidence.excerpt().equals(redactedExcerpt)) throw new EvidenceReferenceException();
+    }
+    /** Decrypt the durable resume only inside the callback transaction. */
+    private String sourceTextForTask(MatchTask task) {
+        if (crypto == null) throw new EvidenceReferenceException();
+        Resume resume = lifecycle.findActiveForAnalysis(task.getResumeId(), task.getResumeVersion())
+                .orElseThrow(EvidenceReferenceException::new);
+        if (resume.getEncryptedRawContent() == null || resume.getRawContentNonce() == null) throw new EvidenceReferenceException();
+        final byte[] bytes;
+        try { bytes = normalizeDocumentBytes(resume.getSourceType(), crypto.decryptBytes(resume.getEncryptedRawContent(), resume.getRawContentNonce())); }
+        catch (RuntimeException invalidCiphertext) { throw new EvidenceReferenceException(); }
+        if (bytes.length == 0) throw new EvidenceReferenceException();
+        if (resume.getSourceType() == Resume.SourceType.TXT) return new String(bytes, StandardCharsets.UTF_8);
+        return String.join("\n", docxParagraphs(bytes));
     }
     private static void validateResultSchema(AnalysisCallbackRequest.AnalysisResultPayload result) {
         if (!finiteBetween(result.score().skills()) || !finiteBetween(result.score().projectExperience()) || !finiteBetween(result.score().workContent()) || !finiteBetween(result.score().educationExperience()) || !finiteBetween(result.score().softSkills()) || !finiteBetween(result.score().composite())) throw new EvidenceReferenceException();
@@ -299,14 +354,15 @@ public class MatchTaskService {
         if (Double.compare(expected, result.score().composite()) != 0) throw new EvidenceReferenceException();
         Set<UUID> requirementIds = new HashSet<>();
         for (var requirement : result.requirements()) {
-            if (requirement == null || requirement.requirementId() == null || blank(requirement.jobRequirementText()) || !Set.of("MANDATORY", "PREFERRED").contains(requirement.requirementType()) || !Set.of("SATISFIED", "PARTIALLY_SATISFIED", "RELATED_BUT_EVIDENCE_INSUFFICIENT", "UNMET").contains(requirement.matchStatus()) || !Set.of("EXACT", "SEMANTIC", "RELATED", "NO_MATCH").contains(requirement.matchType()) || !Set.of("SKILLS", "PROJECT_EXPERIENCE", "WORK_CONTENT", "EDUCATION_EXPERIENCE", "SOFT_SKILLS").contains(requirement.component()) || requirement.evidence() == null || !Set.of("NONE", "LOW", "MEDIUM", "HIGH").contains(requirement.evidenceStrength()) || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(requirement.suggestionState()) || !finiteBetween(requirement.componentScore())) throw new EvidenceReferenceException();
+            if (requirement == null || requirement.requirementId() == null || !safeText(requirement.jobRequirementText(), 20_000) || !Set.of("MANDATORY", "PREFERRED").contains(requirement.requirementType()) || !Set.of("SATISFIED", "PARTIALLY_SATISFIED", "RELATED_BUT_EVIDENCE_INSUFFICIENT", "UNMET").contains(requirement.matchStatus()) || !Set.of("EXACT", "SEMANTIC", "RELATED", "NO_MATCH").contains(requirement.matchType()) || !Set.of("SKILLS", "PROJECT_EXPERIENCE", "WORK_CONTENT", "EDUCATION_EXPERIENCE", "SOFT_SKILLS").contains(requirement.component()) || requirement.evidence() == null || !Set.of("NONE", "LOW", "MEDIUM", "HIGH").contains(requirement.evidenceStrength()) || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(requirement.suggestionState()) || !finiteBetween(requirement.componentScore()) || (requirement.gap() != null && (requirement.gap().length() > 5_000 || !ResumeTextRedactor.isRedacted(requirement.gap())))) throw new EvidenceReferenceException();
             if (("SATISFIED".equals(requirement.matchStatus()) || "PARTIALLY_SATISFIED".equals(requirement.matchStatus())) && requirement.evidence().isEmpty()) throw new EvidenceReferenceException();
             if (("SUPPORTED_FACT".equals(requirement.suggestionState()) || "WORDING_ONLY_REWRITE".equals(requirement.suggestionState())) && requirement.evidence().isEmpty()) throw new EvidenceReferenceException();
-            requirementIds.add(requirement.requirementId());
+            if (!requirementIds.add(requirement.requirementId())) throw new EvidenceReferenceException();
         }
-        for (var suggestion : result.suggestions()) if (suggestion == null || suggestion.suggestionId() == null || suggestion.requirementId() == null || !requirementIds.contains(suggestion.requirementId()) || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(suggestion.state()) || blank(suggestion.proposedText()) || suggestion.evidenceIds() == null || (("SUPPORTED_FACT".equals(suggestion.state()) || "WORDING_ONLY_REWRITE".equals(suggestion.state())) && suggestion.evidenceIds().isEmpty())) throw new EvidenceReferenceException();
+        for (var suggestion : result.suggestions()) if (suggestion == null || suggestion.suggestionId() == null || suggestion.requirementId() == null || !requirementIds.contains(suggestion.requirementId()) || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(suggestion.state()) || !safeText(suggestion.proposedText(), 5_000) || suggestion.evidenceIds() == null || (("SUPPORTED_FACT".equals(suggestion.state()) || "WORDING_ONLY_REWRITE".equals(suggestion.state())) && suggestion.evidenceIds().isEmpty())) throw new EvidenceReferenceException();
     }
     private static boolean blank(String value) { return value == null || value.isBlank(); }
+    private static boolean safeText(String value, int maxLength) { return value != null && !value.isBlank() && value.length() <= maxLength && ResumeTextRedactor.isRedacted(value); }
     private static boolean finiteBetween(double value) { return Double.isFinite(value) && value >= 0 && value <= 1; }
     private static String randomToken() { byte[] bytes = new byte[48]; new java.security.SecureRandom().nextBytes(bytes); return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes); }
     private static URI callbackUri() { return URI.create(System.getProperty("matching.callback-url", System.getProperty("app.matching-callback-url", System.getenv().getOrDefault("MATCHING_CALLBACK_URL", "http://127.0.0.1:8080/internal/v1/analysis-results")))); }
@@ -317,13 +373,6 @@ public class MatchTaskService {
                 .replace("\r\n", "\n")
                 .replace('\r', '\n');
         return normalized.getBytes(StandardCharsets.UTF_8);
-    }
-
-    private static String codePointSlice(String value, int start, int end) {
-        if (start < 0 || end < start || end > value.codePointCount(0, value.length())) throw new EvidenceReferenceException();
-        int charStart = value.offsetByCodePoints(0, start);
-        int charEnd = value.offsetByCodePoints(0, end);
-        return value.substring(charStart, charEnd);
     }
 
     private <T> T inWriteTransaction(java.util.function.Supplier<T> operation) {
@@ -355,36 +404,105 @@ public class MatchTaskService {
 
     private record EvidenceSpec(UUID id, String location, int start, int end, String excerpt) {}
     private static List<EvidenceSpec> evidenceSpecs(Resume.SourceType type, byte[] bytes) {
-        String text = new String(bytes, StandardCharsets.UTF_8); List<EvidenceSpec> out = new ArrayList<>();
+        String text; List<EvidenceSpec> out = new ArrayList<>();
         if (type == Resume.SourceType.TXT) {
-            text = text.replace("\r\n", "\n").replace('\r', '\n');
+            text = new String(bytes, StandardCharsets.UTF_8).replace("\r\n", "\n").replace('\r', '\n');
             int offset=0; String[] lines=text.split("\\n", -1);
             for (int i=0;i<lines.length;i++) {
                 int end=offset+lines[i].codePointCount(0, lines[i].length());
                 // Python rejects empty ranges; retain offsets across blank
                 // lines but only expose non-empty evidence slices.
-                if (end > offset) out.add(new EvidenceSpec(UUID.randomUUID(),"txt:"+i,offset,end,lines[i]));
+                if (end > offset) out.add(new EvidenceSpec(UUID.randomUUID(),"txt:"+i,offset,end,ResumeTextRedactor.redactedSlice(text, offset, end)));
                 offset=end+1;
             }
         } else {
-            List<String> paragraphs = docxParagraphs(bytes); int offset=0;
+            List<String> paragraphs = docxParagraphs(bytes); text = String.join("\n", paragraphs); int offset=0;
             for(int i=0;i<paragraphs.size();i++) {
                 int end=offset+paragraphs.get(i).codePointCount(0, paragraphs.get(i).length());
-                if (end > offset) out.add(new EvidenceSpec(UUID.randomUUID(),"paragraph:"+i,offset,end,paragraphs.get(i)));
+                if (end > offset) out.add(new EvidenceSpec(UUID.randomUUID(),"paragraph:"+i,offset,end,ResumeTextRedactor.redactedSlice(text, offset, end)));
                 offset=end+1;
             }
         }
         return out;
     }
-    private static boolean sameSubmission(MatchTask task, CreateMatchTaskCommand command) { return task.getResumeId().equals(command.resumeId()) && task.getLlmProfileId().equals(command.llmProfileId()) && task.getJobDescriptionText().equals(command.jobDescriptionText()); }
+    private static boolean sameSubmission(MatchTask task, CreateMatchTaskCommand command) { return task.getResumeId().equals(command.resumeId()) && task.getLlmProfileId().equals(command.llmProfileId()) && task.getJobFamily() == command.jobFamily() && task.getJobDescriptionText().equals(command.jobDescriptionText()); }
     private static List<String> docxParagraphs(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return List.of();
         try (var zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
-            ZipEntry entry; while ((entry = zip.getNextEntry()) != null) if ("word/document.xml".equals(entry.getName())) {
-                byte[] xml = zip.readAllBytes(); DocumentBuilderFactory f = DocumentBuilderFactory.newInstance(); f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true); f.setFeature("http://xml.org/sax/features/external-general-entities", false); f.setFeature("http://xml.org/sax/features/external-parameter-entities", false); f.setXIncludeAware(false); f.setExpandEntityReferences(false);
-                Document doc = f.newDocumentBuilder().parse(new ByteArrayInputStream(xml)); List<String> out = new ArrayList<>(); NodeList ps = doc.getElementsByTagNameNS("*", "p"); for (int i=0;i<ps.getLength();i++){StringBuilder s=new StringBuilder(); NodeList ts=((Element)ps.item(i)).getElementsByTagNameNS("*", "t"); for(int j=0;j<ts.getLength();j++) s.append(ts.item(j).getTextContent()); out.add(s.toString());} return out;
+            ZipEntry entry;
+            int entryCount = 0;
+            long totalUncompressed = 0;
+            while ((entry = zip.getNextEntry()) != null) {
+                if (++entryCount > MAX_DOCX_ENTRY_COUNT) throw new DocxLimitException();
+                long declaredCompressed = entry.getCompressedSize();
+                if (declaredCompressed >= 0 && declaredCompressed > MAX_DOCX_ENTRY_COMPRESSED_BYTES) {
+                    throw new DocxLimitException();
+                }
+                boolean documentXml = "word/document.xml".equals(entry.getName());
+                long entryLimit = documentXml ? MAX_DOCX_XML_BYTES : MAX_DOCX_ENTRY_UNCOMPRESSED_BYTES;
+                long declaredUncompressed = entry.getSize();
+                if (declaredUncompressed >= 0 && declaredUncompressed > entryLimit) {
+                    throw new DocxLimitException();
+                }
+                if (declaredUncompressed >= 0 && totalUncompressed > MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES - declaredUncompressed) {
+                    throw new DocxLimitException();
+                }
+                EntryBytes content = readEntryBounded(zip, entryLimit, totalUncompressed, documentXml);
+                totalUncompressed = content.totalUncompressed();
+                if (!documentXml) continue;
+
+                byte[] xml = content.bytes();
+                DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
+                f.setNamespaceAware(true);
+                f.setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true);
+                f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+                f.setFeature("http://xml.org/sax/features/external-general-entities", false);
+                f.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+                f.setXIncludeAware(false);
+                f.setExpandEntityReferences(false);
+                Document doc = f.newDocumentBuilder().parse(new ByteArrayInputStream(xml));
+                List<String> out = new ArrayList<>();
+                NodeList ps = doc.getElementsByTagNameNS("*", "p");
+                for (int i = 0; i < ps.getLength(); i++) {
+                    StringBuilder s = new StringBuilder();
+                    appendDocxText(ps.item(i), s);
+                    out.add(s.toString());
+                }
+                return out;
             }
         } catch (Exception ignored) {}
         return List.of();
+    }
+
+    private static EntryBytes readEntryBounded(ZipInputStream zip, long entryLimit,
+                                                long totalBefore, boolean collect) throws IOException {
+        long entryBytes = 0;
+        long total = totalBefore;
+        ByteArrayOutputStream output = collect ? new ByteArrayOutputStream((int) Math.min(entryLimit, 8192)) : null;
+        byte[] buffer = new byte[DOCX_READ_BUFFER_BYTES];
+        int read;
+        while ((read = zip.read(buffer)) != -1) {
+            entryBytes += read;
+            total += read;
+            if (entryBytes > entryLimit || total > MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES) {
+                throw new DocxLimitException();
+            }
+            if (collect) output.write(buffer, 0, read);
+        }
+        return new EntryBytes(collect ? output.toByteArray() : null, total);
+    }
+
+    private record EntryBytes(byte[] bytes, long totalUncompressed) {}
+    private static final class DocxLimitException extends IOException {}
+    private static void appendDocxText(Node node, StringBuilder out) {
+        if (node.getNodeType() == Node.ELEMENT_NODE) {
+            String name = node.getLocalName();
+            if ("t".equals(name) || "delText".equals(name)) { out.append(node.getTextContent()); return; }
+            if ("tab".equals(name)) { out.append('\t'); return; }
+            if ("br".equals(name) || "cr".equals(name)) { out.append('\n'); return; }
+        }
+        NodeList children = node.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) appendDocxText(children.item(i), out);
     }
     public record CallbackResponse(String code, boolean accepted) { static CallbackResponse ok(){return new CallbackResponse("ACCEPTED",true);} static CallbackResponse acceptedReplay(){return new CallbackResponse("ACCEPTED_REPLAY",true);} static CallbackResponse error(String c){return new CallbackResponse(c,false);} }
 }

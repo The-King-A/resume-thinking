@@ -7,8 +7,14 @@ from uuid import uuid4
 import rfc8785
 
 from .extraction import UnsupportedFile, extract_resume
-from .models import AnalysisJob, AnalysisRequest, Callback
-from .openai_compatible import OpenAICompatibleClient, ModelEndpointRejected, ModelOutputInvalid, ModelUnavailable
+from .models import AnalysisJob, AnalysisRequest, AnalysisResult, Callback
+from .openai_compatible import (
+    OpenAICompatibleClient,
+    ModelEndpointRejected,
+    ModelOutputInvalid,
+    ModelUnavailable,
+    _sanitize_model_value,
+)
 from .redaction import redact_text
 from .matching import composite_score
 
@@ -79,8 +85,16 @@ async def analyze_job(job: AnalysisJob | dict) -> dict:
                 raise ModelOutputInvalid("evidence range invalid")
             safe_excerpt = _redacted_range(extracted.text, redacted, allowed.source_start, allowed.source_end)
             evidence_payload.append({"evidenceId": str(allowed.evidence_id), "sourceLocation": allowed.source_location, "sourceStart": allowed.source_start, "sourceEnd": allowed.source_end, "excerpt": safe_excerpt})
-        request = AnalysisRequest(resumeText=redacted.redacted_text, jobDescriptionText=redacted_job.redacted_text, evidence=evidence_payload)
+        request = AnalysisRequest(jobFamily=job.job_family, resumeText=redacted.redacted_text, jobDescriptionText=redacted_job.redacted_text, evidence=evidence_payload)
         result = await OpenAICompatibleClient(job.provider, blocked_secrets=(job.callback_token,)).complete_structured(request)
+        # Keep the callback boundary safe even when the client implementation
+        # is replaced or a test double returns an unredacted model object.
+        result = AnalysisResult.model_validate(
+            _sanitize_model_value(
+                result.model_dump(by_alias=True, mode="json"),
+                (job.provider.api_key, job.callback_token),
+            )
+        )
         allowed_ids = {e.evidence_id for e in job.allowed_evidence}
         requirement_ids = {req.requirement_id for req in result.requirements}
         for req in result.requirements:

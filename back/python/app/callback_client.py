@@ -8,6 +8,17 @@ from .settings import is_allowed_callback_url, settings
 
 
 STOP_CODES = {"TASK_GONE", "STALE_ATTEMPT", "IDEMPOTENCY_CONFLICT"}
+_TOKEN_PLACEHOLDER_MARKERS = ("replace-with", "change-me", "placeholder")
+
+
+def _is_usable_internal_service_token(token: object) -> bool:
+    """Return whether the configured token is safe to use for internal egress."""
+    if not isinstance(token, str):
+        return False
+    normalized = token.strip()
+    if not normalized or normalized != token:
+        return False
+    return not any(marker in normalized.lower() for marker in _TOKEN_PLACEHOLDER_MARKERS)
 
 
 class CallbackClient:
@@ -22,10 +33,14 @@ class CallbackClient:
         # this client into an unrestricted HTTP proxy.
         if not is_allowed_callback_url(url):
             return False
+        token = settings.internal_service_token
+        # Never send a callback without a configured, non-placeholder service
+        # token.  This also prevents retries from leaking an unauthenticated
+        # request when deployment configuration is incomplete.
+        if not _is_usable_internal_service_token(token):
+            return False
         timeout = httpx.Timeout(settings.read_timeout, connect=settings.connect_timeout)
-        headers = {}
-        if settings.internal_service_token:
-            headers["X-Internal-Service-Token"] = settings.internal_service_token
+        headers = {"X-Internal-Service-Token": token}
         for number in range(self.attempts):
             try:
                 async with httpx.AsyncClient(timeout=timeout, transport=self.transport) as client:

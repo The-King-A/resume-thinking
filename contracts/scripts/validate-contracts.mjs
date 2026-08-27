@@ -31,7 +31,7 @@ ajv.addSchema({ ...openapi, $id: openapiId });
 const callbackSchema = await readJson(resolveContractPath('internal/v1/analysis-callback.schema.json'));
 const analysisJobSchema = await readJson(resolveContractPath('internal/v1/analysis-job.schema.json'));
 const validateCallback = ajv.compile(callbackSchema);
-ajv.compile(analysisJobSchema);
+const validateAnalysisJob = ajv.compile(analysisJobSchema);
 
 const schema = (name) => ajv.getSchema(`${openapiId}#/components/schemas/${name}`);
 const validate = (name) => {
@@ -91,6 +91,7 @@ await assertValid('auth-register-valid.json', validate('RegisterRequest'));
 await assertValid('llm-profile-valid.json', validate('CreateLlmProfileRequest'));
 await assertValid('llm-profile-update-valid.json', validate('UpdateLlmProfileRequest'));
 await assertValid('match-request-valid.json', validate('CreateMatchTaskRequest'));
+await assertValid('analysis-job-valid.json', validateAnalysisJob);
 await assertCacheArchivedResume('archive-user.json', 'USER_CACHE_ARCHIVED');
 await assertCacheArchivedResume('archive-admin.json', 'ADMIN_CACHE_ARCHIVED');
 await assertValid('error-envelope.json', validate('ApiError'));

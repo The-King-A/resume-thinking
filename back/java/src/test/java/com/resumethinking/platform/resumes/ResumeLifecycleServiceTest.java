@@ -10,13 +10,14 @@ import static org.mockito.Mockito.*;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.annotation.Transactional;
 
 class ResumeLifecycleServiceTest {
  private final UUID userId=UUID.randomUUID(), otherUserId=UUID.randomUUID(), adminId=UUID.randomUUID();
  private final Instant now=Instant.parse("2026-01-01T00:00:00Z");
  private final ResumeRepository repo=new ResumeRepository.InMemory();
  private final ResumeCache cache=new ResumeCache.InMemory();
- private final ResumeAuditRepository audit=new ResumeAuditRepository.InMemory();
+ private final ResumeAuditRepository.InMemory audit=new ResumeAuditRepository.InMemory();
  private final ResumeLifecycleService lifecycleService=new ResumeLifecycleService(repo,cache,audit,Clock.fixed(now,ZoneOffset.UTC));
 
  @Test void userSoftDeleteRemovesCacheAndCanRecoverOnlyOwnRecord(){
@@ -34,11 +35,50 @@ class ResumeLifecycleServiceTest {
    lifecycleService.recover(resume.getId(),adminId,UserRole.ADMIN,2L); assertThat(resume.getVisibilityState()).isEqualTo(VisibilityState.ACTIVE);
   }
 
+  @Test void administratorSoftDeleteSupersedesAnExistingUserDeletion(){
+  Resume resume=Resume.active(UUID.randomUUID(),userId,"CV",Resume.SourceType.TXT,UserRole.USER,now,0L); repo.save(resume);
+  lifecycleService.softDelete(new DeleteResumeCommand(resume.getId(),userId,UserRole.USER,"确认删除简历",0L));
+  assertThat(resume.getVisibilityState()).isEqualTo(VisibilityState.USER_SOFT_DELETED);
+  lifecycleService.softDelete(new DeleteResumeCommand(resume.getId(),adminId,UserRole.ADMIN,"确认删除简历",1L));
+  assertThat(resume.getStatus()).isEqualTo(1);
+  assertThat(resume.getVisibilityState()).isEqualTo(VisibilityState.ADMIN_SOFT_DELETED);
+  assertThatThrownBy(() -> lifecycleService.recover(resume.getId(),userId,UserRole.USER,2L))
+      .isInstanceOf(ResourceNotFoundException.class);
+  lifecycleService.recover(resume.getId(),adminId,UserRole.ADMIN,2L);
+  assertThat(resume.getVisibilityState()).isEqualTo(VisibilityState.ACTIVE);
+  }
+
   @Test void administratorCannotRestoreAnActiveRecordThroughRecovery(){
    Resume resume=Resume.active(UUID.randomUUID(),userId,"active",Resume.SourceType.TXT,UserRole.USER,now,0L); repo.save(resume);
    assertThatThrownBy(()->lifecycleService.recover(resume.getId(),adminId,UserRole.ADMIN,0L))
        .isInstanceOf(ResourceNotFoundException.class);
   }
+
+ @Test void recoveryUsesPessimisticLookupAndNeverTheUnlockedLookup(){
+  ResumeRepository lockedRepository=mock(ResumeRepository.class);
+  Resume resume=Resume.active(UUID.randomUUID(),userId,"locked-recovery",Resume.SourceType.TXT,UserRole.USER,now,0L);
+  resume.softDelete(userId,UserRole.USER,now);
+  when(lockedRepository.findByIdForUpdate(resume.getId())).thenReturn(Optional.of(resume));
+  var service=new ResumeLifecycleService(lockedRepository,new ResumeCache.Noop(),new ResumeAuditRepository.InMemory(),Clock.fixed(now,ZoneOffset.UTC));
+
+  ResumeView restored=service.recover(resume.getId(),userId,UserRole.USER,0L);
+
+  assertThat(restored.getVisibilityState()).isEqualTo(VisibilityState.ACTIVE);
+  verify(lockedRepository).findByIdForUpdate(resume.getId());
+  verify(lockedRepository,never()).findRecoverable(resume.getId(),userId,UserRole.USER);
+  verify(lockedRepository,never()).findById(resume.getId());
+ }
+
+ @Test void expiredActiveUserResumeCannotBypassArchiveThroughRecovery(){
+  Resume expired=Resume.active(UUID.randomUUID(),userId,"expired",Resume.SourceType.TXT,UserRole.USER,now.minus(Duration.ofDays(8)),0L);
+  repo.save(expired);
+
+  assertThat(expired.getVisibilityState()).isEqualTo(VisibilityState.ACTIVE);
+  assertThat(expired.getVisibleUntil()).isBefore(now);
+  assertThatThrownBy(() -> lifecycleService.recover(expired.getId(),userId,UserRole.USER,0L))
+      .isInstanceOf(ResourceNotFoundException.class);
+  assertThat(expired.getVisibilityState()).isEqualTo(VisibilityState.ACTIVE);
+ }
  @Test void archiveUsesCreatorRoleRetentionAndIsRecoverable(){
   Resume user=Resume.active(UUID.randomUUID(),userId,"u",Resume.SourceType.TXT,UserRole.USER,now.minus(Duration.ofDays(8)),0L);
   Resume admin=Resume.active(UUID.randomUUID(),adminId,"a",Resume.SourceType.DOCX,UserRole.ADMIN,now.minus(Duration.ofDays(31)),0L); repo.save(user);repo.save(admin);cache.put(user);cache.put(admin);
@@ -108,6 +148,73 @@ class ResumeLifecycleServiceTest {
    assertThatThrownBy(()->lifecycleService.softDelete(new DeleteResumeCommand(archived.getId(),userId,UserRole.USER,"确认删除简历",1L))).isInstanceOf(ResourceNotFoundException.class);
  }
 
+ @Test void cacheArchivedRecordsCannotBeSoftDeletedByEitherRole(){
+  Resume userArchived=Resume.active(UUID.randomUUID(),userId,"user-archived",Resume.SourceType.TXT,UserRole.USER,now.minus(Duration.ofDays(8)),0L);
+  Resume adminArchived=Resume.active(UUID.randomUUID(),adminId,"admin-archived",Resume.SourceType.TXT,UserRole.ADMIN,now.minus(Duration.ofDays(31)),0L);
+  repo.save(userArchived); repo.save(adminArchived);
+  lifecycleService.archiveDue(now);
+  assertThat(userArchived.getVisibilityState()).isEqualTo(VisibilityState.USER_CACHE_ARCHIVED);
+  assertThat(adminArchived.getVisibilityState()).isEqualTo(VisibilityState.ADMIN_CACHE_ARCHIVED);
+  int userStatus=userArchived.getStatus(), adminStatus=adminArchived.getStatus();
+  long userVersion=userArchived.getVersion(), adminVersion=adminArchived.getVersion();
+
+  assertThatThrownBy(() -> lifecycleService.softDelete(new DeleteResumeCommand(
+      userArchived.getId(),userId,UserRole.USER,"确认删除简历",userVersion)))
+      .isInstanceOf(ResourceNotFoundException.class);
+  assertThatThrownBy(() -> lifecycleService.softDelete(new DeleteResumeCommand(
+      userArchived.getId(),adminId,UserRole.ADMIN,"确认删除简历",userVersion)))
+      .isInstanceOf(ResourceNotFoundException.class);
+  assertThatThrownBy(() -> lifecycleService.softDelete(new DeleteResumeCommand(
+      adminArchived.getId(),adminId,UserRole.ADMIN,"确认删除简历",adminVersion)))
+      .isInstanceOf(ResourceNotFoundException.class);
+  assertThatThrownBy(() -> lifecycleService.softDelete(new DeleteResumeCommand(
+      adminArchived.getId(),userId,UserRole.USER,"确认删除简历",adminVersion)))
+      .isInstanceOf(ResourceNotFoundException.class);
+
+  assertThat(userArchived.getVisibilityState()).isEqualTo(VisibilityState.USER_CACHE_ARCHIVED);
+  assertThat(adminArchived.getVisibilityState()).isEqualTo(VisibilityState.ADMIN_CACHE_ARCHIVED);
+  assertThat(userArchived.getStatus()).isEqualTo(userStatus);
+  assertThat(adminArchived.getStatus()).isEqualTo(adminStatus);
+  assertThat(userArchived.getVersion()).isEqualTo(userVersion);
+  assertThat(adminArchived.getVersion()).isEqualTo(adminVersion);
+ }
+
+ @Test void expiredUserDeleteArchivesAndReturnsNotFoundBeforeSchedulerRuns(){
+  Resume expired=Resume.active(UUID.randomUUID(),userId,"expired-user",Resume.SourceType.TXT,
+      UserRole.USER,now.minus(Duration.ofDays(8)),0L);
+  repo.save(expired); cache.put(expired);
+
+  assertThatThrownBy(() -> lifecycleService.softDelete(new DeleteResumeCommand(
+      expired.getId(),userId,UserRole.USER,"确认删除简历",0L)))
+      .isInstanceOf(ResourceNotFoundException.class);
+
+  assertThat(expired.getVisibilityState()).isEqualTo(VisibilityState.USER_CACHE_ARCHIVED);
+  assertThat(expired.getStatus()).isZero();
+  assertThat(cache.get(expired.getId())).isEmpty();
+  assertThat(audit.all()).anySatisfy(event -> {
+    assertThat(event.resumeId()).isEqualTo(expired.getId());
+    assertThat(event.action()).isEqualTo("ARCHIVED");
+  });
+ }
+
+ @Test void expiredAdminDeleteArchivesAndReturnsNotFoundBeforeSchedulerRuns(){
+  Resume expired=Resume.active(UUID.randomUUID(),adminId,"expired-admin",Resume.SourceType.TXT,
+      UserRole.ADMIN,now.minus(Duration.ofDays(31)),0L);
+  repo.save(expired); cache.put(expired);
+
+  assertThatThrownBy(() -> lifecycleService.softDelete(new DeleteResumeCommand(
+      expired.getId(),adminId,UserRole.ADMIN,"确认删除简历",0L)))
+      .isInstanceOf(ResourceNotFoundException.class);
+
+  assertThat(expired.getVisibilityState()).isEqualTo(VisibilityState.ADMIN_CACHE_ARCHIVED);
+  assertThat(expired.getStatus()).isZero();
+  assertThat(cache.get(expired.getId())).isEmpty();
+  assertThat(audit.all()).anySatisfy(event -> {
+    assertThat(event.resumeId()).isEqualTo(expired.getId());
+    assertThat(event.action()).isEqualTo("ARCHIVED");
+  });
+ }
+
  @Test void activeReadsAndAnalysisReservationsExcludeTheVisibilityBoundary(){
   Resume visible=Resume.active(UUID.randomUUID(),userId,"visible",Resume.SourceType.TXT,UserRole.USER,now.minus(Duration.ofDays(1)),0L);
   Resume boundary=Resume.active(UUID.randomUUID(),userId,"boundary",Resume.SourceType.TXT,UserRole.USER,now.minus(Duration.ofDays(7)),0L);
@@ -171,6 +278,33 @@ class ResumeLifecycleServiceTest {
   } finally {
    if (TransactionSynchronizationManager.isSynchronizationActive()) TransactionSynchronizationManager.clearSynchronization();
   }
+ }
+
+ @Test void archivePersistsAuditInTransactionAndEvictsCacheOnlyAfterCommit(){
+  RecordingCache recording = new RecordingCache();
+  ResumeAuditRepository.InMemory recordingAudit = new ResumeAuditRepository.InMemory();
+  ResumeLifecycleService service = new ResumeLifecycleService(repo,recording,recordingAudit,Clock.fixed(now,ZoneOffset.UTC));
+  Resume expired=Resume.active(UUID.randomUUID(),userId,"archive-transaction",Resume.SourceType.TXT,UserRole.USER,now.minus(Duration.ofDays(8)),0L);
+  repo.save(expired);
+  recording.put(expired);
+  TransactionSynchronizationManager.initSynchronization();
+  try {
+   assertThat(service.archiveDue(now)).isEqualTo(1);
+   assertThat(expired.getVisibilityState()).isEqualTo(VisibilityState.USER_CACHE_ARCHIVED);
+   assertThat(recordingAudit.all()).hasSize(1);
+   assertThat(recording.events).containsExactly("put:"+expired.getId());
+   // The initial put happened before the transaction; eviction is deferred.
+   assertThat(recording.events).doesNotContain("evict:resume:view:"+expired.getId());
+   fireAfterCommit();
+   assertThat(recording.events).containsExactly("put:"+expired.getId(),"evict:resume:view:"+expired.getId());
+  } finally {
+   if (TransactionSynchronizationManager.isSynchronizationActive()) TransactionSynchronizationManager.clearSynchronization();
+  }
+ }
+
+ @Test void archiveDueRetainsTransactionalBoundary() throws NoSuchMethodException{
+  assertThat(ResumeLifecycleService.class.getMethod("archiveDue",Instant.class)
+      .isAnnotationPresent(Transactional.class)).isTrue();
  }
 
  private static void fireAfterCommit(){

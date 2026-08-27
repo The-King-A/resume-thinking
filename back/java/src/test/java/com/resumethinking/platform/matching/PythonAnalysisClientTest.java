@@ -22,6 +22,17 @@ class PythonAnalysisClientTest {
                 .hasMessage("PYTHON_INTERNAL_SERVICE_TOKEN_MISSING");
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "replace-with-shared-service-token", "change-me", "placeholder-token"
+    })
+    void dispatchFailsClosedForExampleInternalTokens(String token) {
+        var client = new PythonAnalysisClient(URI.create("http://127.0.0.1:1"), token);
+        assertThatThrownBy(() -> client.dispatch(job(token)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("PYTHON_INTERNAL_SERVICE_TOKEN_MISSING");
+    }
+
     @Test
     void dispatchSendsInternalTokenOnlyAsHeader() throws Exception {
         AtomicReference<String> header = new AtomicReference<>();

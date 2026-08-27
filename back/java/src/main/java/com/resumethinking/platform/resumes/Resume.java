@@ -14,7 +14,7 @@ public class Resume {
     @Column(nullable=false, length=200) private String title;
     @Enumerated(EnumType.STRING) @Column(name="source_type", nullable=false, length=8) private SourceType sourceType;
     @Column(name="parser_version", nullable=false, length=64) private String parserVersion;
-    @Column(name="raw_content_ciphertext", nullable=false, columnDefinition="BLOB") private byte[] encryptedRawContent;
+    @Column(name="raw_content_ciphertext", nullable=false, columnDefinition="MEDIUMBLOB") private byte[] encryptedRawContent;
     @Column(name="raw_content_nonce", columnDefinition="VARBINARY(12)") private byte[] rawContentNonce;
     @Enumerated(EnumType.STRING) @Column(name="creator_role", nullable=false, length=16) private UserRole creatorRole;
     @Column(nullable=false) private int status;

@@ -25,11 +25,29 @@ _PATTERNS = (
     ("address", re.compile(r"(?<!\S)(?:(?:地址|住址)[:：]\s*)?(?:北京|上海|天津|重庆|广东|浙江|江苏|四川|湖北|湖南|山东|福建|安徽|河北|河南|陕西|辽宁|吉林|黑龙江|江西|广西|云南|贵州|山西|甘肃|海南|新疆|西藏|内蒙古|宁夏|青海)省?(?:[^\n,，。;；.．]{0,40})(?:路|街|道|号|室|区)(?=$|[\s,，。;；.．])"), "[REDACTED_ADDRESS]"),
 )
 
+# Names are redacted only when a line starts with an explicit identity label.
+# Keeping the label and replacing the short value makes the decision visible
+# to callers while avoiding ordinary prose such as "project name: ...".
+_NAME_PATTERN = re.compile(
+    r"(?im)(?:(?<=^)|(?<=[\r\n]))[ \t]*(?:[-*•][ \t]*)?"
+    r"(?:姓名|名字|真实姓名|full[ \t]+name|candidate[ \t]+name|legal[ \t]+name|name)"
+    r"[ \t]*[:：][ \t]*"
+    r"(?P<value>"
+    r"(?:[\u3400-\u9fff]{2,6}(?:[·•][\u3400-\u9fff]{1,6})?)"
+    r"|(?:[A-Za-z][A-Za-z.'-]{1,39}(?:[ \t]+[A-Za-z][A-Za-z.'-]{1,39}){0,3})"
+    r")"
+    r"(?=[ \t]*(?:$|[\r\n,，。.;；|/、()（）]))"
+)
+
 
 def redact_text(text: str) -> RedactionResult:
     matches: list[tuple[int, int, str, str]] = []
     for kind, pattern, replacement in _PATTERNS:
         matches.extend((m.start(), m.end(), kind, replacement) for m in pattern.finditer(text))
+    matches.extend(
+        (match.start("value"), match.end("value"), "name", "[REDACTED_NAME]")
+        for match in _NAME_PATTERN.finditer(text)
+    )
     selected: list[tuple[int, int, str, str]] = []
     for item in sorted(matches, key=lambda x: (x[0], -(x[1] - x[0]))):
         if selected and item[0] < selected[-1][1]:

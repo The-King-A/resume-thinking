@@ -213,6 +213,7 @@ class ApiClient:
             body={
                 "resumeId": resume_id,
                 "llmProfileId": profile_id,
+                "jobFamily": "JAVA_BACKEND",
                 "jobDescriptionText": job_text,
                 "idempotencyKey": f"mvp-{uuid.uuid4().hex}",
             },

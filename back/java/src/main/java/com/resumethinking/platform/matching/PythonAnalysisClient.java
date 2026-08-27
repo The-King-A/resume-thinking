@@ -32,7 +32,10 @@ public class PythonAnalysisClient {
         this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build(); this.mapper = new ObjectMapper().findAndRegisterModules();
     }
     public void dispatch(InternalAnalysisJob job) {
-        if (internalServiceToken == null || internalServiceToken.isBlank()) {
+        // Never serialize or send the job when the shared credential is an
+        // example value.  The payload contains the decrypted provider key and
+        // resume bytes, so fail closed before any network side effect.
+        if (!usableToken(internalServiceToken)) {
             throw new IllegalStateException("PYTHON_INTERNAL_SERVICE_TOKEN_MISSING");
         }
         try {
@@ -47,10 +50,20 @@ public class PythonAnalysisClient {
             throw new IllegalStateException("MODEL_UNAVAILABLE", e);
         }
     }
-    public record InternalAnalysisJob(UUID taskId, int attempt, long resumeVersion, String sourceType,
+    public record InternalAnalysisJob(UUID taskId, int attempt, long resumeVersion, String sourceType, JobFamily jobFamily,
                                       Document document, Set<AllowedEvidence> allowedEvidence, String jobDescriptionText,
                                       boolean redactionRequired, URI callbackUrl, String callbackToken,
-                                      Provider provider, UUID correlationId) {}
+                                      Provider provider, UUID correlationId) {
+        /** Compatibility constructor for callers created before job families were explicit. */
+        public InternalAnalysisJob(UUID taskId, int attempt, long resumeVersion, String sourceType,
+                                   Document document, Set<AllowedEvidence> allowedEvidence, String jobDescriptionText,
+                                   boolean redactionRequired, URI callbackUrl, String callbackToken,
+                                   Provider provider, UUID correlationId) {
+            this(taskId, attempt, resumeVersion, sourceType, JobFamily.JAVA_BACKEND, document,
+                    allowedEvidence, jobDescriptionText, redactionRequired, callbackUrl, callbackToken,
+                    provider, correlationId);
+        }
+    }
     public record Document(String contentBase64, String originalFilename) {}
     public record AllowedEvidence(UUID evidenceId, String sourceLocation, int sourceStart, int sourceEnd) {}
     public record Provider(URI baseUrl, String model, String apiKey) {}
@@ -59,6 +72,13 @@ public class PythonAnalysisClient {
         if (token == null || token.isBlank()) token = System.getProperty("python.internal.service-token");
         if (token == null || token.isBlank()) token = System.getenv("PYTHON_INTERNAL_SERVICE_TOKEN");
         return token;
+    }
+    private static boolean usableToken(String token) {
+        if (token == null || token.isBlank()) return false;
+        String normalized = token.toLowerCase(Locale.ROOT);
+        return !normalized.contains("replace-with")
+                && !normalized.contains("change-me")
+                && !normalized.contains("placeholder");
     }
     public static final class Noop extends PythonAnalysisClient { public Noop() { super(URI.create("http://127.0.0.1:1")); } @Override public void dispatch(InternalAnalysisJob job) {} }
 }

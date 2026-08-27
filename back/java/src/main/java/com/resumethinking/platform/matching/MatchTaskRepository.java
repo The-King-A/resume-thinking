@@ -9,6 +9,12 @@ public interface MatchTaskRepository {
     Optional<MatchTask> findById(UUID id);
     Optional<MatchTask> findByCreatorIdAndIdempotencyKey(UUID creatorId, String idempotencyKey);
     Optional<MatchTask> findByIdForUpdate(UUID id);
+    /**
+     * Return all in-flight tasks for a resume while holding write locks.
+     * Callers must invoke this inside the resume lifecycle transaction; the
+     * stable ordering keeps concurrent lifecycle workers deterministic.
+     */
+    List<MatchTask> findByResumeIdAndStateInForUpdate(UUID resumeId, Collection<MatchTask.State> states);
     default Optional<MatchTask> lockById(UUID id) { return findByIdForUpdate(id); }
 
     final class InMemory implements MatchTaskRepository {
@@ -18,5 +24,11 @@ public interface MatchTaskRepository {
         public synchronized Optional<MatchTask> findById(UUID id) { return Optional.ofNullable(values.get(id)); }
         public synchronized Optional<MatchTask> findByIdForUpdate(UUID id) { return findById(id); }
         public synchronized Optional<MatchTask> findByCreatorIdAndIdempotencyKey(UUID owner, String key) { return values.values().stream().filter(t -> owner.equals(t.getCreatorId()) && key.equals(t.getIdempotencyKey())).findFirst(); }
+        public synchronized List<MatchTask> findByResumeIdAndStateInForUpdate(UUID resumeId, Collection<MatchTask.State> states) {
+            return values.values().stream()
+                    .filter(t -> Objects.equals(resumeId, t.getResumeId()) && states.contains(t.getState()))
+                    .sorted(Comparator.comparing(MatchTask::getId))
+                    .toList();
+        }
     }
 }

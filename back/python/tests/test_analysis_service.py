@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from app.analysis_service import analyze_job
 from app.models import AnalysisJob, AnalysisResult
 from app.analysis_service import _hash_payload
+from app.openai_compatible import ModelOutputInvalid
 
 
 class CapturingClient:
@@ -37,9 +38,16 @@ class WrongCompositeClient(CapturingClient):
         })
 
 
+class FailingClient(CapturingClient):
+    async def complete_structured(self, request):
+        type(self).request = request
+        raise ModelOutputInvalid("provider output invalid")
+
+
 def _job(text: str, start: int, end: int, location: str = "txt:0"):
     return {
         "taskId": str(uuid4()), "attempt": 1, "resumeVersion": 0, "sourceType": "TXT",
+        "jobFamily": "JAVA_BACKEND",
         "document": {"contentBase64": base64.b64encode(text.encode()).decode(), "originalFilename": "resume.txt"},
         "allowedEvidence": [{"evidenceId": str(uuid4()), "sourceLocation": location, "sourceStart": start, "sourceEnd": end}],
         "jobDescriptionText": "Build reliable software with clear communication.", "redactionRequired": True,
@@ -52,6 +60,7 @@ def _job(text: str, start: int, end: int, location: str = "txt:0"):
 async def test_malformed_provider_or_document_returns_failure():
     job = {
         "taskId": str(uuid4()), "attempt": 1, "resumeVersion": 0, "sourceType": "TXT",
+        "jobFamily": "JAVA_BACKEND",
         "document": {"contentBase64": base64.b64encode(b"resume text").decode(), "originalFilename": "resume.txt"},
         "allowedEvidence": [{"evidenceId": str(uuid4()), "sourceLocation": "txt:0", "sourceStart": 0, "sourceEnd": 11}],
         "jobDescriptionText": "Build reliable software with clear communication.", "redactionRequired": True,
@@ -69,6 +78,75 @@ async def test_evidence_slice_redacts_pii_at_range_boundary(monkeypatch):
     callback = await analyze_job(_job("alice@example.com\nEngineer", 0, 7))
     assert callback["outcome"] == "SUCCEEDED"
     assert "alice@" not in CapturingClient.request.evidence[0].excerpt
+
+
+@pytest.mark.asyncio
+async def test_analysis_request_preserves_the_java_backend_job_family(monkeypatch):
+    monkeypatch.setattr("app.analysis_service.OpenAICompatibleClient", CapturingClient)
+    job = _job("Java\nEngineer", 0, 4)
+    job["jobFamily"] = "JAVA_BACKEND"
+
+    callback = await analyze_job(job)
+
+    assert callback["outcome"] == "SUCCEEDED"
+    assert CapturingClient.request.model_dump(by_alias=True)["jobFamily"] == "JAVA_BACKEND"
+
+
+@pytest.mark.asyncio
+async def test_failed_callback_does_not_echo_labeled_names(monkeypatch):
+    monkeypatch.setattr("app.analysis_service.OpenAICompatibleClient", FailingClient)
+    text = "\u59d3\u540d\uff1a\u5f20\u4e09\nName: Alice Zhang"
+
+    callback = await analyze_job(_job(text, 0, len(text)))
+
+    assert callback["outcome"] == "FAILED"
+    assert callback["errorCode"] == "MODEL_OUTPUT_INVALID"
+    assert "\u5f20\u4e09" not in FailingClient.request.resume_text
+    assert "Alice Zhang" not in FailingClient.request.resume_text
+    assert "\u5f20\u4e09" not in json.dumps(callback, ensure_ascii=False)
+    assert "Alice Zhang" not in json.dumps(callback, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_success_callback_redacts_provider_output_before_boundary(monkeypatch):
+    requirement_id = uuid4()
+
+    class LeakyClient(CapturingClient):
+        async def complete_structured(self, request):
+            return AnalysisResult.model_validate({
+                "score": {"skills": 0, "projectExperience": 0, "workContent": 0, "educationExperience": 0, "softSkills": 0, "composite": 0},
+                "requirements": [{
+                    "requirementId": str(requirement_id),
+                    "jobRequirementText": "Name: Alice Zhang",
+                    "requirementType": "MANDATORY",
+                    "matchStatus": "UNMET",
+                    "matchType": "NO_MATCH",
+                    "component": "SKILLS",
+                    "componentScore": 0,
+                    "evidence": [],
+                    "evidenceStrength": "NONE",
+                    "gap": "Contact alice@example.com",
+                    "suggestionState": "RISKY_OR_UNSUPPORTED",
+                }],
+                "suggestions": [{
+                    "suggestionId": str(uuid4()),
+                    "requirementId": str(requirement_id),
+                    "state": "NEEDS_USER_CONFIRMATION",
+                    "proposedText": "\u59d3\u540d\uff1a\u5f20\u4e09",
+                    "evidenceIds": [],
+                }],
+            })
+
+    monkeypatch.setattr("app.analysis_service.OpenAICompatibleClient", LeakyClient)
+    callback = await analyze_job(_job("alpha", 0, 5))
+
+    serialized = json.dumps(callback, ensure_ascii=False)
+    assert callback["outcome"] == "SUCCEEDED"
+    assert "Alice Zhang" not in serialized
+    assert "alice@example.com" not in serialized
+    assert "\u5f20\u4e09" not in serialized
+    assert "[REDACTED_NAME]" in serialized
+    assert "[REDACTED_EMAIL]" in serialized
 
 
 @pytest.mark.asyncio

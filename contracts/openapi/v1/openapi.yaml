@@ -727,6 +727,9 @@ components:
     SourceType:
       type: string
       enum: [TXT, DOCX]
+    JobFamily:
+      type: string
+      enum: [JAVA_BACKEND]
     RequirementType:
       type: string
       enum: [MANDATORY, PREFERRED]
@@ -1015,7 +1018,7 @@ components:
     CreateMatchTaskRequest:
       type: object
       additionalProperties: false
-      required: [resumeId, llmProfileId, jobDescriptionText, idempotencyKey]
+      required: [resumeId, llmProfileId, jobFamily, jobDescriptionText, idempotencyKey]
       properties:
         resumeId:
           type: string
@@ -1023,6 +1026,8 @@ components:
         llmProfileId:
           type: string
           format: uuid
+        jobFamily:
+          $ref: '#/components/schemas/JobFamily'
         jobDescriptionText:
           type: string
           minLength: 20
@@ -1034,7 +1039,7 @@ components:
     MatchTask:
       type: object
       additionalProperties: false
-      required: [id, resumeId, llmProfileId, state, attempt, resumeVersion, createdAt, updatedAt]
+      required: [id, resumeId, llmProfileId, jobFamily, state, attempt, resumeVersion, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -1045,6 +1050,8 @@ components:
         llmProfileId:
           type: string
           format: uuid
+        jobFamily:
+          $ref: '#/components/schemas/JobFamily'
         state:
           $ref: '#/components/schemas/TaskState'
         attempt:

@@ -17,7 +17,8 @@ public class MatchTask {
     @Column(name = "llm_profile_id", nullable = false, columnDefinition = "BINARY(16)") private UUID llmProfileId;
     @Column(name = "creator_id", nullable = false, columnDefinition = "BINARY(16)") private UUID creatorId;
     @Column(name = "resume_version", nullable = false) private long resumeVersion;
-    @Column(name = "job_description_text", nullable = false, length = 20000) private String jobDescriptionText;
+    @Enumerated(EnumType.STRING) @Column(name = "job_family", nullable = false, length = 32) private JobFamily jobFamily;
+    @Column(name = "job_description_text", nullable = false, columnDefinition = "MEDIUMTEXT") private String jobDescriptionText;
     @Column(name = "idempotency_key", nullable = false, length = 128) private String idempotencyKey;
     @Column(nullable = false) private int attempt;
     @Column(name = "callback_token_hash", nullable = false, length = 64) private String callbackTokenHash;
@@ -32,12 +33,18 @@ public class MatchTask {
 
     protected MatchTask() {}
     public MatchTask(UUID id, UUID resumeId, UUID llmProfileId, UUID creatorId, long resumeVersion,
-                     String jobDescriptionText, String idempotencyKey, String callbackToken,
+                     JobFamily jobFamily, String jobDescriptionText, String idempotencyKey, String callbackToken,
                      Set<UUID> allowedEvidence, Instant now) {
         this.id = id; this.resumeId = resumeId; this.llmProfileId = llmProfileId; this.creatorId = creatorId;
-        this.resumeVersion = resumeVersion; this.jobDescriptionText = jobDescriptionText; this.idempotencyKey = idempotencyKey;
+        this.resumeVersion = resumeVersion; this.jobFamily = jobFamily; this.jobDescriptionText = jobDescriptionText; this.idempotencyKey = idempotencyKey;
         this.attempt = 1; this.callbackToken = callbackToken; this.callbackTokenHash = sha256(callbackToken);
         this.allowedEvidence = new LinkedHashSet<>(allowedEvidence); this.state = State.QUEUED; this.createdAt = now; this.updatedAt = now;
+    }
+    public MatchTask(UUID id, UUID resumeId, UUID llmProfileId, UUID creatorId, long resumeVersion,
+                     String jobDescriptionText, String idempotencyKey, String callbackToken,
+                     Set<UUID> allowedEvidence, Instant now) {
+        this(id, resumeId, llmProfileId, creatorId, resumeVersion, JobFamily.JAVA_BACKEND,
+                jobDescriptionText, idempotencyKey, callbackToken, allowedEvidence, now);
     }
     public void markProcessing() { if (state == State.QUEUED) { state = State.PROCESSING; updatedAt = Instant.now(); } }
     public void markSucceeded() { state = State.SUCCEEDED; resultAvailable = true; updatedAt = Instant.now(); }
@@ -55,6 +62,7 @@ public class MatchTask {
     public UUID getLlmProfileId() { return llmProfileId; } public UUID llmProfileId() { return llmProfileId; }
     public UUID getCreatorId() { return creatorId; } public UUID creatorId() { return creatorId; }
     public long getResumeVersion() { return resumeVersion; } public long resumeVersion() { return resumeVersion; }
+    public JobFamily getJobFamily() { return jobFamily; } public JobFamily jobFamily() { return jobFamily; }
     public String getJobDescriptionText() { return jobDescriptionText; } public String jobDescriptionText() { return jobDescriptionText; }
     public String getIdempotencyKey() { return idempotencyKey; }
     public int getAttempt() { return attempt; } public int attempt() { return attempt; }

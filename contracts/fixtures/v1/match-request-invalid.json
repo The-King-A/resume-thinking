@@ -1,6 +1,7 @@
 {
-  "resumeId": "not-a-uuid",
-  "llmProfileId": "not-a-uuid",
-  "jobDescriptionText": "",
-  "idempotencyKey": ""
+  "resumeId": "00000000-0000-4000-8000-000000000010",
+  "llmProfileId": "00000000-0000-4000-8000-000000000011",
+  "jobFamily": "PYTHON_BACKEND",
+  "jobDescriptionText": "Build reliable software with clear communication and practical testing.",
+  "idempotencyKey": "fixture-match-key-0001"
 }

@@ -58,6 +58,7 @@ async function startMatch() {
     task.value = await lifecycleApi.createMatchTask({
       resumeId: resume.id,
       llmProfileId: profileId.value,
+      jobFamily: 'JAVA_BACKEND',
       jobDescriptionText: jobDescription.value.trim(),
       idempotencyKey: `match-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`,
     })

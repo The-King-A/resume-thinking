@@ -1,6 +1,6 @@
 # MVP Verification Evidence
 
-Date: 2026-08-27
+Date: 2026-08-28
 
 This report records the evidence for the first resume-to-job matching slice. It
 separates implemented behavior, deterministic/offline checks, unverified live
@@ -35,8 +35,9 @@ real-provider quality, fairness, or physical deletion of MySQL data.
 ### Resume and matching flow
 
 - TXT and DOCX resumes can be uploaded and retained in encrypted MySQL
-  storage. Java writes a derived Redis view with a retention TTL and evicts it
-  on deletion or archival; public list/read authorization remains backed by the
+  storage (`MEDIUMBLOB` via the V6 upgrade, matching the 5 MB upload limit).
+  Java writes a derived Redis view with a retention TTL and evicts it on
+  deletion or archival; public list/read authorization remains backed by the
   durable Java state. PDF is explicitly rejected in the MVP.
 - A Java backend job description creates an asynchronous task. Python receives
   redacted material and an allow-listed evidence set, then returns structured
@@ -44,7 +45,9 @@ real-provider quality, fairness, or physical deletion of MySQL data.
 - Evidence references are checked against the task's allowed source ranges;
   unsupported or unconfirmed claims remain separate from generated resume
   content. Late, stale, duplicate, or unauthorized callbacks cannot recreate a
-  deleted result.
+  deleted result. Task and result reads also require the associated resume to
+  remain `ACTIVE` at the task's captured version; restoring a resume starts a
+  new version before a new task can be read.
 - The result page retries a transient `TASK_NOT_READY` response instead of
   requiring a manual refresh.
 
@@ -72,10 +75,10 @@ The following checks were run against the integrated worktree
 | Check | Result | Evidence boundary |
 | --- | --- | --- |
 | `pnpm --dir contracts run lint` | PASS | OpenAPI v1 syntax and lint rules |
-| `pnpm --dir contracts run validate` | PASS | 12 valid fixtures plus the expected invalid match fixture |
-| `E:\maven\...\mvn.cmd test` in `back/java` | PASS, 59 tests | Java unit and HTTP-boundary tests; no real DB/Redis |
-| Python 3.11 `pytest back/python/tests tests/integration -q` | PASS, 55 tests | Redaction, parsing, callback rules, fixtures, and offline flow assertions |
-| `pnpm --dir front exec vitest run` | PASS, 46 tests | Vue/API behavior under jsdom |
+| `pnpm --dir contracts run validate` | PASS | 13 valid fixtures plus the expected invalid match fixture |
+| `E:\maven\...\mvn.cmd clean test` in `back/java` | PASS, 85 tests | Java unit and HTTP-boundary tests; no real DB/Redis |
+| Python 3.11 `pytest back/python/tests tests/integration -q` | PASS, 67 tests | Redaction, parsing, callback rules, fixtures, and offline flow assertions |
+| `pnpm --dir front exec vitest run` | PASS, 50 tests | Vue/API behavior under jsdom |
 | `pnpm --dir front run build` | PASS | `vue-tsc` and Vite production build |
 | PowerShell AST parse of `run_mvp_flow.ps1` | PASS, 0 parser errors | Launcher syntax only |
 | Launcher preflight with a temporary fake token | PASS | Output was generic `FAIL preflight=CONFIGURATION_OR_SERVICE`; the fake token was absent from output |

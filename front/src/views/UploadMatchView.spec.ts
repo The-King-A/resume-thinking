@@ -36,7 +36,7 @@ describe('UploadMatchView', () => {
 
     expect(lifecycleApi.uploadResume).toHaveBeenCalledWith(file, undefined)
     expect(lifecycleApi.createMatchTask).toHaveBeenCalledWith(expect.objectContaining({
-      resumeId: 'resume-1', llmProfileId: 'profile-1', jobDescriptionText: 'Java backend engineer with Spring Boot experience.',
+      resumeId: 'resume-1', llmProfileId: 'profile-1', jobFamily: 'JAVA_BACKEND', jobDescriptionText: 'Java backend engineer with Spring Boot experience.',
       idempotencyKey: expect.stringMatching(/^match-/),
     }))
     expect(wrapper.text()).toContain('Queued')

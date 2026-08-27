@@ -40,6 +40,7 @@ class AnalysisJob(StrictModel):
     attempt: StrictInt = Field(ge=1)
     resume_version: StrictInt = Field(alias="resumeVersion", ge=0)
     source_type: Literal["TXT", "DOCX"] = Field(alias="sourceType")
+    job_family: Literal["JAVA_BACKEND"] = Field(alias="jobFamily")
     document: Document
     allowed_evidence: list[AllowedEvidence] = Field(alias="allowedEvidence", min_length=1)
     job_description_text: str = Field(alias="jobDescriptionText", min_length=20, max_length=20000)
@@ -161,4 +162,8 @@ class ExtractedEvidence(StrictModel):
 class AnalysisRequest(StrictModel):
     resume_text: str = Field(alias="resumeText")
     job_description_text: str = Field(alias="jobDescriptionText")
+    # The first released family is Java backend; keep a default so direct
+    # provider integrations that predate the internal job envelope remain
+    # source-compatible while the Java worker always supplies the field.
+    job_family: Literal["JAVA_BACKEND"] = Field(default="JAVA_BACKEND", alias="jobFamily")
     evidence: list[ExtractedEvidence] = Field(default_factory=list)

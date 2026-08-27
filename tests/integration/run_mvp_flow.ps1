@@ -216,6 +216,9 @@ try {
             }
         }
 
+        # Pass the resolved Java origin to a newly started Python worker so
+        # callback allowlisting follows the actual integration-test endpoint.
+        [Environment]::SetEnvironmentVariable('JAVA_CALLBACK_BASE_URL', $javaBase, 'Process')
         if (-not $pythonHealthy) {
             $pythonPort = ([Uri]$pythonBase).Port
             if ($pythonPort -lt 1) { $pythonPort = 8000 }

@@ -2,11 +2,62 @@ import json
 import pytest
 import httpx
 
-from app.openai_compatible import ModelOutputInvalid, OpenAICompatibleClient
+from app.openai_compatible import ModelEndpointRejected, ModelOutputInvalid, OpenAICompatibleClient
 
 
 def test_invalid_model_json_error_type_is_exposed():
     assert ModelOutputInvalid.code == "MODEL_OUTPUT_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_provider_endpoint_is_revalidated_before_request(monkeypatch):
+    validations = 0
+    requests = 0
+
+    def validate(_url):
+        nonlocal validations
+        validations += 1
+        if validations == 2:
+            raise ModelEndpointRejected("provider endpoint rejected")
+
+    async def handler(_request):
+        nonlocal requests
+        requests += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": {
+                                "score": {
+                                    "skills": 0,
+                                    "projectExperience": 0,
+                                    "workContent": 0,
+                                    "educationExperience": 0,
+                                    "softSkills": 0,
+                                    "composite": 0,
+                                },
+                                "requirements": [],
+                                "suggestions": [],
+                            }
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(validate))
+    client = OpenAICompatibleClient(
+        {"baseUrl": "http://127.0.0.1:8080", "model": "m", "apiKey": "k"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ModelEndpointRejected):
+        await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
+
+    assert validations == 2
+    assert requests == 0
 
 
 @pytest.mark.asyncio
@@ -45,6 +96,113 @@ async def test_provider_request_redacts_all_text_fields():
     assert "110101199001011234" not in seen["body"]
     assert "sk-live-secret-123" not in seen["body"]
     assert "CALLBACK_TOKEN" not in seen["body"]
+
+
+@pytest.mark.asyncio
+async def test_provider_request_redacts_labeled_names():
+    seen = {}
+
+    async def handler(request):
+        seen["body"] = request.content.decode("utf-8")
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": "{\"score\":{\"skills\":0,\"projectExperience\":0,\"workContent\":0,\"educationExperience\":0,\"softSkills\":0,\"composite\":0},\"requirements\":[],\"suggestions\":[]}"
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = OpenAICompatibleClient(
+        {"baseUrl": "http://127.0.0.1:8080", "model": "m", "apiKey": "k"},
+        transport=httpx.MockTransport(handler),
+    )
+    await client.complete_structured(
+        {
+            "resumeText": "\u59d3\u540d\uff1a\u5f20\u4e09\nName: Alice Zhang\nProject name: Resume Matcher",
+            "jobDescriptionText": "Build reliable software with clear communication.",
+            "evidence": [],
+        }
+    )
+
+    content = json.loads(seen["body"])["messages"][0]["content"]
+    assert "\u5f20\u4e09" not in content
+    assert "Alice Zhang" not in content
+    assert "Project name: Resume Matcher" in content
+
+
+@pytest.mark.asyncio
+async def test_provider_result_redacts_pii_before_returning_to_java():
+    async def handler(_request):
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "score": {
+                                        "skills": 0,
+                                        "projectExperience": 0,
+                                        "workContent": 0,
+                                        "educationExperience": 0,
+                                        "softSkills": 0,
+                                        "composite": 0,
+                                    },
+                                    "requirements": [
+                                        {
+                                            "requirementId": "00000000-0000-0000-0000-000000000001",
+                                            "jobRequirementText": "\u59d3\u540d\uff1a\u5f20\u4e09\uff0c\u90ae\u7bb1 alice@example.com",
+                                            "requirementType": "MANDATORY",
+                                            "matchStatus": "UNMET",
+                                            "matchType": "NO_MATCH",
+                                            "component": "SKILLS",
+                                            "componentScore": 0,
+                                            "evidence": [],
+                                            "evidenceStrength": "NONE",
+                                            "gap": "联系 alice@example.com",
+                                            "suggestionState": "RISKY_OR_UNSUPPORTED",
+                                        }
+                                    ],
+                                    "suggestions": [
+                                        {
+                                            "suggestionId": "00000000-0000-0000-0000-000000000002",
+                                            "requirementId": "00000000-0000-0000-0000-000000000001",
+                                            "state": "NEEDS_USER_CONFIRMATION",
+                                            "proposedText": "Name: Alice Zhang",
+                                            "evidenceIds": [],
+                                        }
+                                    ],
+                                }
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = OpenAICompatibleClient(
+        {"baseUrl": "http://127.0.0.1:8080", "model": "m", "apiKey": "k"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.complete_structured({
+        "resumeText": "Java",
+        "jobDescriptionText": "Build reliable software with clear communication.",
+        "evidence": [],
+    })
+
+    serialized = json.dumps(result.model_dump(by_alias=True, mode="json"), ensure_ascii=False)
+    assert "alice@example.com" not in serialized
+    assert "张三" not in serialized
+    assert "Alice Zhang" not in serialized
+    assert "[REDACTED_EMAIL]" in serialized
+    assert "[REDACTED_NAME]" in serialized
 
 
 @pytest.mark.asyncio

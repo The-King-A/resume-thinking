@@ -1,10 +1,10 @@
 package com.resumethinking.platform.profiles;
 
-import com.resumethinking.platform.crypto.AesGcmCryptoService; import org.springframework.stereotype.Service; import org.springframework.beans.factory.annotation.Value; import java.net.*; import java.net.http.*; import java.time.*; import java.security.*; import java.util.*; import java.util.regex.*;
+import com.resumethinking.platform.crypto.AesGcmCryptoService; import org.springframework.stereotype.Service; import org.springframework.beans.factory.annotation.Autowired; import org.springframework.beans.factory.annotation.Value; import java.net.*; import java.net.http.*; import java.time.*; import java.security.*; import java.util.*; import java.util.regex.*;
 
 @Service public class LlmProfileService {
  private final LlmProfileRepository repository; private final AesGcmCryptoService crypto; private final boolean allowLocal;
- public LlmProfileService(LlmProfileRepository repository,AesGcmCryptoService crypto,@Value("${app.allow-local-model-endpoints:false}") boolean allowLocal){this.repository=repository;this.crypto=crypto;this.allowLocal=allowLocal;}
+ @Autowired public LlmProfileService(LlmProfileRepository repository,AesGcmCryptoService crypto,@Value("${app.allow-local-model-endpoints:false}") boolean allowLocal){this.repository=repository;this.crypto=crypto;this.allowLocal=allowLocal;}
  public LlmProfileService(LlmProfileRepository repository,AesGcmCryptoService crypto){this(repository,crypto,false);}
  public LlmProfile create(UUID owner,CreateLlmProfileCommand command){
   if(command==null||command.apiKey()==null||command.apiKey().isBlank()) throw new IllegalArgumentException("VALIDATION_ERROR");

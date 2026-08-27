@@ -11,6 +11,7 @@
     "attempt",
     "resumeVersion",
     "sourceType",
+    "jobFamily",
     "document",
     "allowedEvidence",
     "jobDescriptionText",
@@ -36,6 +37,10 @@
     "sourceType": {
       "type": "string",
       "enum": ["TXT", "DOCX"]
+    },
+    "jobFamily": {
+      "type": "string",
+      "enum": ["JAVA_BACKEND"]
     },
     "document": {
       "type": "object",

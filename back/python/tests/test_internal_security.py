@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.callback_client import CallbackClient
 from app.main import app
+from app.models import AnalysisJob
 from app.settings import is_allowed_callback_url, settings
 
 
@@ -17,6 +18,7 @@ def _job(*, callback_url: str = "http://127.0.0.1:8080/callback") -> dict:
         "attempt": 1,
         "resumeVersion": 0,
         "sourceType": "TXT",
+        "jobFamily": "JAVA_BACKEND",
         "document": {
             "contentBase64": base64.b64encode(b"resume text").decode("ascii"),
             "originalFilename": "resume.txt",
@@ -66,6 +68,15 @@ def test_analysis_job_requires_internal_service_auth_without_parsing_body():
     assert secret_resume not in response.text
     assert "callback-secret-should-not-echo" not in response.text
     assert "api-key-should-not-echo" not in response.text
+
+
+def test_analysis_job_accepts_the_released_java_backend_job_family():
+    payload = _job()
+    payload["jobFamily"] = "JAVA_BACKEND"
+
+    parsed = AnalysisJob.model_validate(payload)
+
+    assert parsed.model_dump(by_alias=True)["jobFamily"] == "JAVA_BACKEND"
 
 
 def test_analysis_job_rejects_wrong_internal_service_auth():
