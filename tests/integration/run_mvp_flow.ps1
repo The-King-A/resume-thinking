@@ -17,6 +17,16 @@ $startedProcesses = @()
 $exitCode = 0
 $pythonExe = $null
 $liveAttempted = $false
+$required = @(
+    'MYSQL_URL',
+    'MYSQL_USERNAME',
+    'MYSQL_PASSWORD',
+    'REDIS_HOST',
+    'REDIS_PORT',
+    'JWT_SIGNING_KEY_BASE64',
+    'APP_ENCRYPTION_KEY_BASE64',
+    'PYTHON_INTERNAL_SERVICE_TOKEN'
+)
 
 function Write-Flow {
     param([string]$Message)
@@ -163,6 +173,15 @@ function Resolve-Python {
 
 try {
     $hasDotEnv = Import-DotEnv
+    $missing = @($required | Where-Object { -not (Test-ConfiguredValue $_) })
+    if ($missing.Count -gt 0) {
+        if ($strict) { throw 'required service credentials are placeholders or missing' }
+        if (-not $hasDotEnv) { Write-Flow 'SKIP configuration=MISSING_ENV' }
+        else { Write-Flow 'SKIP configuration=MISSING_CREDENTIALS' }
+        $exitCode = 0
+        return
+    }
+
     $javaHealthy = Test-Health ("$javaBase/actuator/health")
     $pythonHealthy = Test-Health ("$pythonBase/health")
 
@@ -174,21 +193,7 @@ try {
             return
         }
 
-        $required = @('MYSQL_URL', 'MYSQL_USERNAME', 'MYSQL_PASSWORD', 'REDIS_HOST', 'REDIS_PORT', 'JWT_SIGNING_KEY_BASE64', 'APP_ENCRYPTION_KEY_BASE64')
-        $missing = @($required | Where-Object { -not (Test-ConfiguredValue $_) })
         $pythonExe = Resolve-Python
-        if (-not $hasDotEnv -and $missing.Count -gt 0) {
-            if ($strict) { throw 'required .env credentials are not configured' }
-            Write-Flow 'SKIP configuration=MISSING_ENV'
-            $exitCode = 0
-            return
-        }
-        if ($missing.Count -gt 0) {
-            if ($strict) { throw 'required service credentials are placeholders or missing' }
-            Write-Flow 'SKIP configuration=MISSING_CREDENTIALS'
-            $exitCode = 0
-            return
-        }
         if (-not $pythonExe) {
             if ($strict) { throw 'Python 3.11 executable was not found' }
             Write-Flow 'SKIP python=EXECUTABLE_MISSING'
