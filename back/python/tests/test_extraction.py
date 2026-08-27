@@ -1,4 +1,5 @@
 from io import BytesIO
+from zipfile import ZipFile
 
 import pytest
 from docx import Document
@@ -26,3 +27,16 @@ def test_docx_paragraph_offsets_are_stable():
 def test_other_types_are_unsupported():
     with pytest.raises(UnsupportedFile):
         extract_resume("PDF", b"%PDF")
+
+
+def test_malformed_docx_is_unsupported():
+    with pytest.raises(UnsupportedFile):
+        extract_resume("DOCX", b"not a docx package")
+
+
+def test_incomplete_docx_package_is_unsupported():
+    stream = BytesIO()
+    with ZipFile(stream, "w") as package:
+        package.writestr("word/document.xml", b"<broken>")
+    with pytest.raises(UnsupportedFile):
+        extract_resume("DOCX", stream.getvalue())

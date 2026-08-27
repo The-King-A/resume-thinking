@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
-import math
 from uuid import uuid4
+
+import rfc8785
 
 from .extraction import UnsupportedFile, extract_resume
 from .models import AnalysisJob, AnalysisRequest, Callback
@@ -15,7 +15,27 @@ from .matching import composite_score
 
 def _hash_payload(payload: dict) -> str:
     body = {k: v for k, v in payload.items() if k != "payloadHash"}
-    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+    return hashlib.sha256(rfc8785.dumps(body)).hexdigest()
+
+
+def _redacted_range(text: str, redaction, start: int, end: int) -> str:
+    chunks: list[str] = []
+    cursor = start
+    for replacement in redaction.replacements:
+        if replacement.end <= start:
+            continue
+        if replacement.start >= end:
+            break
+        literal_end = min(replacement.start, end)
+        if cursor < literal_end:
+            chunks.append(text[cursor:literal_end])
+        chunks.append(replacement.replacement)
+        cursor = max(cursor, replacement.end)
+        if cursor >= end:
+            break
+    if cursor < end:
+        chunks.append(text[cursor:end])
+    return "".join(chunks)
 
 
 async def analyze_job(job: AnalysisJob | dict) -> dict:
@@ -28,13 +48,12 @@ async def analyze_job(job: AnalysisJob | dict) -> dict:
         redacted_job = redact_text(job.job_description_text)
         evidence_payload = []
         for allowed in job.allowed_evidence:
-            matching = [e for e in extracted.evidence if allowed.source_start >= e["sourceStart"] and allowed.source_end <= e["sourceEnd"] and allowed.source_end >= allowed.source_start]
-            if not matching:
+            if not (0 <= allowed.source_start < allowed.source_end <= len(extracted.text)):
                 raise ModelOutputInvalid("evidence range invalid")
-            source = matching[0]
-            relative_start = allowed.source_start - source["sourceStart"]
-            relative_end = allowed.source_end - source["sourceStart"]
-            safe_excerpt = redact_text(source["excerpt"][relative_start:relative_end]).redacted_text
+            touched = [e for e in extracted.evidence if e["sourceStart"] < allowed.source_end and e["sourceEnd"] > allowed.source_start]
+            if not touched or allowed.source_location != touched[0]["sourceLocation"]:
+                raise ModelOutputInvalid("evidence range invalid")
+            safe_excerpt = _redacted_range(extracted.text, redacted, allowed.source_start, allowed.source_end)
             evidence_payload.append({"evidenceId": str(allowed.evidence_id), "sourceLocation": allowed.source_location, "sourceStart": allowed.source_start, "sourceEnd": allowed.source_end, "excerpt": safe_excerpt})
         request = AnalysisRequest(resumeText=redacted.redacted_text, jobDescriptionText=redacted_job.redacted_text, evidence=evidence_payload)
         result = await OpenAICompatibleClient(job.provider).complete_structured(request)
@@ -42,13 +61,14 @@ async def analyze_job(job: AnalysisJob | dict) -> dict:
         requirement_ids = {req.requirement_id for req in result.requirements}
         for req in result.requirements:
             for evidence in req.evidence:
-                if evidence.evidence_id not in allowed_ids:
+                allowed = next((item for item in job.allowed_evidence if item.evidence_id == evidence.evidence_id), None)
+                if allowed is None or not (allowed.source_start <= evidence.source_start <= evidence.source_end <= allowed.source_end):
                     raise ModelOutputInvalid("model output invalid")
         for suggestion in result.suggestions:
             if suggestion.requirement_id not in requirement_ids or any(eid not in allowed_ids for eid in suggestion.evidence_ids):
                 raise ModelOutputInvalid("model output invalid")
         expected = composite_score(skills=result.score.skills, projects=result.score.project_experience, work_content=result.score.work_content, education_experience=result.score.education_experience, soft_skills=result.score.soft_skills)
-        if not math.isclose(result.score.composite, expected, rel_tol=0, abs_tol=1e-4):
+        if result.score.composite != expected:
             raise ModelOutputInvalid("composite score invalid")
         callback = {**callback_base, "outcome": "SUCCEEDED", "result": result.model_dump(by_alias=True, mode="json")}
     except UnsupportedFile:
@@ -57,7 +77,11 @@ async def analyze_job(job: AnalysisJob | dict) -> dict:
         callback = {**callback_base, "outcome": "TIMED_OUT", "errorCode": "MODEL_UNAVAILABLE"}
     except ModelEndpointRejected:
         callback = {**callback_base, "outcome": "FAILED", "errorCode": "MODEL_ENDPOINT_REJECTED"}
-    except (ModelOutputInvalid, ValueError, AttributeError, json.JSONDecodeError):
+    except (ModelOutputInvalid, ValueError, AttributeError):
         callback = {**callback_base, "outcome": "FAILED", "errorCode": "MODEL_OUTPUT_INVALID"}
-    callback["payloadHash"] = _hash_payload(callback)
+    try:
+        callback["payloadHash"] = _hash_payload(callback)
+    except (ValueError, TypeError, UnicodeError):
+        callback = {**callback_base, "outcome": "FAILED", "errorCode": "MODEL_OUTPUT_INVALID"}
+        callback["payloadHash"] = _hash_payload(callback)
     return Callback.model_validate(callback).model_dump(by_alias=True, mode="json")

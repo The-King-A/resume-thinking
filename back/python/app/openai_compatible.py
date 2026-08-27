@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import ipaddress
+import socket
 from urllib.parse import urlsplit
 from typing import Any
 
@@ -32,18 +33,35 @@ class OpenAICompatibleClient:
 
     @staticmethod
     def _validate_endpoint(url: str) -> None:
-        parsed = urlsplit(url)
-        if parsed.username or parsed.password or not parsed.hostname or parsed.query or parsed.fragment:
-            raise ModelEndpointRejected("provider endpoint rejected")
         try:
-            address = ipaddress.ip_address(parsed.hostname)
-        except ValueError:
-            address = None
+            parsed = urlsplit(url)
+            hostname = parsed.hostname
+            port = parsed.port
+        except (ValueError, UnicodeError) as exc:
+            raise ModelEndpointRejected("provider endpoint rejected") from exc
+        if parsed.username or parsed.password or not hostname or parsed.query or parsed.fragment:
+            raise ModelEndpointRejected("provider endpoint rejected")
+        if port is None:
+            port = 80 if parsed.scheme == "http" else 443
+        if not 1 <= port <= 65535:
+            raise ModelEndpointRejected("provider endpoint rejected")
         if parsed.scheme == "http":
-            if address != ipaddress.ip_address("127.0.0.1"):
+            if hostname != "127.0.0.1":
                 raise ModelEndpointRejected("provider endpoint rejected")
         elif parsed.scheme == "https":
-            if address is not None and (address.is_private or address.is_loopback or address.is_link_local or address.is_reserved or address.is_multicast):
+            try:
+                address = ipaddress.ip_address(hostname)
+            except ValueError:
+                address = None
+            if address is not None:
+                addresses = [address]
+            else:
+                try:
+                    resolved = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+                    addresses = [ipaddress.ip_address(item[4][0]) for item in resolved]
+                except (OSError, ValueError, UnicodeError) as exc:
+                    raise ModelEndpointRejected("provider endpoint rejected") from exc
+            if not addresses or any(not item.is_global for item in addresses):
                 raise ModelEndpointRejected("provider endpoint rejected")
         else:
             raise ModelEndpointRejected("provider endpoint rejected")

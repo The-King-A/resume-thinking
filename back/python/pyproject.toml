@@ -11,6 +11,7 @@ dependencies = [
   "uvicorn[standard]>=0.32,<1",
   "pydantic>=2.10,<3",
   "httpx>=0.28,<1",
+  "rfc8785==0.1.4",
   "python-docx>=1.1,<2",
   "python-multipart>=0.0.18,<1"
 ]

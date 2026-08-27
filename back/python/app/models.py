@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -45,9 +46,15 @@ class AnalysisJob(StrictModel):
     @field_validator("callback_url")
     @classmethod
     def callback_uri(cls, value: str) -> str:
-        from urllib.parse import urlsplit
-        parsed = urlsplit(value)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        try:
+            parsed = urlsplit(value)
+            hostname = parsed.hostname
+            port = parsed.port
+        except (ValueError, UnicodeError) as exc:
+            raise ValueError("callbackUrl must be a URI") from exc
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or not hostname or parsed.username or parsed.password:
+            raise ValueError("callbackUrl must be a URI")
+        if port is not None and not 1 <= port <= 65535:
             raise ValueError("callbackUrl must be a URI")
         return value
 
