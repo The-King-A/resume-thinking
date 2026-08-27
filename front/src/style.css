@@ -52,7 +52,33 @@
 
 body {
   margin: 0;
+  background: #f6f7f9;
 }
+
+button, input, select { font: inherit; }
+button { cursor: pointer; border: 0; border-radius: 6px; padding: 10px 16px; background: #1d4ed8; color: white; }
+button:disabled { opacity: .6; cursor: wait; }
+label { display: grid; gap: 6px; color: var(--text-h); font-size: 14px; text-align: left; }
+input, select { width: 100%; box-sizing: border-box; border: 1px solid #cfd4dc; border-radius: 5px; padding: 10px 12px; background: #fff; color: #111827; }
+.auth-page, .workspace { width: min(1080px, 100%); margin: 0 auto; box-sizing: border-box; padding: 48px 28px; text-align: left; }
+.auth-panel { width: min(440px, 100%); margin: 0 auto; background: white; border: 1px solid var(--border); border-radius: 8px; padding: 32px; box-sizing: border-box; }
+.auth-panel form, .profile-form { display: grid; gap: 16px; margin: 24px 0; }
+.eyebrow { text-transform: uppercase; letter-spacing: 1px; font-size: 12px; color: #1d4ed8; font-weight: 700; }
+.muted { color: #687386; font-size: 14px; }
+.notice { background: #eff6ff; border-left: 3px solid #3b82f6; padding: 10px 12px; font-size: 14px; color: #1e3a5f; }
+.error { color: #b42318; font-size: 14px; }
+.success { color: #067647; font-size: 14px; }
+fieldset { border: 1px solid var(--border); border-radius: 6px; padding: 14px; display: grid; gap: 8px; }
+fieldset label, .check { display: flex; align-items: center; gap: 8px; }
+fieldset input[type='radio'], fieldset input[type='checkbox'], .check input { width: auto; }
+.workspace header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.profile-grid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.3fr); gap: 28px; margin-top: 28px; }
+.profile-grid > section { background: white; border: 1px solid var(--border); border-radius: 8px; padding: 24px; }
+.profile-row { display: flex; gap: 16px; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); padding: 16px 0; }
+.profile-row div { display: grid; gap: 4px; min-width: 0; }
+.profile-row span { color: #687386; font-size: 13px; overflow-wrap: anywhere; }
+.form-actions { display: flex; gap: 10px; justify-content: flex-end; }
+@media (max-width: 760px) { .auth-page, .workspace { padding: 24px 16px; } .profile-grid { grid-template-columns: 1fr; } .workspace header { flex-direction: column; } }
 
 h1,
 h2 {
