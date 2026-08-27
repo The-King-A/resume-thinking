@@ -34,9 +34,10 @@ real-provider quality, fairness, or physical deletion of MySQL data.
 
 ### Resume and matching flow
 
-- TXT and DOCX resumes can be uploaded, retained in encrypted MySQL storage,
-  and represented in Redis for page reads. PDF is explicitly rejected in the
-  MVP.
+- TXT and DOCX resumes can be uploaded and retained in encrypted MySQL
+  storage. Java writes a derived Redis view with a retention TTL and evicts it
+  on deletion or archival; public list/read authorization remains backed by the
+  durable Java state. PDF is explicitly rejected in the MVP.
 - A Java backend job description creates an asynchronous task. Python receives
   redacted material and an allow-listed evidence set, then returns structured
   scores, requirement matches, source ranges, and suggestion states.
