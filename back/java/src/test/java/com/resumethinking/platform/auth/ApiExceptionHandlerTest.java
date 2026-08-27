@@ -14,10 +14,18 @@ class ApiExceptionHandlerTest {
  @RestController static class FailingController {
   @GetMapping("/jpa-lock") String jpa(){throw new OptimisticLockException("stale");}
   @GetMapping("/spring-lock") String spring(){throw new ObjectOptimisticLockingFailureException("resume", "stale");}
+  @GetMapping("/unsupported-file") String unsupported(){throw new IllegalArgumentException("UNSUPPORTED_FILE");}
+  @GetMapping("/payload-too-large") String tooLarge(){throw new IllegalArgumentException("PAYLOAD_TOO_LARGE");}
  }
  @Test void optimisticLockFailuresUseVersionConflictEnvelope() throws Exception {
   MockMvc mvc=MockMvcBuilders.standaloneSetup(new FailingController()).setControllerAdvice(new ApiExceptionHandler()).build();
   mvc.perform(get("/jpa-lock")).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("VERSION_CONFLICT"));
   mvc.perform(get("/spring-lock")).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("VERSION_CONFLICT"));
- }
+  }
+
+  @Test void uploadPolicyFailuresUseContractStatuses() throws Exception {
+   MockMvc mvc=MockMvcBuilders.standaloneSetup(new FailingController()).setControllerAdvice(new ApiExceptionHandler()).build();
+   mvc.perform(get("/unsupported-file")).andExpect(status().isUnsupportedMediaType()).andExpect(jsonPath("$.code").value("UNSUPPORTED_FILE"));
+   mvc.perform(get("/payload-too-large")).andExpect(status().isPayloadTooLarge()).andExpect(jsonPath("$.code").value("PAYLOAD_TOO_LARGE"));
+  }
 }
