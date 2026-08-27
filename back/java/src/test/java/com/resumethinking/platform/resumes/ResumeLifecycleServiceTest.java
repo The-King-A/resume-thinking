@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.time.*;
 import java.util.*;
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.*;
 import org.springframework.data.domain.PageRequest;
 
 class ResumeLifecycleServiceTest {
@@ -40,6 +41,16 @@ class ResumeLifecycleServiceTest {
   Resume r=Resume.active(UUID.randomUUID(),userId,"x",Resume.SourceType.TXT,UserRole.USER,now,4L);repo.save(r);
   assertThatThrownBy(()->lifecycleService.softDelete(new DeleteResumeCommand(r.getId(),userId,UserRole.USER,"删除",4L))).isInstanceOf(IllegalArgumentException.class);
   assertThatThrownBy(()->lifecycleService.softDelete(new DeleteResumeCommand(r.getId(),userId,UserRole.USER,"确认删除简历",3L))).isInstanceOf(VersionConflictException.class);
+ }
+
+ @Test void softDeleteUsesTheSamePessimisticLookupAsCallbacks(){
+  ResumeRepository lockedRepository=mock(ResumeRepository.class);
+  Resume r=Resume.active(UUID.randomUUID(),userId,"locked",Resume.SourceType.TXT,UserRole.USER,now,0L);
+  when(lockedRepository.findByIdForUpdate(r.getId())).thenReturn(Optional.of(r));
+  var service=new ResumeLifecycleService(lockedRepository,new ResumeCache.Noop(),new ResumeAuditRepository.InMemory(),Clock.fixed(now,ZoneOffset.UTC));
+  service.softDelete(new DeleteResumeCommand(r.getId(),userId,UserRole.USER,"确认删除简历",0L));
+  verify(lockedRepository).findByIdForUpdate(r.getId());
+  verify(lockedRepository,never()).findById(r.getId());
  }
 
  @Test void repeatedRestoreOfAuthorizedActiveRecordIsIdempotent(){

@@ -18,7 +18,11 @@ public class ResumeLifecycleService {
     @Transactional
     public Resume softDelete(DeleteResumeCommand command) {
         if (!CONFIRMATION.equals(command.confirmationText())) throw new InvalidConfirmationException();
-        Resume resume = repository.findById(command.resumeId()).filter(r -> command.role()==UserRole.ADMIN || r.getOwnerId().equals(command.actorId())).orElseThrow(ResourceNotFoundException::new);
+        // The callback path locks this same row before deciding whether to persist a result.
+        // Lock the row before authorization/version checks so delete and callback cannot race.
+        Resume resume = repository.findByIdForUpdate(command.resumeId())
+                .filter(r -> command.role()==UserRole.ADMIN || r.getOwnerId().equals(command.actorId()))
+                .orElseThrow(ResourceNotFoundException::new);
         if (resume.getVisibilityState()!=VisibilityState.ACTIVE) {
             if ((resume.getVisibilityState()==VisibilityState.ADMIN_SOFT_DELETED || resume.getVisibilityState()==VisibilityState.ADMIN_CACHE_ARCHIVED) && command.role()!=UserRole.ADMIN) throw new ResourceNotFoundException();
             return resume;

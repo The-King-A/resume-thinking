@@ -90,10 +90,45 @@ class MatchTaskServiceTest {
                 new AnalysisResultRepository.InMemory(), new CallbackReceiptRepository.InMemory(), new AnalysisEvidenceRepository.InMemory(), crypto);
         service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
                 "Build reliable software with clear communication and practical testing.", "crlf-key-00000001"));
+        assertThat(new String(java.util.Base64.getDecoder().decode(capture.job.document().contentBase64()), StandardCharsets.UTF_8))
+                .isEqualTo("Java\nTesting");
         assertThat(capture.job.allowedEvidence()).extracting(PythonAnalysisClient.AllowedEvidence::sourceStart)
                 .containsExactly(0, 5);
         assertThat(capture.job.allowedEvidence()).extracting(PythonAnalysisClient.AllowedEvidence::sourceEnd)
                 .containsExactly(4, 12);
+    }
+
+    @Test
+    void blankAndTrailingTxtLinesDoNotCreateZeroLengthAllowedEvidence() {
+        var crypto = new com.resumethinking.platform.crypto.AesGcmCryptoService("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
+        var encrypted = crypto.encrypt("Java\n\nTesting\n");
+        var resumes = new ResumeRepository.InMemory();
+        resumes.save(new Resume(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER, encrypted.ciphertext(), encrypted.nonce(), Instant.now(), "v1"));
+        var capture = new CapturingClient();
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()),
+                new TestProfileService(userId, profileId), new MatchTaskRepository.InMemory(), capture,
+                new AnalysisResultRepository.InMemory(), new CallbackReceiptRepository.InMemory(), new AnalysisEvidenceRepository.InMemory(), crypto);
+        service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
+                "Build reliable software with clear communication and practical testing.", "blank-key-0000001"));
+        assertThat(capture.job.allowedEvidence()).hasSize(2).allSatisfy(e -> assertThat(e.sourceStart()).isLessThan(e.sourceEnd()));
+        assertThat(capture.job.allowedEvidence()).extracting(PythonAnalysisClient.AllowedEvidence::sourceStart).containsExactly(0, 6);
+        assertThat(capture.job.allowedEvidence()).extracting(PythonAnalysisClient.AllowedEvidence::sourceEnd).containsExactly(4, 13);
+    }
+
+    @Test
+    void unicodeAstralCharactersUsePythonCodePointOffsets() {
+        var crypto = new com.resumethinking.platform.crypto.AesGcmCryptoService("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
+        var encrypted = crypto.encrypt("Java😀\nTesting");
+        var resumes = new ResumeRepository.InMemory();
+        resumes.save(new Resume(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER, encrypted.ciphertext(), encrypted.nonce(), Instant.now(), "v1"));
+        var capture = new CapturingClient();
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()),
+                new TestProfileService(userId, profileId), new MatchTaskRepository.InMemory(), capture,
+                new AnalysisResultRepository.InMemory(), new CallbackReceiptRepository.InMemory(), new AnalysisEvidenceRepository.InMemory(), crypto);
+        service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
+                "Build reliable software with clear communication and practical testing.", "unicode-key-00001"));
+        assertThat(capture.job.allowedEvidence()).extracting(PythonAnalysisClient.AllowedEvidence::sourceStart).containsExactly(0, 6);
+        assertThat(capture.job.allowedEvidence()).extracting(PythonAnalysisClient.AllowedEvidence::sourceEnd).containsExactly(5, 13);
     }
 
     @Test

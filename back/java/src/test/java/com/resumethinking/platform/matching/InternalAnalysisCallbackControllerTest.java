@@ -68,4 +68,31 @@ class InternalAnalysisCallbackControllerTest {
         assertThat(service.acceptCallback(stale).code()).isEqualTo("VALIDATION_ERROR");
         assertThat(resultRepo.countByTaskId(task.id())).isZero();
     }
+
+    @Test
+    void callbackIdCannotBeReplayedForAnotherTaskOrWithAnotherToken() {
+        UUID owner = UUID.randomUUID(); UUID resumeOne = UUID.randomUUID(); UUID resumeTwo = UUID.randomUUID();
+        ResumeRepository resumes = new ResumeRepository.InMemory();
+        resumes.save(Resume.active(resumeOne, owner, "one", Resume.SourceType.TXT, UserRole.USER, Instant.now(), 0L));
+        resumes.save(Resume.active(resumeTwo, owner, "two", Resume.SourceType.TXT, UserRole.USER, Instant.now(), 0L));
+        var lifecycle = new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory());
+        var taskRepo = new MatchTaskRepository.InMemory(); var receipts = new CallbackReceiptRepository.InMemory();
+        var service = new MatchTaskService(lifecycle, null, taskRepo, new PythonAnalysisClient.Noop(), new AnalysisResultRepository.InMemory(), receipts);
+        var firstTask = service.createTask(new CreateMatchTaskCommand(owner, resumeOne, UUID.randomUUID(),
+                "Build reliable software with clear communication and practical testing.", "cross-task-key-001"));
+        var secondTask = service.createTask(new CreateMatchTaskCommand(owner, resumeTwo, UUID.randomUUID(),
+                "Build reliable software with clear communication and practical testing.", "cross-task-key-002"));
+        UUID callbackId = UUID.randomUUID();
+        var first = new AnalysisCallbackRequest(firstTask.id(), 1, callbackId, firstTask.callbackTokenForTests(), "", "FAILED", null,
+                "MODEL_UNAVAILABLE", UUID.randomUUID()).withComputedPayloadHash();
+        assertThat(service.acceptCallback(first).code()).isEqualTo("ACCEPTED");
+
+        var wrongToken = new AnalysisCallbackRequest(firstTask.id(), 1, callbackId, "x".repeat(32), first.payloadHash(), "FAILED", null,
+                "MODEL_UNAVAILABLE", first.correlationId());
+        assertThat(service.acceptCallback(wrongToken).code()).isEqualTo("TASK_GONE");
+
+        var reusedForOtherTask = new AnalysisCallbackRequest(secondTask.id(), 1, callbackId, secondTask.callbackTokenForTests(), first.payloadHash(),
+                "FAILED", null, "MODEL_UNAVAILABLE", first.correlationId());
+        assertThat(service.acceptCallback(reusedForOtherTask).code()).isEqualTo("IDEMPOTENCY_CONFLICT");
+    }
 }
