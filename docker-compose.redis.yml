@@ -1,0 +1,10 @@
+services:
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - resume_redis_data:/data
+volumes:
+  resume_redis_data:

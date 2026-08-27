@@ -1,2 +1,16 @@
 .worktrees/
 .superpowers/
+.env
+.env.*
+!.env.example
+back/java/target/
+back/python/.venv/
+back/python/.pytest_cache/
+back/python/*.egg-info/
+__pycache__/
+*.py[cod]
+front/node_modules/
+front/dist/
+playwright-report/
+test-results/
+contracts/node_modules/

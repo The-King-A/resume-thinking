@@ -1,0 +1,13 @@
+spring:
+  datasource:
+    url: ${MYSQL_URL}
+    username: ${MYSQL_USERNAME}
+    password: ${MYSQL_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+app:
+  jwt-signing-key-base64: ${JWT_SIGNING_KEY_BASE64}
+  encryption-key-base64: ${APP_ENCRYPTION_KEY_BASE64}
+  python-analysis-base-url: ${PYTHON_ANALYSIS_BASE_URL}
