@@ -17,7 +17,7 @@ const taskGone = ref(false)
 const error = ref('')
 let pollTimer: number | undefined
 
-const selectedProfiles = computed(() => profileStore.profiles.filter((profile) => profile.selected))
+const availableProfiles = computed(() => profileStore.profiles)
 const canSubmit = computed(() => Boolean(file.value && profileId.value && jobDescription.value.trim().length >= 20 && !fileError.value && !submitting.value))
 const taskLabel = computed(() => ({ QUEUED: 'Queued', PROCESSING: 'Processing', SUCCEEDED: 'Complete', FAILED: 'Failed', TIMED_OUT: 'Timed out', BLOCKED: 'Archived or blocked' }[task.value?.state || 'QUEUED']))
 
@@ -85,7 +85,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearTimeout(pollTimer) })
         <p v-if="fileName" class="muted">Selected: {{ fileName }}</p>
         <p v-if="fileError" class="error" role="alert">{{ fileError }}</p>
         <label>Resume title (optional)<input v-model="title" maxlength="200" /></label>
-        <label>Selected model profile<select v-model="profileId"><option value="" disabled>Select a saved profile</option><option v-for="profile in selectedProfiles" :key="profile.id" :value="profile.id">{{ profile.displayName }}</option></select><span v-if="!selectedProfiles.length" class="field-help">Select a saved model profile in settings before matching.</span></label>
+        <label>Selected model profile<select v-model="profileId"><option value="" disabled>Select a saved profile</option><option v-for="profile in availableProfiles" :key="profile.id" :value="profile.id">{{ profile.displayName }}</option></select><span v-if="!availableProfiles.length" class="field-help">Select a saved model profile in settings before matching.</span></label>
         <label>Java backend job description<textarea v-model="jobDescription" minlength="20" maxlength="20000" rows="10" placeholder="Paste the Java backend role requirements returned by your trusted job source."></textarea><span class="field-help">At least 20 characters. The text is sent only to the Java backend.</span></label>
         <button data-test="start-match" type="submit" :disabled="!canSubmit">{{ submitting ? 'Starting…' : 'Start evidence match' }}</button>
       </form>

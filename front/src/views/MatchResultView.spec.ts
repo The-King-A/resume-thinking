@@ -1,15 +1,21 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import MatchResultView from './MatchResultView.vue'
 import { ApiError } from '../api/contracts'
 
-const { lifecycleApi } = vi.hoisted(() => ({ lifecycleApi: { getMatchTask: vi.fn(), getMatchResult: vi.fn() } }))
+const { lifecycleApi, routeParams } = vi.hoisted(() => ({ lifecycleApi: { getMatchTask: vi.fn(), getMatchResult: vi.fn() }, routeParams: { taskId: 'task-1', proxy: null as { taskId: string } | null } }))
 vi.mock('../api/lifecycle', () => ({ lifecycleApi }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ params: { taskId: 'task-1' } }) }))
+vi.mock('vue-router', async () => {
+  const { reactive } = await import('vue')
+  const params = reactive(routeParams)
+  routeParams.proxy = params
+  return { useRoute: () => ({ params }) }
+})
 
 describe('MatchResultView task lifecycle', () => {
-  beforeEach(() => { vi.useFakeTimers(); lifecycleApi.getMatchTask.mockReset(); lifecycleApi.getMatchResult.mockReset() })
+  beforeEach(() => { vi.useFakeTimers(); if (routeParams.proxy) routeParams.proxy.taskId = 'task-1'; lifecycleApi.getMatchTask.mockReset(); lifecycleApi.getMatchResult.mockReset() })
   afterEach(() => vi.useRealTimers())
 
   it('polls while queued and stops after a failure without requesting a result', async () => {
@@ -43,5 +49,24 @@ describe('MatchResultView task lifecycle', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Task archived')
     expect(wrapper.text()).not.toContain('private backend detail')
+  })
+
+  it('reloads a new task when the route parameter changes', async () => {
+    lifecycleApi.getMatchTask.mockResolvedValue({ id: 'task-1', state: 'FAILED' })
+    mount(MatchResultView, { global: { stubs: { RouterLink: true, MatchEvidenceTable: true } } })
+    await flushPromises()
+    if (!routeParams.proxy) throw new Error('route proxy missing')
+    routeParams.proxy.taskId = 'task-2'
+    await nextTick()
+    await flushPromises()
+    expect(lifecycleApi.getMatchTask).toHaveBeenLastCalledWith('task-2')
+  })
+
+  it('shows the Java job description on a completed result', async () => {
+    lifecycleApi.getMatchTask.mockResolvedValue({ id: 'task-1', state: 'SUCCEEDED' })
+    lifecycleApi.getMatchResult.mockResolvedValue({ taskId: 'task-1', resumeId: 'resume-1', resumeVersion: 2, jobDescriptionText: 'Java backend engineer with Spring Boot.', score: { skills: .5, projectExperience: .5, workContent: .5, educationExperience: .5, softSkills: .5, composite: .5 }, requirements: [], suggestions: [], completedAt: '2026-08-27T08:00:00Z' })
+    const wrapper = mount(MatchResultView, { global: { stubs: { RouterLink: true, MatchEvidenceTable: true } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Java backend engineer with Spring Boot.')
   })
 })

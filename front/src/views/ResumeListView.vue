@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import DeleteResumeDialog from '../components/DeleteResumeDialog.vue'
 import { lifecycleApi } from '../api/lifecycle'
 import type { DeleteResumeRequest, Resume } from '../api/contracts'
@@ -11,11 +11,19 @@ const selected = ref<Resume | null>(null)
 const loading = ref(true)
 const deleting = ref(false)
 const error = ref('')
+const page = ref(1)
+const totalPages = ref(1)
+const isAdmin = computed(() => auth.user?.role === 'ADMIN')
 
-async function loadResumes() {
+async function loadResumes(nextPage = page.value) {
   loading.value = true
   error.value = ''
-  try { resumes.value = (await lifecycleApi.listResumes()).items.filter((item) => item.visibilityState === 'ACTIVE' && item.status === 0) }
+  try {
+    const response = await lifecycleApi.listResumes(nextPage)
+    page.value = response.page
+    totalPages.value = response.totalPages
+    resumes.value = response.items.filter((item) => item.visibilityState === 'ACTIVE' && item.status === 0)
+  }
   catch { error.value = 'Unable to load active resumes.' }
   finally { loading.value = false }
 }
@@ -26,7 +34,8 @@ async function deleteResume(payload: DeleteResumeRequest) {
   error.value = ''
   const id = selected.value.id
   try {
-    await lifecycleApi.deleteResume(id, payload)
+    if (isAdmin.value) await lifecycleApi.adminSoftDeleteResume(id, payload)
+    else await lifecycleApi.deleteResume(id, payload)
     resumes.value = resumes.value.filter((item) => item.id !== id)
     selected.value = null
   } catch { error.value = 'Unable to delete this resume. Refresh and check its current version.' }
@@ -42,8 +51,8 @@ onMounted(loadResumes)
       <div><p class="eyebrow">Resume workspace</p><h1>Active resumes</h1><p class="muted">Only active resume metadata returned by the Java service appears here.</p></div>
       <nav class="workspace-nav" aria-label="Resume actions">
         <RouterLink class="button-link" to="/match">Upload & match</RouterLink>
-        <RouterLink to="/recovery">Recovery</RouterLink>
-        <RouterLink v-if="auth.user?.role === 'ADMIN'" to="/admin/recovery">Admin recovery</RouterLink>
+        <RouterLink v-if="!isAdmin" to="/recovery">Recovery</RouterLink>
+        <RouterLink v-else to="/admin/recovery">Admin recovery</RouterLink>
         <RouterLink to="/profiles">Model profiles</RouterLink>
       </nav>
     </header>
@@ -57,6 +66,7 @@ onMounted(loadResumes)
       </article>
     </section>
     <section v-else class="empty-state"><h2>No active resumes</h2><p>Upload a TXT or DOCX resume to begin a match.</p><RouterLink to="/match">Upload resume</RouterLink></section>
+    <nav v-if="totalPages > 1" class="pagination" aria-label="Resume pages"><button type="button" :disabled="page <= 1 || loading" @click="loadResumes(page - 1)">Previous</button><span>Page {{ page }} of {{ totalPages }}</span><button type="button" :disabled="page >= totalPages || loading" @click="loadResumes(page + 1)">Next</button></nav>
     <DeleteResumeDialog :open="Boolean(selected)" :resume-id="selected?.id || ''" :version="selected?.version || 0" :busy="deleting" @cancel="selected = null" @confirm="deleteResume" />
   </main>
 </template>

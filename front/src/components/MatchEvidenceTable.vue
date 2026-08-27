@@ -14,8 +14,8 @@ const label = (value: string) => value.toLowerCase().replaceAll('_', ' ')
       <thead><tr><th>Requirement</th><th>Evidence</th><th>Location</th><th>Type</th><th>Score</th><th>Strength</th><th>Gap</th></tr></thead>
       <tbody>
         <tr v-for="requirement in requirements" :key="requirement.requirementId" :class="{ 'non-positive': !positive(requirement.matchStatus) }" :data-positive="positive(requirement.matchStatus)">
-          <td><strong>{{ requirement.requirementText }}</strong><span>{{ label(requirement.requirementType) }}</span></td>
-          <td><ul v-if="requirement.evidence.length"><li v-for="item in requirement.evidence" :key="item.id">{{ item.excerpt }}</li></ul><span v-else>No supporting evidence</span></td>
+          <td><strong>{{ requirement.requirementText }}</strong><span>{{ requirement.requirementId }}</span><span>{{ label(requirement.requirementType) }}</span></td>
+          <td><ul v-if="requirement.evidence.length"><li v-for="item in requirement.evidence" :key="item.id"><span class="evidence-source-type">{{ item.sourceType }} · {{ item.id }}</span>{{ item.excerpt }}</li></ul><span v-else>No supporting evidence</span></td>
           <td><ul v-if="requirement.evidence.length"><li v-for="item in requirement.evidence" :key="item.id">{{ item.sourceLocation }}<span v-if="item.sourceStart !== undefined && item.sourceEnd !== undefined" class="source-range">Characters {{ item.sourceStart }}-{{ item.sourceEnd }}</span></li></ul><span v-else>Not available</span></td>
           <td><strong>{{ label(requirement.matchStatus) }}</strong><span>{{ label(requirement.matchType) }} · {{ label(requirement.component) }}</span></td>
           <td>{{ percent(requirement.componentScore) }}</td>

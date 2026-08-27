@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { lifecycleApi } from '../api/lifecycle'
 import { ApiError, type MatchResult, type MatchTask, type SuggestionState } from '../api/contracts'
 import MatchEvidenceTable from '../components/MatchEvidenceTable.vue'
 
 const route = useRoute()
-const taskId = String(route.params.taskId || '')
+const taskId = ref(String(route.params.taskId || ''))
 const task = ref<MatchTask | null>(null)
 const result = ref<MatchResult | null>(null)
 const loading = ref(true)
@@ -24,13 +24,14 @@ const suggestionLabel = (state: SuggestionState) => ({ SUPPORTED_FACT: 'Supporte
 
 function schedulePoll() {
   if (task.value?.state !== 'QUEUED' && task.value?.state !== 'PROCESSING') return
-  pollTimer = window.setTimeout(loadTask, 1500)
+  pollTimer = window.setTimeout(() => loadTask(taskId.value), 1500)
 }
 
-async function loadTask() {
+async function loadTask(id: string) {
+  if (!id) { error.value = 'Unable to load this matching task.'; loading.value = false; return }
   try {
-    task.value = await lifecycleApi.getMatchTask(taskId)
-    if (task.value.state === 'SUCCEEDED') result.value = await lifecycleApi.getMatchResult(taskId)
+    task.value = await lifecycleApi.getMatchTask(id)
+    if (task.value.state === 'SUCCEEDED') result.value = await lifecycleApi.getMatchResult(id)
     else schedulePoll()
   } catch (caught) {
     if (caught instanceof ApiError && caught.code === 'TASK_GONE') gone.value = true
@@ -39,7 +40,18 @@ async function loadTask() {
   } finally { loading.value = false }
 }
 
-onMounted(loadTask)
+watch(() => route.params.taskId, (next) => {
+  if (pollTimer) window.clearTimeout(pollTimer)
+  taskId.value = String(next || '')
+  task.value = null
+  result.value = null
+  gone.value = false
+  notReady.value = false
+  error.value = ''
+  loading.value = true
+  void loadTask(taskId.value)
+})
+onMounted(() => { void loadTask(taskId.value) })
 onBeforeUnmount(() => { if (pollTimer) window.clearTimeout(pollTimer) })
 </script>
 
@@ -62,6 +74,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearTimeout(pollTimer) })
       <p v-else-if="task.state === 'BLOCKED'" class="error">The task cannot continue and polling has stopped.</p>
     </section>
     <template v-else-if="result">
+      <section class="job-description"><p class="eyebrow">Java backend role</p><h2>Job description</h2><p>{{ result.jobDescriptionText }}</p></section>
       <section class="score-band"><div><span>Composite match</span><strong>{{ Math.round(result.score.composite * 100) }}%</strong></div><dl><template v-for="item in scoreItems" :key="item[0]"><dt>{{ item[0] }}</dt><dd>{{ Math.round(item[1] * 100) }}%</dd></template></dl></section>
       <section class="result-section"><div class="section-heading"><div><p class="eyebrow">Requirement evidence</p><h2>What the resume supports</h2></div><p class="muted">Related-but-insufficient and unmet requirements are not positive matches.</p></div><MatchEvidenceTable :requirements="result.requirements" /></section>
       <section class="result-section suggestions-section"><div class="section-heading"><div><p class="eyebrow">Suggestions</p><h2>Review separately</h2></div><p class="muted">Nothing here is automatically applied to a resume.</p></div>
