@@ -71,7 +71,7 @@ public class MatchTaskService {
                 command.jobDescriptionText(), command.idempotencyKey(), callbackToken, evidenceIds, Instant.now());
         tasks.save(task);
         evidenceSpecs.forEach(e -> evidenceRepository.save(new AnalysisEvidence(e.id(), task.getId(), e.location(), e.start(), e.end())));
-        if (documentBytes.length == 0 && resume.getRawContentNonce() == null) { task.markFailed("MODEL_OUTPUT_INVALID"); tasks.save(task); return task; }
+        if (profile != null && documentBytes.length == 0 && resume.getRawContentNonce() == null) { task.markFailed("MODEL_OUTPUT_INVALID"); tasks.save(task); return task; }
         if (profile != null) {
             var source = reservation.sourceType().name();
             var allowed = evidenceSpecs.stream().map(e -> new PythonAnalysisClient.AllowedEvidence(e.id(), e.location(), e.start(), e.end())).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
@@ -99,10 +99,11 @@ public class MatchTaskService {
 
     @Transactional
     public CallbackResponse acceptCallback(AnalysisCallbackRequest request) {
-        if (request == null || request.callbackId() == null) return CallbackResponse.error("VALIDATION_ERROR");
+        if (request == null || request.callbackId() == null || request.taskId() == null || request.callbackToken() == null || request.correlationId() == null || request.attempt() < 1) return CallbackResponse.error("VALIDATION_ERROR");
         var old = receipts.findByCallbackId(request.callbackId());
         if (old.isPresent()) return old.get().payloadHash().equals(request.payloadHash()) ? CallbackResponse.acceptedReplay() : CallbackResponse.error("IDEMPOTENCY_CONFLICT");
         MatchTask task = tasks.lockById(request.taskId()).orElseThrow(TaskGoneException::new);
+        if (task.getState() == MatchTask.State.SUCCEEDED || task.getState() == MatchTask.State.FAILED || task.getState() == MatchTask.State.TIMED_OUT) return CallbackResponse.error("TASK_GONE");
         if (request.attempt() < task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
         if (!lifecycle.isActiveAtVersion(task.getResumeId(), task.getResumeVersion())) {
             task.markBlocked(); tasks.save(task); return CallbackResponse.error("TASK_GONE");
@@ -112,6 +113,7 @@ public class MatchTaskService {
         if (request.outcome() == null || !(request.outcome().equals("SUCCEEDED") || request.outcome().equals("FAILED") || request.outcome().equals("TIMED_OUT"))) return CallbackResponse.error("VALIDATION_ERROR");
         if (request.outcome().equals("SUCCEEDED") && request.result() == null) return CallbackResponse.error("MODEL_OUTPUT_INVALID");
         if (!request.outcome().equals("SUCCEEDED") && (request.errorCode() == null || request.errorCode().isBlank())) return CallbackResponse.error("VALIDATION_ERROR");
+        if (request.errorCode() != null && !Set.of("MODEL_UNAVAILABLE","MODEL_OUTPUT_INVALID","MODEL_ENDPOINT_REJECTED","UNSUPPORTED_FILE").contains(request.errorCode())) return CallbackResponse.error("VALIDATION_ERROR");
         if (request.payloadHash() == null || !request.payloadHash().matches("[a-f0-9]{64}")) return CallbackResponse.error("VALIDATION_ERROR");
         if (!request.payloadHash().equals(CallbackPayloadHash.compute(request))) return CallbackResponse.error("VALIDATION_ERROR");
         if ("SUCCEEDED".equals(request.outcome())) validateEvidence(task, request.result());
@@ -130,7 +132,7 @@ public class MatchTaskService {
     }
     private void validateEvidence(MatchTask task, AnalysisCallbackRequest.EvidenceReference evidence) {
         var allowed = evidenceRepository.findByTaskId(task.getId()).stream().filter(e -> e.getId().equals(evidence.evidenceId())).findFirst().orElse(null);
-        if (!task.evidenceAllowed(evidence.evidenceId()) || allowed == null || evidence.sourceStart() < allowed.getSourceStart() || evidence.sourceEnd() < evidence.sourceStart() || evidence.sourceEnd() > allowed.getSourceEnd() || evidence.excerpt() == null || evidence.excerpt().isBlank()) throw new EvidenceReferenceException();
+        if (allowed == null || evidence.sourceStart() < allowed.getSourceStart() || evidence.sourceEnd() < evidence.sourceStart() || evidence.sourceEnd() > allowed.getSourceEnd() || evidence.excerpt() == null || evidence.excerpt().isBlank()) throw new EvidenceReferenceException();
     }
     private static String randomToken() { byte[] bytes = new byte[48]; new java.security.SecureRandom().nextBytes(bytes); return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes); }
     private record EvidenceSpec(UUID id, String location, int start, int end) {}
