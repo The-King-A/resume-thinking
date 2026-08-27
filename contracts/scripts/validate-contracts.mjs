@@ -68,6 +68,9 @@ const assertCallbackAfterSoftDeleteContext = async () => {
   if (context.resume.status !== 1 || context.resume.visibilityState !== 'USER_SOFT_DELETED') {
     throw new Error('callback-after-soft-delete context must record a user-soft-deleted resume');
   }
+  if (context.task.state !== 'BLOCKED') {
+    throw new Error('callback-after-soft-delete context task must be BLOCKED after soft deletion');
+  }
   if (context.expectedJavaRejection !== 'TASK_GONE') {
     throw new Error('callback-after-soft-delete context must expect Java rejection TASK_GONE');
   }

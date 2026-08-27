@@ -3,7 +3,7 @@
     "id": "00000000-0000-4000-8000-000000000006",
     "resumeId": "00000000-0000-4000-8000-000000000050",
     "llmProfileId": "00000000-0000-4000-8000-000000000051",
-    "state": "PROCESSING",
+    "state": "BLOCKED",
     "attempt": 1,
     "resumeVersion": 3,
     "failureCode": null,
