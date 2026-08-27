@@ -25,4 +25,15 @@ describe('authentication expiry navigation', () => {
     await flushPromises()
     await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/login'))
   })
+
+  it('registers the resume lifecycle routes', () => {
+    for (const path of ['/resumes', '/match', '/matches/task-1', '/recovery', '/admin/recovery']) {
+      expect(router.resolve(path).matched.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('redirects a USER away from administrator recovery', async () => {
+    await router.push('/admin/recovery')
+    expect(router.currentRoute.value.path).toBe('/resumes')
+  })
 })
