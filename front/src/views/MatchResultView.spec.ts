@@ -43,6 +43,23 @@ describe('MatchResultView task lifecycle', () => {
     expect(wrapper.text()).not.toContain('private backend detail')
   })
 
+  it('retries a temporarily unavailable result until the completed result is available', async () => {
+    lifecycleApi.getMatchTask.mockResolvedValue({ id: 'task-1', state: 'SUCCEEDED' })
+    lifecycleApi.getMatchResult
+      .mockRejectedValueOnce(new ApiError({ code: 'TASK_NOT_READY', message: 'private backend detail', correlationId: 'c', retryable: true }, 409))
+      .mockResolvedValueOnce({ taskId: 'task-1', resumeId: 'resume-1', resumeVersion: 1, jobDescriptionText: 'Java backend engineer.', score: { skills: .5, projectExperience: .5, workContent: .5, educationExperience: .5, softSkills: .5, composite: .5 }, requirements: [], suggestions: [], completedAt: '2026-08-27T08:00:00Z' })
+    const wrapper = mount(MatchResultView, { global: { stubs: { RouterLink: true, MatchEvidenceTable: true } } })
+    await flushPromises()
+    expect(lifecycleApi.getMatchResult).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('Result not ready')
+
+    await vi.advanceTimersByTimeAsync(1500)
+    await flushPromises()
+    expect(lifecycleApi.getMatchResult).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('Java backend engineer.')
+    expect(wrapper.text()).not.toContain('Result not ready')
+  })
+
   it('shows archived state on a 410 TASK_GONE', async () => {
     lifecycleApi.getMatchTask.mockRejectedValue(new ApiError({ code: 'TASK_GONE', message: 'private backend detail', correlationId: 'c', retryable: false }, 410))
     const wrapper = mount(MatchResultView, { global: { stubs: { RouterLink: true, MatchEvidenceTable: true } } })
