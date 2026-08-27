@@ -3,6 +3,7 @@ CREATE TABLE resumes (
  owner_id BINARY(16) NOT NULL,
  title VARCHAR(200) NOT NULL,
  source_type VARCHAR(8) NOT NULL,
+ parser_version VARCHAR(64) NOT NULL,
  raw_content_ciphertext BLOB NOT NULL,
  creator_role VARCHAR(16) NOT NULL,
  status TINYINT NOT NULL DEFAULT 0,
@@ -24,7 +25,10 @@ CREATE TABLE resume_recovery_audit (
  resume_id BINARY(16) NOT NULL,
  actor_id BINARY(16) NULL,
  action VARCHAR(32) NOT NULL,
- visibility_state VARCHAR(32) NOT NULL,
+ prior_visibility_state VARCHAR(32) NOT NULL,
+ new_visibility_state VARCHAR(32) NOT NULL,
  occurred_at TIMESTAMP(6) NOT NULL,
+ correlation_id BINARY(16) NOT NULL,
  CONSTRAINT fk_resume_audit_resume FOREIGN KEY (resume_id) REFERENCES resumes(id)
-);
+ );
+CREATE INDEX ix_resume_audit_resume_occurred ON resume_recovery_audit(resume_id, occurred_at);

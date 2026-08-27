@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.time.*;
 import java.util.*;
 import static org.assertj.core.api.Assertions.*;
+import org.springframework.data.domain.PageRequest;
 
 class ResumeLifecycleServiceTest {
  private final UUID userId=UUID.randomUUID(), otherUserId=UUID.randomUUID(), adminId=UUID.randomUUID();
@@ -39,5 +40,41 @@ class ResumeLifecycleServiceTest {
   Resume r=Resume.active(UUID.randomUUID(),userId,"x",Resume.SourceType.TXT,UserRole.USER,now,4L);repo.save(r);
   assertThatThrownBy(()->lifecycleService.softDelete(new DeleteResumeCommand(r.getId(),userId,UserRole.USER,"删除",4L))).isInstanceOf(IllegalArgumentException.class);
   assertThatThrownBy(()->lifecycleService.softDelete(new DeleteResumeCommand(r.getId(),userId,UserRole.USER,"确认删除简历",3L))).isInstanceOf(VersionConflictException.class);
+ }
+
+ @Test void repeatedRestoreOfAuthorizedActiveRecordIsIdempotent(){
+  Resume r=Resume.active(UUID.randomUUID(),userId,"x",Resume.SourceType.TXT,UserRole.USER,now,0L);repo.save(r);
+  lifecycleService.softDelete(new DeleteResumeCommand(r.getId(),userId,UserRole.USER,"确认删除简历",0L));
+  ResumeView first=lifecycleService.recover(r.getId(),userId,UserRole.USER,1L);
+  ResumeView second=lifecycleService.recover(r.getId(),userId,UserRole.USER,999L);
+  assertThat(second).isEqualTo(first);
+ }
+
+ @Test void lifecycleVersionChangesOnlyWhenRepositoryPersists(){
+  Resume r=Resume.active(UUID.randomUUID(),userId,"x",Resume.SourceType.TXT,UserRole.USER,now,0L);repo.save(r);
+  r.softDelete(userId,UserRole.USER,now);
+  assertThat(r.getVersion()).isZero();
+  repo.save(r);
+  assertThat(r.getVersion()).isEqualTo(1L);
+ }
+
+ @Test void pagedQueriesApplyOwnerAndRoleFiltersBeforeReturningResults(){
+  Resume mine=Resume.active(UUID.randomUUID(),userId,"mine",Resume.SourceType.TXT,UserRole.USER,now,0L);
+  Resume other=Resume.active(UUID.randomUUID(),otherUserId,"other",Resume.SourceType.TXT,UserRole.USER,now,0L);
+  repo.save(mine); repo.save(other);
+  assertThat(lifecycleService.listActive(userId,UserRole.USER,PageRequest.of(0,1)).getContent()).containsExactly(mine);
+  lifecycleService.softDelete(new DeleteResumeCommand(mine.getId(),userId,UserRole.USER,"确认删除简历",0L));
+  lifecycleService.softDelete(new DeleteResumeCommand(other.getId(),otherUserId,UserRole.USER,"确认删除简历",0L));
+  assertThat(lifecycleService.listRecoverable(userId,UserRole.USER,null,PageRequest.of(0,20)).getContent()).containsExactly(mine);
+  assertThat(lifecycleService.listRecoverable(adminId,UserRole.ADMIN,userId,PageRequest.of(0,20)).getContent()).containsExactly(mine);
+ }
+
+ @Test void analysisReservationIsInvalidatedByVersionOrVisibilityChange(){
+  Resume r=Resume.active(UUID.randomUUID(),userId,"x",Resume.SourceType.TXT,UserRole.USER,now,0L);repo.save(r);
+  var reservation=lifecycleService.reserveForAnalysis(r.getId(),userId,UserRole.USER);
+  assertThat(reservation.resumeVersion()).isZero();
+  assertThat(lifecycleService.isActiveAtVersion(r.getId(),reservation.resumeVersion())).isTrue();
+  lifecycleService.softDelete(new DeleteResumeCommand(r.getId(),userId,UserRole.USER,"确认删除简历",0L));
+  assertThat(lifecycleService.isActiveAtVersion(r.getId(),reservation.resumeVersion())).isFalse();
  }
 }
