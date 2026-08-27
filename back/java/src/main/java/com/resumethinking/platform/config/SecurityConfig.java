@@ -106,8 +106,14 @@ public class SecurityConfig {
         private final ObjectMapper objectMapper;
 
         public InternalServiceTokenFilter(String expectedToken, ObjectMapper objectMapper) {
-            this.expectedToken = expectedToken == null ? new byte[0] : expectedToken.getBytes(StandardCharsets.UTF_8);
+            this.expectedToken = usableToken(expectedToken) ? expectedToken.getBytes(StandardCharsets.UTF_8) : new byte[0];
             this.objectMapper = objectMapper;
+        }
+
+        private static boolean usableToken(String token) {
+            if (token == null || token.isBlank()) return false;
+            String normalized = token.toLowerCase(java.util.Locale.ROOT);
+            return !normalized.contains("replace-with") && !normalized.contains("change-me") && !normalized.contains("placeholder");
         }
 
         @Override
