@@ -28,7 +28,7 @@
     "payloadHash": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$",
-      "description": "SHA-256 of the canonical callback payload used to detect a changed retry."
+      "description": "Lowercase SHA-256 of the RFC 8785 JSON Canonicalization Scheme UTF-8 bytes for this callback with the payloadHash member omitted."
     },
     "outcome": {
       "type": "string",
@@ -49,11 +49,17 @@
   "allOf": [
     {
       "if": { "properties": { "outcome": { "const": "SUCCEEDED" } } },
-      "then": { "required": ["result"] }
+      "then": {
+        "required": ["result"],
+        "not": { "required": ["errorCode"] }
+      }
     },
     {
       "if": { "properties": { "outcome": { "enum": ["FAILED", "TIMED_OUT"] } } },
-      "then": { "required": ["errorCode"] }
+      "then": {
+        "required": ["errorCode"],
+        "not": { "required": ["result"] }
+      }
     }
   ],
   "not": {
@@ -115,7 +121,17 @@
         "evidenceStrength": { "type": "string", "enum": ["NONE", "LOW", "MEDIUM", "HIGH"] },
         "gap": { "type": ["string", "null"], "maxLength": 5000 },
         "suggestionState": { "type": "string", "enum": ["SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED"] }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "matchStatus": { "enum": ["SATISFIED", "PARTIALLY_SATISFIED"] } } },
+          "then": { "properties": { "evidence": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "suggestionState": { "enum": ["SUPPORTED_FACT", "WORDING_ONLY_REWRITE"] } } },
+          "then": { "properties": { "evidence": { "minItems": 1 } } }
+        }
+      ]
     },
     "EvidenceReference": {
       "type": "object",
@@ -146,7 +162,13 @@
           "type": "array",
           "items": { "type": "string", "format": "uuid" }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "state": { "enum": ["SUPPORTED_FACT", "WORDING_ONLY_REWRITE"] } } },
+          "then": { "properties": { "evidenceIds": { "minItems": 1 } } }
+        }
+      ]
     }
   }
 }

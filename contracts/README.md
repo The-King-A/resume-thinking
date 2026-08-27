@@ -39,6 +39,19 @@ posts a schema-conforming callback to Java. It must never log a raw resume,
 provider API key, callback token, HTTP authorization header, or raw provider
 response.
 
+### Provider Endpoint Safety
+
+Before a connection test or analysis dispatch, Java accepts only an HTTPS
+endpoint. The sole local-development exception is an explicitly configured
+`http://127.0.0.1` endpoint used by controlled tests. Java resolves every host
+immediately before the request and rejects addresses that are private,
+loopback, link-local, multicast, and reserved. It rejects redirects to a new
+host and re-runs this check for every redirect or newly resolved address.
+Python repeats this validation immediately before its provider request as
+defense in depth. A rejected endpoint makes no provider request and returns
+`MODEL_ENDPOINT_REJECTED` with a sanitized error. This is a runtime network
+policy; a JSON Schema cannot safely infer DNS resolution or address class.
+
 The job and callback schemas reject unexpected top-level fields. They
 explicitly prohibit identity and storage-authority fields such as `ownerId`,
 `userId`, `databaseCredentials`, `persistenceCommand`, and host filesystem
@@ -90,6 +103,11 @@ archived data from MySQL. Recovery is an explicit, indexed, owner- or
 administrator-scoped query. Physical database deletion has no public API and
 is an operator-only direct MySQL procedure.
 
+Every successful restore recomputes `visible_until` from the restore timestamp
+and the original creator role: seven days for a `USER` creator and thirty days
+for an `ADMIN` creator. A restored record therefore cannot immediately
+re-archive because it retained an old deadline.
+
 ## Task Lifecycle and Callback Rules
 
 The durable task state machine is:
@@ -107,6 +125,13 @@ of the following match the active durable task:
 3. a fresh `callbackId`, or the same callback ID and the same `payloadHash`;
 4. every returned `evidenceId` belongs to `allowedEvidence` supplied in the
    original analysis job, with valid offsets for the current resume version.
+
+`payloadHash` is the lowercase SHA-256 digest of the UTF-8 bytes produced by
+[RFC 8785 JSON Canonicalization Scheme](https://www.rfc-editor.org/rfc/rfc8785)
+for the complete callback object after omitting its `payloadHash` member. The
+hash does not normalize text beyond RFC 8785, does not add whitespace, and
+uses RFC 8785 number serialization. Java and Python use this exact algorithm
+before either creates or compares a callback receipt.
 
 Repeated transport delivery with the same callback ID and payload hash returns
 an idempotent accepted replay. Reusing a callback ID with a changed payload

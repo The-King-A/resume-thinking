@@ -594,7 +594,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ApiError'
+            $ref: '#/components/schemas/ResourceNotFoundError'
           example:
             code: RESOURCE_NOT_FOUND
             message: Resource not found.
@@ -707,6 +707,14 @@ components:
         reason:
           type: string
           minLength: 1
+    ResourceNotFoundError:
+      allOf:
+        - $ref: '#/components/schemas/ApiError'
+        - type: object
+          required: [code]
+          properties:
+            code:
+              const: RESOURCE_NOT_FOUND
     UserRole:
       type: string
       enum: [USER, ADMIN]
@@ -858,7 +866,7 @@ components:
           type: boolean
         lastTestStatus:
           type: [string, 'null']
-          enum: [SUCCEEDED, FAILED, 'null']
+          enum: [SUCCEEDED, FAILED, null]
         lastTestedAt:
           type: [string, 'null']
           format: date-time
@@ -1023,7 +1031,7 @@ components:
           minimum: 0
         failureCode:
           type: [string, 'null']
-          enum: [MODEL_UNAVAILABLE, MODEL_OUTPUT_INVALID, MODEL_ENDPOINT_REJECTED, UNSUPPORTED_FILE, TASK_GONE, STALE_ATTEMPT, 'null']
+          enum: [MODEL_UNAVAILABLE, MODEL_OUTPUT_INVALID, MODEL_ENDPOINT_REJECTED, UNSUPPORTED_FILE, TASK_GONE, STALE_ATTEMPT, null]
         resultAvailable:
           type: boolean
         createdAt:
@@ -1092,6 +1100,23 @@ components:
           type: [string, 'null']
         suggestionState:
           $ref: '#/components/schemas/SuggestionState'
+      allOf:
+        - if:
+            properties:
+              matchStatus:
+                enum: [SATISFIED, PARTIALLY_SATISFIED]
+          then:
+            properties:
+              evidence:
+                minItems: 1
+        - if:
+            properties:
+              suggestionState:
+                enum: [SUPPORTED_FACT, WORDING_ONLY_REWRITE]
+          then:
+            properties:
+              evidence:
+                minItems: 1
     MatchSuggestion:
       type: object
       additionalProperties: false
@@ -1118,6 +1143,15 @@ components:
         requiresUserConfirmation:
           type: boolean
           default: false
+      allOf:
+        - if:
+            properties:
+              state:
+                enum: [SUPPORTED_FACT, WORDING_ONLY_REWRITE]
+          then:
+            properties:
+              evidenceIds:
+                minItems: 1
     ScoreBreakdown:
       type: object
       additionalProperties: false
