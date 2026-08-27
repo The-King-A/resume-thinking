@@ -21,9 +21,14 @@ def _hash_payload(payload: dict) -> str:
 def _finalize_callback(callback: dict, callback_base: dict) -> dict:
     """Hash and return the exact schema-shaped object that will be sent."""
     try:
-        payload = Callback.model_validate({**callback, "payloadHash": "0" * 64}).model_dump(by_alias=True, mode="json", exclude_none=True)
+        payload = Callback.model_validate({**callback, "payloadHash": "0" * 64}).model_dump(by_alias=True, mode="json")
+        if payload.get("outcome") == "SUCCEEDED":
+            payload.pop("errorCode", None)
+        else:
+            payload.pop("result", None)
         payload["payloadHash"] = _hash_payload(payload)
-        return Callback.model_validate(payload).model_dump(by_alias=True, mode="json", exclude_none=True)
+        Callback.model_validate(payload)
+        return payload
     except (ValueError, TypeError, UnicodeError):
         payload = {
             **callback_base,
@@ -31,7 +36,8 @@ def _finalize_callback(callback: dict, callback_base: dict) -> dict:
             "errorCode": "MODEL_OUTPUT_INVALID",
             "payloadHash": "0" * 64,
         }
-        payload = Callback.model_validate(payload).model_dump(by_alias=True, mode="json", exclude_none=True)
+        payload = Callback.model_validate(payload).model_dump(by_alias=True, mode="json")
+        payload.pop("result", None)
         payload["payloadHash"] = _hash_payload(payload)
         return payload
 

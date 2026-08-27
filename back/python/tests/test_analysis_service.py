@@ -1,4 +1,7 @@
 import base64
+import json
+import subprocess
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -99,6 +102,44 @@ async def test_callback_hash_covers_exact_schema_payload(monkeypatch):
     assert "errorCode" not in callback
     assert "result" in callback
     assert callback["payloadHash"] == _hash_payload(callback)
+
+
+@pytest.mark.asyncio
+async def test_success_callback_keeps_required_nested_null_and_passes_ajv(monkeypatch):
+    requirement_id = uuid4()
+
+    class RequirementClient(CapturingClient):
+        async def complete_structured(self, request):
+            return AnalysisResult.model_validate({
+                "score": {"skills": 0, "projectExperience": 0, "workContent": 0, "educationExperience": 0, "softSkills": 0, "composite": 0},
+                "requirements": [{
+                    "requirementId": str(requirement_id), "jobRequirementText": "Java", "requirementType": "MANDATORY",
+                    "matchStatus": "UNMET", "matchType": "NO_MATCH", "component": "SKILLS", "componentScore": 0,
+                    "evidence": [], "evidenceStrength": "NONE", "gap": None, "suggestionState": "RISKY_OR_UNSUPPORTED",
+                }], "suggestions": [],
+            })
+
+    monkeypatch.setattr("app.analysis_service.OpenAICompatibleClient", RequirementClient)
+    callback = await analyze_job(_job("alpha", 0, 5))
+    assert callback["result"]["requirements"][0]["gap"] is None
+    assert callback["payloadHash"] == _hash_payload(callback)
+
+    schema_path = Path(__file__).resolve().parents[3] / "contracts/internal/v1/analysis-callback.schema.json"
+    script = """
+const fs = require('fs');
+const Ajv = require('ajv/dist/2020');
+const addFormats = require('ajv-formats');
+const schema = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+const payload = JSON.parse(fs.readFileSync(0, 'utf8'));
+const ajv = new Ajv({allErrors: true, strict: false});
+addFormats(ajv);
+if (!ajv.validate(schema, payload)) {
+  console.error(JSON.stringify(ajv.errors));
+  process.exit(1);
+}
+"""
+    result = subprocess.run(["node", "-e", script, str(schema_path)], input=json.dumps(callback), text=True, capture_output=True, cwd=schema_path.parents[2])
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 @pytest.mark.asyncio

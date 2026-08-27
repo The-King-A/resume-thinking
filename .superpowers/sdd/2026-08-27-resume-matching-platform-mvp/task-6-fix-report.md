@@ -77,3 +77,49 @@ pnpm --dir contracts validate
   should also prevent DNS rebinding between validation and connection.
 - The Python test suite uses deterministic transports and does not contact a
   real external model provider.
+
+## Fix Round 2
+
+### Failure reproduction
+
+Two regression tests were added before implementation changes. The first
+constructed a successful result containing a requirement with the required
+`gap: null`, then checked the returned object with AJV and recomputed its
+hash. It failed because recursive `exclude_none=True` removed the nested
+required `gap`, causing final callback validation to fail and downgrade the
+success. The second sent a labeled Chinese address followed by punctuation
+and a phone number through a real `httpx.MockTransport`; the address remained
+in the outbound body because `(?!\\S)` rejected Chinese punctuation as a
+boundary.
+
+### Changes
+
+- Callback finalization now serializes without recursive null removal, removes
+  only the mutually exclusive top-level `result` or `errorCode`, computes the
+  hash over that exact object, validates it, and returns that exact object.
+  Nested required fields such as `gap: null` remain present.
+- Address matching now treats end-of-input, whitespace, Chinese comma/period,
+  and semicolon as valid non-consuming boundaries. Punctuation remains in the
+  redacted text while the address and following phone are removed.
+- The AJV test validates the generated success callback against
+  `contracts/internal/v1/analysis-callback.schema.json` and verifies the
+  RFC 8785/JCS payload hash over the final object.
+
+### Verification
+
+```text
+C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest back/python/tests -q
+...........................................                              [100%]
+43 passed, 1 warning in 0.66s
+
+C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -c "import pathlib,py_compile; [py_compile.compile(str(p), doraise=True) for p in pathlib.Path('back/python/app').glob('*.py')]; print('py_compile ok')"
+py_compile ok
+
+pnpm --dir contracts validate
+all frozen fixtures valid; expected invalid fixture accepted
+```
+
+Remaining risks are unchanged: Java callback lifecycle and persistence
+integration remain outside this lane, provider authentication still requires
+the API key in the Authorization header, and DNS rebinding protection also
+depends on production network policy.
