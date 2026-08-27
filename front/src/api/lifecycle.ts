@@ -2,29 +2,25 @@ import { request } from './http'
 import type {
   CreateMatchTaskRequest,
   DeleteResumeRequest,
-  Evidence,
   MatchResult,
   MatchTask,
-  RequirementMatch,
   RestoreResumeRequest,
   Resume,
   ResumePage,
 } from './contracts'
 
-type CompatibleEvidence = Omit<Evidence, 'id'> & { id?: string; evidenceId?: string }
-type CompatibleMatchResult = Omit<MatchResult, 'requirements'> & {
-  requirements: Array<Omit<RequirementMatch, 'evidence'> & { evidence: CompatibleEvidence[] }>
-}
-
-export function normalizeMatchResult(result: CompatibleMatchResult): MatchResult {
+export function normalizeMatchResult(result: MatchResult): MatchResult {
   return {
     ...result,
     requirements: result.requirements.map((requirement) => ({
       ...requirement,
-      evidence: requirement.evidence.map(({ evidenceId, ...evidence }) => {
-        const id = evidence.id || evidenceId
-        if (!id) throw new Error('Evidence identifier missing')
-        return { ...evidence, id }
+      evidence: requirement.evidence.map((evidence) => {
+        const record = evidence as unknown as Record<string, unknown>
+        const allowedKeys = new Set(['id', 'sourceType', 'sourceLocation', 'sourceStart', 'sourceEnd', 'excerpt', 'confidence', 'strength'])
+        if (typeof record.id !== 'string' || !record.id || 'evidenceId' in record || Object.keys(record).some((key) => !allowedKeys.has(key))) {
+          throw new Error('Evidence must include a v1 id')
+        }
+        return evidence
       }),
     })),
   }
@@ -46,5 +42,5 @@ export const lifecycleApi = {
   restoreAdminResume: (resumeId: string, data: RestoreResumeRequest) => request<Resume>({ method: 'POST', url: `/api/v1/admin/recovery/resumes/${resumeId}/restore`, data }),
   createMatchTask: (data: CreateMatchTaskRequest) => request<MatchTask>({ method: 'POST', url: '/api/v1/match-tasks', data }),
   getMatchTask: (taskId: string) => request<MatchTask>({ method: 'GET', url: `/api/v1/match-tasks/${taskId}` }),
-  getMatchResult: (taskId: string) => request<CompatibleMatchResult>({ method: 'GET', url: `/api/v1/match-tasks/${taskId}/result` }).then(normalizeMatchResult),
+  getMatchResult: (taskId: string) => request<MatchResult>({ method: 'GET', url: `/api/v1/match-tasks/${taskId}/result` }).then(normalizeMatchResult),
 }

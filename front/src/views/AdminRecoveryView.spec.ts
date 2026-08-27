@@ -50,4 +50,15 @@ describe('AdminRecoveryView role boundary', () => {
     expect(wrapper.text()).toContain('admin-visible-resume')
     expect(wrapper.text()).toContain('owner-42')
   })
+
+  it('checks the current role when an action is invoked', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'admin-1', username: 'admin', email: 'admin@example.com', role: 'ADMIN', createdAt: '' }
+    request.mockResolvedValue({ items: [], page: 1, pageSize: 20, totalItems: 0, totalPages: 1 })
+    const wrapper = mount(AdminRecoveryView, { global: { plugins: [pinia], stubs: { RouterLink: true } } })
+    await flushPromises()
+    auth.user = { id: 'user-1', username: 'user', email: 'user@example.com', role: 'USER', createdAt: '' }
+    await wrapper.get('form').trigger('submit')
+    expect(request).toHaveBeenCalledTimes(1)
+  })
 })

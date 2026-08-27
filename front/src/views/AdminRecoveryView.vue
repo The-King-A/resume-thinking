@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import RecoveryDialog from '../components/RecoveryDialog.vue'
 import { lifecycleApi } from '../api/lifecycle'
 import type { RestoreResumeRequest, Resume } from '../api/contracts'
@@ -14,11 +14,11 @@ const restoring = ref(false)
 const error = ref('')
 const page = ref(1)
 const totalPages = ref(1)
-const isAdmin = auth.user?.role === 'ADMIN'
+const isAdmin = computed(() => auth.user?.role === 'ADMIN')
 const stateLabel = (state: Resume['visibilityState']) => state.includes('ARCHIVED') ? 'Archived' : 'Soft deleted'
 
 async function loadRecoverable(nextPage = page.value) {
-  if (!isAdmin) return
+  if (auth.user?.role !== 'ADMIN') return
   loading.value = true
   error.value = ''
   try {
@@ -32,7 +32,7 @@ async function loadRecoverable(nextPage = page.value) {
 }
 
 async function restore(payload: RestoreResumeRequest) {
-  if (!isAdmin || !selected.value) return
+  if (auth.user?.role !== 'ADMIN' || !selected.value) return
   restoring.value = true
   error.value = ''
   const id = selected.value.id

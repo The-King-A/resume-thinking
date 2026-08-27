@@ -14,6 +14,7 @@ const gone = ref(false)
 const notReady = ref(false)
 const error = ref('')
 let pollTimer: number | undefined
+let requestGeneration = 0
 
 const statusLabel = computed(() => ({ QUEUED: 'Queued', PROCESSING: 'Processing', SUCCEEDED: 'Complete', FAILED: 'Failed', TIMED_OUT: 'Timed out', BLOCKED: 'Archived or blocked' }[task.value?.state || 'QUEUED']))
 const scoreItems = computed(() => result.value ? [
@@ -22,26 +23,48 @@ const scoreItems = computed(() => result.value ? [
 ] as const : [])
 const suggestionLabel = (state: SuggestionState) => ({ SUPPORTED_FACT: 'Supported fact', WORDING_ONLY_REWRITE: 'Wording-only rewrite', NEEDS_USER_CONFIRMATION: 'Needs your confirmation', RISKY_OR_UNSUPPORTED: 'Risky or unsupported' }[state])
 
-function schedulePoll() {
-  if (task.value?.state !== 'QUEUED' && task.value?.state !== 'PROCESSING') return
-  pollTimer = window.setTimeout(() => loadTask(taskId.value), 1500)
+function isCurrent(id: string, generation: number) {
+  return generation === requestGeneration && taskId.value === id
 }
 
-async function loadTask(id: string) {
+function schedulePoll(id: string, generation: number) {
+  if (!isCurrent(id, generation) || (task.value?.state !== 'QUEUED' && task.value?.state !== 'PROCESSING')) return
+  if (pollTimer) window.clearTimeout(pollTimer)
+  pollTimer = window.setTimeout(() => {
+    pollTimer = undefined
+    if (isCurrent(id, generation)) void loadTask(id, generation)
+  }, 1500)
+}
+
+async function loadTask(id: string, generation = requestGeneration) {
+  if (!isCurrent(id, generation)) return
   if (!id) { error.value = 'Unable to load this matching task.'; loading.value = false; return }
   try {
-    task.value = await lifecycleApi.getMatchTask(id)
-    if (task.value.state === 'SUCCEEDED') result.value = await lifecycleApi.getMatchResult(id)
-    else schedulePoll()
+    const nextTask = await lifecycleApi.getMatchTask(id)
+    if (!isCurrent(id, generation)) return
+    task.value = nextTask
+    if (nextTask.state === 'SUCCEEDED') {
+      const nextResult = await lifecycleApi.getMatchResult(id)
+      if (!isCurrent(id, generation)) return
+      result.value = nextResult
+    } else schedulePoll(id, generation)
   } catch (caught) {
-    if (caught instanceof ApiError && caught.code === 'TASK_GONE') gone.value = true
+    if (!isCurrent(id, generation)) return
+    if (caught instanceof ApiError && caught.code === 'TASK_GONE') {
+      task.value = null
+      result.value = null
+      gone.value = true
+    }
     else if (caught instanceof ApiError && caught.code === 'TASK_NOT_READY') notReady.value = true
     else error.value = 'Unable to load this matching task.'
-  } finally { loading.value = false }
+  } finally {
+    if (isCurrent(id, generation)) loading.value = false
+  }
 }
 
 watch(() => route.params.taskId, (next) => {
   if (pollTimer) window.clearTimeout(pollTimer)
+  const generation = ++requestGeneration
   taskId.value = String(next || '')
   task.value = null
   result.value = null
@@ -49,9 +72,9 @@ watch(() => route.params.taskId, (next) => {
   notReady.value = false
   error.value = ''
   loading.value = true
-  void loadTask(taskId.value)
+  void loadTask(taskId.value, generation)
 })
-onMounted(() => { void loadTask(taskId.value) })
+onMounted(() => { const generation = ++requestGeneration; void loadTask(taskId.value, generation) })
 onBeforeUnmount(() => { if (pollTimer) window.clearTimeout(pollTimer) })
 </script>
 
