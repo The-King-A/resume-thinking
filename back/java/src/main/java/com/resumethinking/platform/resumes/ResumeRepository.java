@@ -25,7 +25,9 @@ public interface ResumeRepository extends Repository<Resume, UUID> {
     default Optional<Resume> findActiveByIdAndOwnerId(UUID id, UUID ownerId) { return findById(id).filter(r -> r.getOwnerId().equals(ownerId) && r.getVisibilityState()==VisibilityState.ACTIVE); }
     default Optional<Resume> findRecoverable(UUID id, UUID actorId, UserRole role) {
         return findById(id).filter(r -> role==UserRole.ADMIN
-            ? true
+            ? EnumSet.of(VisibilityState.USER_SOFT_DELETED, VisibilityState.ADMIN_SOFT_DELETED,
+                    VisibilityState.USER_CACHE_ARCHIVED, VisibilityState.ADMIN_CACHE_ARCHIVED)
+                    .contains(r.getVisibilityState())
             : r.getOwnerId().equals(actorId) && (r.getVisibilityState()==VisibilityState.ACTIVE
                 || r.getVisibilityState()==VisibilityState.USER_SOFT_DELETED
                 || r.getVisibilityState()==VisibilityState.USER_CACHE_ARCHIVED));

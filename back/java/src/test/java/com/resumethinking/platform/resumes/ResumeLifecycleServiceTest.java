@@ -26,13 +26,19 @@ class ResumeLifecycleServiceTest {
   assertThatThrownBy(()->lifecycleService.recover(resume.getId(),otherUserId,UserRole.USER,3L)).isInstanceOf(ResourceNotFoundException.class);
   lifecycleService.recover(resume.getId(),userId,UserRole.USER,3L); assertThat(resume.getStatus()).isZero(); assertThat(resume.getVisibilityState()).isEqualTo(VisibilityState.ACTIVE);
  }
- @Test void administratorSoftDeleteCannotBeRecoveredByOwner(){
+  @Test void administratorSoftDeleteCannotBeRecoveredByOwner(){
   Resume resume=Resume.active(UUID.randomUUID(),userId,"CV",Resume.SourceType.TXT,UserRole.USER,now,1L); repo.save(resume);
   lifecycleService.softDelete(new DeleteResumeCommand(resume.getId(),adminId,UserRole.ADMIN,"确认删除简历",1L));
   assertThat(resume.getVisibilityState()).isEqualTo(VisibilityState.ADMIN_SOFT_DELETED);
   assertThatThrownBy(()->lifecycleService.recover(resume.getId(),userId,UserRole.USER,2L)).isInstanceOf(ResourceNotFoundException.class);
-  lifecycleService.recover(resume.getId(),adminId,UserRole.ADMIN,2L); assertThat(resume.getVisibilityState()).isEqualTo(VisibilityState.ACTIVE);
- }
+   lifecycleService.recover(resume.getId(),adminId,UserRole.ADMIN,2L); assertThat(resume.getVisibilityState()).isEqualTo(VisibilityState.ACTIVE);
+  }
+
+  @Test void administratorCannotRestoreAnActiveRecordThroughRecovery(){
+   Resume resume=Resume.active(UUID.randomUUID(),userId,"active",Resume.SourceType.TXT,UserRole.USER,now,0L); repo.save(resume);
+   assertThatThrownBy(()->lifecycleService.recover(resume.getId(),adminId,UserRole.ADMIN,0L))
+       .isInstanceOf(ResourceNotFoundException.class);
+  }
  @Test void archiveUsesCreatorRoleRetentionAndIsRecoverable(){
   Resume user=Resume.active(UUID.randomUUID(),userId,"u",Resume.SourceType.TXT,UserRole.USER,now.minus(Duration.ofDays(8)),0L);
   Resume admin=Resume.active(UUID.randomUUID(),adminId,"a",Resume.SourceType.DOCX,UserRole.ADMIN,now.minus(Duration.ofDays(31)),0L); repo.save(user);repo.save(admin);cache.put(user);cache.put(admin);

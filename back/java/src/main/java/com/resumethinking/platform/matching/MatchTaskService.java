@@ -82,8 +82,11 @@ public class MatchTaskService {
         String callbackToken = randomToken();
         Resume resume = lifecycle.findActiveForAnalysis(reservation.resumeId(), reservation.resumeVersion()).orElseThrow(ResourceNotFoundException::new);
         byte[] documentBytes;
+        // Raw resume content is always persisted as ciphertext.  Missing
+        // crypto configuration or an invalid ciphertext must fail closed: an
+        // encrypted blob is never a valid fallback analysis document.
         if (resume.getRawContentNonce() == null || crypto == null) {
-            documentBytes = resume.getRawContentNonce() == null ? new byte[0] : resume.getEncryptedRawContent();
+            documentBytes = new byte[0];
         } else {
             try { documentBytes = crypto.decryptBytes(resume.getEncryptedRawContent(), resume.getRawContentNonce()); }
             catch (RuntimeException ex) { documentBytes = new byte[0]; }
@@ -165,19 +168,15 @@ public class MatchTaskService {
     }
 
     private CallbackResponse acceptCallbackInTransaction(AnalysisCallbackRequest request) {
-        if (request == null || request.callbackId() == null || request.taskId() == null || request.callbackToken() == null
-                || request.callbackToken().length() < 32 || request.correlationId() == null || request.attempt() < 1) {
+        if (!validCallbackEnvelope(request)) {
             return CallbackResponse.error("VALIDATION_ERROR");
         }
         if (request.payloadHash() == null || !request.payloadHash().matches("[a-f0-9]{64}")) {
             return CallbackResponse.error("VALIDATION_ERROR");
         }
-        final boolean hashMatches;
-        try {
-            hashMatches = request.payloadHash().equals(CallbackPayloadHash.compute(request));
-        } catch (RuntimeException invalidHashInput) {
-            return CallbackResponse.error("VALIDATION_ERROR");
-        }
+        final String computedPayloadHash = recomputePayloadHash(request);
+        if (computedPayloadHash == null) return CallbackResponse.error("VALIDATION_ERROR");
+        final boolean hashMatches = request.payloadHash().equals(computedPayloadHash);
 
         // Lock task and resume before consulting the receipt.  This prevents a
         // reused callback ID from bypassing token, attempt, or visibility checks.
@@ -228,13 +227,54 @@ public class MatchTaskService {
     }
 
     private CallbackResponse resolveCallbackRace(AnalysisCallbackRequest request, Throwable failure) {
-        Optional<CallbackReceipt> raced = inReadTransaction(() -> receipts.findByCallbackId(request.callbackId()));
+        // The failed write transaction may have used a stale persistence
+        // context.  Re-read the receipt and re-run the same identity checks in
+        // a fresh transaction before treating this as an idempotent replay.
+        return inWriteTransaction(() -> resolveCallbackRaceInTransaction(request, failure));
+    }
+
+    private CallbackResponse resolveCallbackRaceInTransaction(AnalysisCallbackRequest request, Throwable failure) {
+        if (!validCallbackEnvelope(request) || request.payloadHash() == null
+                || !request.payloadHash().matches("[a-f0-9]{64}")) {
+            return CallbackResponse.error("VALIDATION_ERROR");
+        }
+        String computedPayloadHash = recomputePayloadHash(request);
+        if (computedPayloadHash == null || !request.payloadHash().equals(computedPayloadHash)) {
+            // The callback ID was already claimed by another transaction, so
+            // a changed body is an idempotency conflict rather than a replay.
+            return CallbackResponse.error("IDEMPOTENCY_CONFLICT");
+        }
+
+        Optional<CallbackReceipt> raced = receipts.findByCallbackId(request.callbackId());
         if (raced.isEmpty()) {
             if (failure instanceof RuntimeException runtime) throw runtime;
             throw new IllegalStateException("callback receipt persistence failed", failure);
         }
+
+        MatchTask task = tasks.lockById(request.taskId()).orElseThrow(TaskGoneException::new);
+        if (request.attempt() < task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
+        if (lifecycle.lockActiveAtVersion(task.getResumeId(), task.getResumeVersion()).isEmpty()) {
+            task.markBlocked();
+            tasks.saveAndFlush(task);
+            return CallbackResponse.error("TASK_GONE");
+        }
+        if (request.attempt() != task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
+        if (!task.tokenMatches(request.callbackToken()) || task.getState() == MatchTask.State.BLOCKED) {
+            return CallbackResponse.error("TASK_GONE");
+        }
         return request.payloadHash().equals(raced.get().payloadHash())
                 ? CallbackResponse.acceptedReplay() : CallbackResponse.error("IDEMPOTENCY_CONFLICT");
+    }
+
+    private static boolean validCallbackEnvelope(AnalysisCallbackRequest request) {
+        return request != null && request.callbackId() != null && request.taskId() != null
+                && request.callbackToken() != null && request.callbackToken().length() >= 32
+                && request.correlationId() != null && request.attempt() >= 1;
+    }
+
+    private static String recomputePayloadHash(AnalysisCallbackRequest request) {
+        try { return CallbackPayloadHash.compute(request); }
+        catch (RuntimeException invalidHashInput) { return null; }
     }
 
     private void validateEvidence(MatchTask task, AnalysisCallbackRequest.AnalysisResultPayload result) {
@@ -257,12 +297,14 @@ public class MatchTaskService {
                 .setScale(4, java.math.RoundingMode.HALF_UP);
         double expected = expectedDecimal.doubleValue();
         if (Double.compare(expected, result.score().composite()) != 0) throw new EvidenceReferenceException();
+        Set<UUID> requirementIds = new HashSet<>();
         for (var requirement : result.requirements()) {
             if (requirement == null || requirement.requirementId() == null || blank(requirement.jobRequirementText()) || !Set.of("MANDATORY", "PREFERRED").contains(requirement.requirementType()) || !Set.of("SATISFIED", "PARTIALLY_SATISFIED", "RELATED_BUT_EVIDENCE_INSUFFICIENT", "UNMET").contains(requirement.matchStatus()) || !Set.of("EXACT", "SEMANTIC", "RELATED", "NO_MATCH").contains(requirement.matchType()) || !Set.of("SKILLS", "PROJECT_EXPERIENCE", "WORK_CONTENT", "EDUCATION_EXPERIENCE", "SOFT_SKILLS").contains(requirement.component()) || requirement.evidence() == null || !Set.of("NONE", "LOW", "MEDIUM", "HIGH").contains(requirement.evidenceStrength()) || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(requirement.suggestionState()) || !finiteBetween(requirement.componentScore())) throw new EvidenceReferenceException();
             if (("SATISFIED".equals(requirement.matchStatus()) || "PARTIALLY_SATISFIED".equals(requirement.matchStatus())) && requirement.evidence().isEmpty()) throw new EvidenceReferenceException();
             if (("SUPPORTED_FACT".equals(requirement.suggestionState()) || "WORDING_ONLY_REWRITE".equals(requirement.suggestionState())) && requirement.evidence().isEmpty()) throw new EvidenceReferenceException();
+            requirementIds.add(requirement.requirementId());
         }
-        for (var suggestion : result.suggestions()) if (suggestion == null || suggestion.suggestionId() == null || suggestion.requirementId() == null || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(suggestion.state()) || blank(suggestion.proposedText()) || suggestion.evidenceIds() == null || (("SUPPORTED_FACT".equals(suggestion.state()) || "WORDING_ONLY_REWRITE".equals(suggestion.state())) && suggestion.evidenceIds().isEmpty())) throw new EvidenceReferenceException();
+        for (var suggestion : result.suggestions()) if (suggestion == null || suggestion.suggestionId() == null || suggestion.requirementId() == null || !requirementIds.contains(suggestion.requirementId()) || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(suggestion.state()) || blank(suggestion.proposedText()) || suggestion.evidenceIds() == null || (("SUPPORTED_FACT".equals(suggestion.state()) || "WORDING_ONLY_REWRITE".equals(suggestion.state())) && suggestion.evidenceIds().isEmpty())) throw new EvidenceReferenceException();
     }
     private static boolean blank(String value) { return value == null || value.isBlank(); }
     private static boolean finiteBetween(double value) { return Double.isFinite(value) && value >= 0 && value <= 1; }

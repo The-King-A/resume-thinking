@@ -3,6 +3,7 @@ package com.resumethinking.platform.resumes;
 import com.resumethinking.platform.auth.UserRole;
 import com.resumethinking.platform.profiles.ResourceNotFoundException;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -14,6 +15,7 @@ import java.util.*;
 public class ResumeLifecycleService {
     public static final String CONFIRMATION = "确认删除简历";
     private final ResumeRepository repository; private final ResumeCache cache; private final ResumeAuditRepository audit; private final Clock clock;
+    @Autowired
     public ResumeLifecycleService(ResumeRepository repository, ResumeCache cache, ResumeAuditRepository audit, Clock clock){this.repository=repository;this.cache=cache;this.audit=audit;this.clock=clock;}
     public ResumeLifecycleService(ResumeRepository repository, ResumeCache cache, ResumeAuditRepository audit){this(repository,cache,audit,Clock.systemUTC());}
 
@@ -39,6 +41,12 @@ public class ResumeLifecycleService {
     @Transactional
     public ResumeView recover(UUID resumeId, UUID actorId, UserRole role, long expectedVersion) {
         Resume resume = repository.findRecoverable(resumeId,actorId,role).orElseThrow(ResourceNotFoundException::new);
+        // An administrator restore is only valid for an explicitly archived
+        // or soft-deleted record.  Keep the user's repeat-restore idempotency,
+        // but never expose ACTIVE records through the admin recovery route.
+        if (role == UserRole.ADMIN && resume.getVisibilityState() == VisibilityState.ACTIVE) {
+            throw new ResourceNotFoundException();
+        }
         if (resume.getVisibilityState()==VisibilityState.ACTIVE) return ResumeView.from(resume);
         requireVersion(resume, expectedVersion); VisibilityState prior=resume.getVisibilityState(); Instant at=clock.instant();
         resume.restore(at); repository.save(resume);

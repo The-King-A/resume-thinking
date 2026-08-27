@@ -10,6 +10,9 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.Set;
+import java.util.ArrayList;
+import java.util.Optional;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -52,6 +55,25 @@ class MatchTaskServiceTest {
         assertThat(task.state()).isEqualTo(MatchTask.State.PROCESSING);
         assertThat(new String(java.util.Base64.getDecoder().decode(capture.job.document().contentBase64()), StandardCharsets.UTF_8)).isEqualTo("Java\nTesting");
         assertThat(capture.job.allowedEvidence()).allSatisfy(e -> assertThat(e.sourceEnd()).isLessThanOrEqualTo(12));
+    }
+
+    @Test
+    void missingCryptoNeverDispatchesPersistedCiphertext() {
+        var resumes = new ResumeRepository.InMemory();
+        byte[] ciphertext = "ciphertext-must-not-leak".getBytes(StandardCharsets.UTF_8);
+        resumes.save(new Resume(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER,
+                ciphertext, new byte[12], Instant.now(), "v1"));
+        var capture = new CapturingClient();
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()),
+                new TestProfileService(userId, profileId), new MatchTaskRepository.InMemory(), capture,
+                new AnalysisResultRepository.InMemory(), new CallbackReceiptRepository.InMemory(),
+                new AnalysisEvidenceRepository.InMemory(), null);
+
+        var task = service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
+                "Build reliable software with clear communication and practical testing.", "missing-crypto-0001"));
+
+        assertThat(task.state()).isEqualTo(MatchTask.State.FAILED);
+        assertThat(capture.job).isNull();
     }
 
     @Test
@@ -164,11 +186,80 @@ class MatchTaskServiceTest {
         assertThat(service.acceptCallback(callback).code()).isEqualTo("MODEL_OUTPUT_INVALID");
     }
 
+    @Test
+    void suggestionRequirementMustBeReturnedByTheSameResult() {
+        var resumes = new ResumeRepository.InMemory();
+        resumes.save(Resume.active(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER, Instant.now(), 0L));
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()),
+                null, new MatchTaskRepository.InMemory(), new PythonAnalysisClient.Noop());
+        var task = service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
+                "Build reliable software with clear communication and practical testing.", "suggestion-owner-01"));
+
+        UUID returnedRequirementId = UUID.randomUUID();
+        var requirement = new AnalysisCallbackRequest.RequirementMatch(returnedRequirementId, "Java", "MANDATORY",
+                "UNMET", "NO_MATCH", "SKILLS", 0.0,
+                java.util.List.<AnalysisCallbackRequest.EvidenceReference>of(), "NONE", "gap", "NEEDS_USER_CONFIRMATION");
+        var suggestion = new AnalysisCallbackRequest.Suggestion(UUID.randomUUID(), UUID.randomUUID(),
+                "NEEDS_USER_CONFIRMATION", "Consider adding Java experience", java.util.List.of());
+        var result = new AnalysisCallbackRequest.AnalysisResultPayload(
+                new AnalysisCallbackRequest.ScoreBreakdown(0, 0, 0, 0, 0, 0),
+                java.util.List.of(requirement), java.util.List.of(suggestion));
+        var callback = new AnalysisCallbackRequest(task.id(), 1, UUID.randomUUID(), task.callbackTokenForTests(),
+                "", "SUCCEEDED", result, null, UUID.randomUUID()).withComputedPayloadHash();
+
+        assertThat(service.acceptCallback(callback).code()).isEqualTo("MODEL_OUTPUT_INVALID");
+    }
+
+    @Test
+    void callbackRaceRecomputesHashBeforeAcceptingReplay() {
+        var resumes = new ResumeRepository.InMemory();
+        resumes.save(Resume.active(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER, Instant.now(), 0L));
+        var receipts = new MutatingRaceReceipts();
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()),
+                null, new MatchTaskRepository.InMemory(), new PythonAnalysisClient.Noop(),
+                new AnalysisResultRepository.InMemory(), receipts);
+        var task = service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
+                "Build reliable software with clear communication and practical testing.", "callback-race-hash-1"));
+
+        UUID requirementId = UUID.randomUUID();
+        var requirements = new ArrayList<>(java.util.List.of(new AnalysisCallbackRequest.RequirementMatch(requirementId,
+                "Java", "MANDATORY", "UNMET", "NO_MATCH", "SKILLS", 0.0,
+                java.util.List.<AnalysisCallbackRequest.EvidenceReference>of(), "NONE", "gap", "NEEDS_USER_CONFIRMATION")));
+        var result = new AnalysisCallbackRequest.AnalysisResultPayload(
+                new AnalysisCallbackRequest.ScoreBreakdown(0, 0, 0, 0, 0, 0), requirements,
+                java.util.List.of());
+        var callback = new AnalysisCallbackRequest(task.id(), 1, UUID.randomUUID(), task.callbackTokenForTests(),
+                "", "SUCCEEDED", result, null, UUID.randomUUID()).withComputedPayloadHash();
+        receipts.mutation = requirements::clear;
+
+        assertThat(service.acceptCallback(callback).code()).isEqualTo("IDEMPOTENCY_CONFLICT");
+    }
+
 
     private static final class CapturingClient extends PythonAnalysisClient {
         private InternalAnalysisJob job;
         CapturingClient() { super(URI.create("http://127.0.0.1:1")); }
         @Override public void dispatch(InternalAnalysisJob job) { this.job = job; }
+    }
+
+    private static final class MutatingRaceReceipts implements CallbackReceiptRepository {
+        private CallbackReceipt receipt;
+        private Runnable mutation;
+
+        @Override public synchronized Optional<CallbackReceipt> findByCallbackId(UUID id) {
+            return receipt == null ? Optional.empty() : Optional.of(receipt);
+        }
+
+        @Override public synchronized CallbackReceipt save(CallbackReceipt value) {
+            receipt = value;
+            return value;
+        }
+
+        @Override public synchronized CallbackReceipt saveAndFlush(CallbackReceipt value) {
+            receipt = value;
+            if (mutation != null) mutation.run();
+            throw new DataIntegrityViolationException("duplicate callback");
+        }
     }
 
     private static final class TestProfileService extends LlmProfileService {
