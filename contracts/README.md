@@ -58,6 +58,15 @@ explicitly prohibit identity and storage-authority fields such as `ownerId`,
 paths. The internal document is a controlled payload, never an undocumented
 host path shared between services.
 
+The v1 analysis-job JSON shape intentionally has no service-credential field.
+Transport authentication is supplied out of band with the
+`X-Internal-Service-Token` HTTP header, configured through the non-committed
+`PYTHON_INTERNAL_SERVICE_TOKEN` environment variable. The Python worker fails
+closed when the variable is absent. Before posting a callback, Python accepts
+only loopback targets or an exact configured Java callback base
+(`JAVA_CALLBACK_BASE_URL`, with optional comma-separated
+`PYTHON_CALLBACK_ALLOWED_BASE_URLS` additions).
+
 ## Public Authorization Rules
 
 - Registration intentionally permits `USER` and `ADMIN` role selection for the
