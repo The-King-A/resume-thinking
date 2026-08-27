@@ -1,0 +1,12 @@
+<script setup lang="ts">
+import { reactive, ref, watch } from 'vue'; import type { LlmProfile, CreateLlmProfileRequest } from '../api/contracts'
+const props = defineProps<{ profile?: LlmProfile | null }>(); const emit = defineEmits<{ save: [payload: CreateLlmProfileRequest]; test: [] }>(); const testing = ref(false); const modelOptions = ref<string[]>([])
+const form = reactive<CreateLlmProfileRequest>({ displayName: '', endpointUrl: 'https://api.openai.com/v1', modelName: '', apiKey: '', selected: false })
+watch(() => props.profile, (profile) => { if (profile) { form.displayName = profile.displayName; form.endpointUrl = profile.endpointUrl; form.modelName = profile.modelName; form.selected = profile.selected; form.apiKey = '' } }, { immediate: true })
+const presets = [{ label: 'OpenAI', url: 'https://api.openai.com/v1' }, { label: 'Azure OpenAI', url: 'https://your-resource.openai.azure.com' }, { label: 'Custom', url: '' }]
+function save() { if (!form.apiKey && !props.profile?.hasApiKey) return; emit('save', { ...form }); form.apiKey = '' }
+function choose(url: string) { form.endpointUrl = url }
+function setModels(models: string[]) { modelOptions.value = models }
+defineExpose({ setModels, setTesting: (value: boolean) => { testing.value = value } })
+</script>
+<template><form class="profile-form" @submit.prevent="save"><label>Profile name<input v-model="form.displayName" required /></label><label>Provider preset<select @change="choose(($event.target as HTMLSelectElement).value)"><option v-for="preset in presets" :key="preset.label" :value="preset.url">{{ preset.label }}</option></select></label><label>Endpoint URL<input v-model="form.endpointUrl" type="url" required /></label><label>Model<select v-if="modelOptions.length" v-model="form.modelName"><option v-for="model in modelOptions" :key="model">{{ model }}</option></select><input v-else v-model="form.modelName" required placeholder="e.g. gpt-4o-mini" /></label><label>API key <span class="muted">(write-only)</span><input v-model="form.apiKey" type="password" autocomplete="new-password" :placeholder="props.profile?.hasApiKey ? 'Stored securely; enter a new key to replace it' : 'Enter provider key'" /></label><label class="check"><input v-model="form.selected" type="checkbox" /> Use as default profile</label><div class="form-actions"><button type="button" @click="emit('test')" :disabled="testing">Test connection</button><button type="submit">{{ props.profile ? 'Save changes' : 'Add profile' }}</button></div></form></template>
