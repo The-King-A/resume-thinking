@@ -20,7 +20,7 @@ public class ResumeLifecycleService {
         if (!CONFIRMATION.equals(command.confirmationText())) throw new InvalidConfirmationException();
         Resume resume = repository.findById(command.resumeId()).filter(r -> command.role()==UserRole.ADMIN || r.getOwnerId().equals(command.actorId())).orElseThrow(ResourceNotFoundException::new);
         if (resume.getVisibilityState()!=VisibilityState.ACTIVE) {
-            if (resume.getVisibilityState()==VisibilityState.ADMIN_SOFT_DELETED && command.role()!=UserRole.ADMIN) throw new ResourceNotFoundException();
+            if ((resume.getVisibilityState()==VisibilityState.ADMIN_SOFT_DELETED || resume.getVisibilityState()==VisibilityState.ADMIN_CACHE_ARCHIVED) && command.role()!=UserRole.ADMIN) throw new ResourceNotFoundException();
             return resume;
         }
         requireVersion(resume, command.expectedVersion());

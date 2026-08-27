@@ -77,4 +77,15 @@ class ResumeLifecycleServiceTest {
   lifecycleService.softDelete(new DeleteResumeCommand(r.getId(),userId,UserRole.USER,"确认删除简历",0L));
   assertThat(lifecycleService.isActiveAtVersion(r.getId(),reservation.resumeVersion())).isFalse();
  }
+
+ @Test void ownerCannotDeleteAdministratorSoftDeletedOrArchivedRecords(){
+  Resume softDeleted=Resume.active(UUID.randomUUID(),userId,"soft",Resume.SourceType.TXT,UserRole.USER,now,0L); repo.save(softDeleted);
+  lifecycleService.softDelete(new DeleteResumeCommand(softDeleted.getId(),adminId,UserRole.ADMIN,"确认删除简历",0L));
+  assertThatThrownBy(()->lifecycleService.softDelete(new DeleteResumeCommand(softDeleted.getId(),userId,UserRole.USER,"确认删除简历",1L))).isInstanceOf(ResourceNotFoundException.class);
+
+  Resume archived=Resume.active(UUID.randomUUID(),userId,"archived",Resume.SourceType.TXT,UserRole.ADMIN,now.minus(Duration.ofDays(31)),0L); repo.save(archived);
+  lifecycleService.archiveDue(now);
+  assertThat(archived.getVisibilityState()).isEqualTo(VisibilityState.ADMIN_CACHE_ARCHIVED);
+  assertThatThrownBy(()->lifecycleService.softDelete(new DeleteResumeCommand(archived.getId(),userId,UserRole.USER,"确认删除简历",1L))).isInstanceOf(ResourceNotFoundException.class);
+ }
 }
