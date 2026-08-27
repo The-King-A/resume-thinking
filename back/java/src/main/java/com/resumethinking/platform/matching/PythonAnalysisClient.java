@@ -19,9 +19,10 @@ public class PythonAnalysisClient {
             String json = mapper.writeValueAsString(job);
             HttpRequest request = HttpRequest.newBuilder(baseUrl.resolve("/internal/v1/analysis-jobs"))
                     .timeout(Duration.ofSeconds(10)).header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(json)).build();
-            http.sendAsync(request, HttpResponse.BodyHandlers.discarding());
+            var response = http.send(request, HttpResponse.BodyHandlers.discarding());
+            if (response.statusCode() / 100 != 2) throw new IllegalStateException("MODEL_UNAVAILABLE");
         } catch (Exception e) {
-            // Dispatch failures are represented by the task state; secrets and document content are never logged.
+            throw new IllegalStateException("MODEL_UNAVAILABLE", e);
         }
     }
     public record InternalAnalysisJob(UUID taskId, int attempt, long resumeVersion, String sourceType,

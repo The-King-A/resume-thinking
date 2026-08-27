@@ -70,7 +70,7 @@ public class MatchTaskService {
         MatchTask task = new MatchTask(UUID.randomUUID(), reservation.resumeId(), command.llmProfileId(), command.actorId(), reservation.resumeVersion(),
                 command.jobDescriptionText(), command.idempotencyKey(), callbackToken, evidenceIds, Instant.now());
         tasks.save(task);
-        evidenceSpecs.forEach(e -> evidenceRepository.save(new AnalysisEvidence(e.id(), task.getId(), e.location(), e.start(), e.end())));
+        evidenceSpecs.forEach(e -> evidenceRepository.save(new AnalysisEvidence(e.id(), task.getId(), reservation.sourceType().name(), e.location(), e.start(), e.end())));
         if (profile != null && documentBytes.length == 0 && resume.getRawContentNonce() == null) { task.markFailed("MODEL_OUTPUT_INVALID"); tasks.save(task); return task; }
         if (profile != null) {
             var source = reservation.sourceType().name();
@@ -79,7 +79,11 @@ public class MatchTaskService {
                     new PythonAnalysisClient.Document(Base64.getEncoder().encodeToString(documentBytes), "resume." + source.toLowerCase(Locale.ROOT)),
                     allowed, command.jobDescriptionText(), true, URI.create(System.getProperty("matching.callback-url", System.getenv().getOrDefault("MATCHING_CALLBACK_URL", "http://127.0.0.1:8080/internal/v1/analysis-results"))), callbackToken,
                     new PythonAnalysisClient.Provider(profile.baseUrl(), profile.model(), profile.apiKey()), UUID.randomUUID());
-            python.dispatch(job);
+            try {
+                if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+                    org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() { public void afterCommit() { try { python.dispatch(job); } catch (RuntimeException ignored) { task.markFailed("MODEL_UNAVAILABLE"); tasks.save(task); } } });
+                } else python.dispatch(job);
+            } catch (RuntimeException ex) { task.markFailed("MODEL_UNAVAILABLE"); tasks.save(task); }
         }
         return task;
     }
