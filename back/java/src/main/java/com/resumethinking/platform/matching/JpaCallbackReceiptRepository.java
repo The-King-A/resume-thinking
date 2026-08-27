@@ -1,0 +1,3 @@
+package com.resumethinking.platform.matching;
+import org.springframework.stereotype.Repository; import java.util.*;
+@Repository public class JpaCallbackReceiptRepository implements CallbackReceiptRepository { private final CallbackReceiptJpaRepository delegate; public JpaCallbackReceiptRepository(CallbackReceiptJpaRepository delegate){this.delegate=delegate;} public Optional<CallbackReceipt> findByCallbackId(UUID id){return delegate.findById(id).map(CallbackReceiptEntity::toRecord);} public CallbackReceipt save(CallbackReceipt r){return delegate.save(new CallbackReceiptEntity(r)).toRecord();} }

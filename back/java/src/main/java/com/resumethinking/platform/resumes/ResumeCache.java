@@ -5,6 +5,7 @@ import java.time.Clock;
 import java.time.Duration;
 
 public interface ResumeCache { void put(Resume resume); void evict(String key); default void evict(UUID id){evict("resume:view:"+id);} default Optional<Resume> get(UUID id){return Optional.empty();}
+    class Noop implements ResumeCache { public void put(Resume resume) {} public void evict(String key) {} }
     class InMemory implements ResumeCache {
         private final Map<String,Resume> values=new HashMap<>(); private final Clock clock;
         public InMemory(){this(Clock.systemUTC());} public InMemory(Clock clock){this.clock=clock;}

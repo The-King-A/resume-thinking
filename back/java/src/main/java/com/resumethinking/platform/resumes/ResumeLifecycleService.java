@@ -65,6 +65,8 @@ public class ResumeLifecycleService {
     }
     @Transactional(readOnly=true)
     public boolean isActiveAtVersion(UUID resumeId,long version){return repository.findById(resumeId).map(r -> r.getVisibilityState()==VisibilityState.ACTIVE && r.getVersion()==version).orElse(false);}
+    @Transactional(readOnly=true)
+    public Optional<Resume> findActiveForAnalysis(UUID resumeId,long version){return repository.findById(resumeId).filter(r -> r.getVisibilityState()==VisibilityState.ACTIVE && r.getVersion()==version);}
     private ResumeAuditRepository.ResumeLifecycleAudit newAudit(UUID resumeId,UUID actorId,String action,VisibilityState prior,VisibilityState next,Instant at){return new ResumeAuditRepository.ResumeLifecycleAudit(resumeId,actorId,action,prior,next,at,UUID.randomUUID());}
     private void requireVersion(Resume resume,long expected){if(resume.getVersion()!=expected) throw new VersionConflictException();}
 }
