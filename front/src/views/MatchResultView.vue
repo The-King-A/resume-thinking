@@ -27,8 +27,8 @@ function isCurrent(id: string, generation: number) {
   return generation === requestGeneration && taskId.value === id
 }
 
-function schedulePoll(id: string, generation: number) {
-  if (!isCurrent(id, generation) || (task.value?.state !== 'QUEUED' && task.value?.state !== 'PROCESSING')) return
+function schedulePoll(id: string, generation: number, force = false) {
+  if (!isCurrent(id, generation) || (!force && task.value?.state !== 'QUEUED' && task.value?.state !== 'PROCESSING')) return
   if (pollTimer) window.clearTimeout(pollTimer)
   pollTimer = window.setTimeout(() => {
     pollTimer = undefined
@@ -47,6 +47,7 @@ async function loadTask(id: string, generation = requestGeneration) {
       const nextResult = await lifecycleApi.getMatchResult(id)
       if (!isCurrent(id, generation)) return
       result.value = nextResult
+      notReady.value = false
     } else schedulePoll(id, generation)
   } catch (caught) {
     if (!isCurrent(id, generation)) return
@@ -55,7 +56,10 @@ async function loadTask(id: string, generation = requestGeneration) {
       result.value = null
       gone.value = true
     }
-    else if (caught instanceof ApiError && caught.code === 'TASK_NOT_READY') notReady.value = true
+    else if (caught instanceof ApiError && caught.code === 'TASK_NOT_READY') {
+      notReady.value = true
+      schedulePoll(id, generation, true)
+    }
     else error.value = 'Unable to load this matching task.'
   } finally {
     if (isCurrent(id, generation)) loading.value = false
