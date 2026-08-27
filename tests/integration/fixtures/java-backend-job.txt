@@ -1,0 +1,1 @@
+Java backend developer. Required: Java, Spring Boot, MySQL. Preferred: Redis. Build and test a reliable REST API with clear communication.

@@ -1,0 +1,5 @@
+Java developer
+Spring Boot
+MySQL
+Redis
+Built a REST API with integration tests and clear technical documentation.
