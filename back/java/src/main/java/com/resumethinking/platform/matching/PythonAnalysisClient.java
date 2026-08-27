@@ -6,6 +6,8 @@ import java.net.http.*;
 import java.time.Duration;
 import java.util.*;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 @Component
 public class PythonAnalysisClient {
@@ -13,6 +15,8 @@ public class PythonAnalysisClient {
     private final HttpClient http;
     private final ObjectMapper mapper;
     public PythonAnalysisClient() { this(URI.create(System.getProperty("python.analysis.base-url", System.getenv().getOrDefault("PYTHON_ANALYSIS_BASE_URL", "http://127.0.0.1:8000")))); }
+    @Autowired
+    public PythonAnalysisClient(@Value("${app.python-analysis-base-url:${PYTHON_ANALYSIS_BASE_URL:http://127.0.0.1:8000}}") String configuredBaseUrl) { this(URI.create(configuredBaseUrl)); }
     public PythonAnalysisClient(URI baseUrl) { this.baseUrl = baseUrl; this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build(); this.mapper = new ObjectMapper().findAndRegisterModules(); }
     public void dispatch(InternalAnalysisJob job) {
         try {

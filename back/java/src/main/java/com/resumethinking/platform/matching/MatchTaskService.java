@@ -26,6 +26,7 @@ public class MatchTaskService {
     private final CallbackReceiptRepository receipts;
     private final AnalysisEvidenceRepository evidenceRepository;
     private final AesGcmCryptoService crypto;
+    private final DispatchFailureRecorder dispatchFailures;
     public MatchTaskService(ResumeLifecycleService lifecycle, LlmProfileService profiles, MatchTaskRepository tasks, PythonAnalysisClient python) {
         this(lifecycle, profiles, tasks, python, new AnalysisResultRepository.InMemory(), new CallbackReceiptRepository.InMemory(), new AnalysisEvidenceRepository.InMemory(), null);
     }
@@ -36,11 +37,14 @@ public class MatchTaskService {
         this(lifecycle, profiles, tasks, python, results, receipts, new AnalysisEvidenceRepository.InMemory(), null);
     }
     public MatchTaskService(ResumeLifecycleService lifecycle, LlmProfileService profiles, MatchTaskRepository tasks, PythonAnalysisClient python, AnalysisResultRepository results, CallbackReceiptRepository receipts, AnalysisEvidenceRepository evidenceRepository) {
-        this(lifecycle, profiles, tasks, python, results, receipts, evidenceRepository, null);
+        this(lifecycle, profiles, tasks, python, results, receipts, evidenceRepository, null, null);
+    }
+    public MatchTaskService(ResumeLifecycleService lifecycle, LlmProfileService profiles, MatchTaskRepository tasks, PythonAnalysisClient python, AnalysisResultRepository results, CallbackReceiptRepository receipts, AnalysisEvidenceRepository evidenceRepository, AesGcmCryptoService crypto) {
+        this(lifecycle, profiles, tasks, python, results, receipts, evidenceRepository, crypto, null);
     }
     @Autowired
-    public MatchTaskService(ResumeLifecycleService lifecycle, LlmProfileService profiles, MatchTaskRepository tasks, PythonAnalysisClient python, AnalysisResultRepository results, CallbackReceiptRepository receipts, AnalysisEvidenceRepository evidenceRepository, AesGcmCryptoService crypto) {
-        this.lifecycle = lifecycle; this.profiles = profiles; this.tasks = tasks; this.python = python; this.results = results; this.receipts = receipts; this.evidenceRepository = evidenceRepository; this.crypto = crypto;
+    public MatchTaskService(ResumeLifecycleService lifecycle, LlmProfileService profiles, MatchTaskRepository tasks, PythonAnalysisClient python, AnalysisResultRepository results, CallbackReceiptRepository receipts, AnalysisEvidenceRepository evidenceRepository, AesGcmCryptoService crypto, DispatchFailureRecorder dispatchFailures) {
+        this.lifecycle = lifecycle; this.profiles = profiles; this.tasks = tasks; this.python = python; this.results = results; this.receipts = receipts; this.evidenceRepository = evidenceRepository; this.crypto = crypto; this.dispatchFailures = dispatchFailures;
     }
 
     @Transactional
@@ -77,11 +81,11 @@ public class MatchTaskService {
             var allowed = evidenceSpecs.stream().map(e -> new PythonAnalysisClient.AllowedEvidence(e.id(), e.location(), e.start(), e.end())).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
             var job = new PythonAnalysisClient.InternalAnalysisJob(task.getId(), task.getAttempt(), task.getResumeVersion(), source,
                     new PythonAnalysisClient.Document(Base64.getEncoder().encodeToString(documentBytes), "resume." + source.toLowerCase(Locale.ROOT)),
-                    allowed, command.jobDescriptionText(), true, URI.create(System.getProperty("matching.callback-url", System.getenv().getOrDefault("MATCHING_CALLBACK_URL", "http://127.0.0.1:8080/internal/v1/analysis-results"))), callbackToken,
+                    allowed, command.jobDescriptionText(), true, callbackUri(), callbackToken,
                     new PythonAnalysisClient.Provider(profile.baseUrl(), profile.model(), profile.apiKey()), UUID.randomUUID());
             try {
                 if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
-                    org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() { public void afterCommit() { try { python.dispatch(job); } catch (RuntimeException ignored) { task.markFailed("MODEL_UNAVAILABLE"); tasks.save(task); } } });
+                    org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() { public void afterCommit() { try { python.dispatch(job); } catch (RuntimeException ignored) { if (dispatchFailures != null) dispatchFailures.markFailed(task.getId(), "MODEL_UNAVAILABLE"); else { task.markFailed("MODEL_UNAVAILABLE"); tasks.save(task); } } } });
                 } else python.dispatch(job);
             } catch (RuntimeException ex) { task.markFailed("MODEL_UNAVAILABLE"); tasks.save(task); }
         }
@@ -98,12 +102,14 @@ public class MatchTaskService {
     public AnalysisResult getResult(UUID taskId, UUID actorId, UserRole role) {
         MatchTask task = getTask(taskId, actorId, role);
         if (!task.isResultAvailable()) throw new TaskNotReadyException();
-        return results.findByTaskId(taskId).orElseThrow(TaskNotReadyException::new);
+        AnalysisResult result = results.findByTaskId(taskId).orElseThrow(TaskNotReadyException::new);
+        return result;
     }
+    List<AnalysisEvidence> evidenceForTask(UUID taskId) { return evidenceRepository.findByTaskId(taskId); }
 
     @Transactional
-    public CallbackResponse acceptCallback(AnalysisCallbackRequest request) {
-        if (request == null || request.callbackId() == null || request.taskId() == null || request.callbackToken() == null || request.correlationId() == null || request.attempt() < 1) return CallbackResponse.error("VALIDATION_ERROR");
+    public synchronized CallbackResponse acceptCallback(AnalysisCallbackRequest request) {
+        if (request == null || request.callbackId() == null || request.taskId() == null || request.callbackToken() == null || request.callbackToken().length() < 32 || request.correlationId() == null || request.attempt() < 1) return CallbackResponse.error("VALIDATION_ERROR");
         var old = receipts.findByCallbackId(request.callbackId());
         if (old.isPresent()) return old.get().payloadHash().equals(request.payloadHash()) ? CallbackResponse.acceptedReplay() : CallbackResponse.error("IDEMPOTENCY_CONFLICT");
         MatchTask task = tasks.lockById(request.taskId()).orElseThrow(TaskGoneException::new);
@@ -116,11 +122,16 @@ public class MatchTaskService {
         if (!task.tokenMatches(request.callbackToken())) return CallbackResponse.error("TASK_GONE");
         if (request.outcome() == null || !(request.outcome().equals("SUCCEEDED") || request.outcome().equals("FAILED") || request.outcome().equals("TIMED_OUT"))) return CallbackResponse.error("VALIDATION_ERROR");
         if (request.outcome().equals("SUCCEEDED") && request.result() == null) return CallbackResponse.error("MODEL_OUTPUT_INVALID");
+        if (request.outcome().equals("SUCCEEDED") && request.errorCode() != null) return CallbackResponse.error("VALIDATION_ERROR");
+        if (!request.outcome().equals("SUCCEEDED") && request.result() != null) return CallbackResponse.error("VALIDATION_ERROR");
         if (!request.outcome().equals("SUCCEEDED") && (request.errorCode() == null || request.errorCode().isBlank())) return CallbackResponse.error("VALIDATION_ERROR");
         if (request.errorCode() != null && !Set.of("MODEL_UNAVAILABLE","MODEL_OUTPUT_INVALID","MODEL_ENDPOINT_REJECTED","UNSUPPORTED_FILE").contains(request.errorCode())) return CallbackResponse.error("VALIDATION_ERROR");
         if (request.payloadHash() == null || !request.payloadHash().matches("[a-f0-9]{64}")) return CallbackResponse.error("VALIDATION_ERROR");
         if (!request.payloadHash().equals(CallbackPayloadHash.compute(request))) return CallbackResponse.error("VALIDATION_ERROR");
-        if ("SUCCEEDED".equals(request.outcome())) validateEvidence(task, request.result());
+        if ("SUCCEEDED".equals(request.outcome())) {
+            try { validateResultSchema(request.result()); validateEvidence(task, request.result()); }
+            catch (RuntimeException invalid) { return CallbackResponse.error("MODEL_OUTPUT_INVALID"); }
+        }
         receipts.save(new CallbackReceipt(request.callbackId(), request.payloadHash(), Instant.now()));
         if ("SUCCEEDED".equals(request.outcome())) { results.save(AnalysisResult.from(task.getId(), task.getResumeId(), task.getResumeVersion(), task.getJobDescriptionText(), request)); task.markSucceeded(); }
         else if ("TIMED_OUT".equals(request.outcome())) task.markTimedOut(request.errorCode());
@@ -130,15 +141,28 @@ public class MatchTaskService {
     }
 
     private void validateEvidence(MatchTask task, AnalysisCallbackRequest.AnalysisResultPayload result) {
-        if (result == null) throw new EvidenceReferenceException();
+        if (result == null || result.score() == null || result.requirements() == null || result.suggestions() == null) throw new EvidenceReferenceException();
         for (var requirement : result.requirements()) for (var evidence : requirement.evidence()) validateEvidence(task, evidence);
-        for (var suggestion : result.suggestions()) for (var id : suggestion.evidenceIds()) if (!task.evidenceAllowed(id)) throw new EvidenceReferenceException();
+        for (var suggestion : result.suggestions()) for (var id : suggestion.evidenceIds())
+            if (evidenceRepository.findByTaskId(task.getId()).stream().noneMatch(e -> e.getId().equals(id))) throw new EvidenceReferenceException();
     }
     private void validateEvidence(MatchTask task, AnalysisCallbackRequest.EvidenceReference evidence) {
         var allowed = evidenceRepository.findByTaskId(task.getId()).stream().filter(e -> e.getId().equals(evidence.evidenceId())).findFirst().orElse(null);
-        if (allowed == null || evidence.sourceStart() < allowed.getSourceStart() || evidence.sourceEnd() < evidence.sourceStart() || evidence.sourceEnd() > allowed.getSourceEnd() || evidence.excerpt() == null || evidence.excerpt().isBlank()) throw new EvidenceReferenceException();
+        if (evidence == null || allowed == null || evidence.sourceStart() < allowed.getSourceStart() || evidence.sourceEnd() < evidence.sourceStart() || evidence.sourceEnd() > allowed.getSourceEnd() || evidence.excerpt() == null || evidence.excerpt().isBlank() || evidence.confidence() < 0 || evidence.confidence() > 1) throw new EvidenceReferenceException();
     }
+    private static void validateResultSchema(AnalysisCallbackRequest.AnalysisResultPayload result) {
+        if (!finiteBetween(result.score().skills()) || !finiteBetween(result.score().projectExperience()) || !finiteBetween(result.score().workContent()) || !finiteBetween(result.score().educationExperience()) || !finiteBetween(result.score().softSkills()) || !finiteBetween(result.score().composite())) throw new EvidenceReferenceException();
+        for (var requirement : result.requirements()) {
+            if (requirement == null || requirement.requirementId() == null || blank(requirement.jobRequirementText()) || !Set.of("MANDATORY", "PREFERRED").contains(requirement.requirementType()) || !Set.of("SATISFIED", "PARTIALLY_SATISFIED", "RELATED_BUT_EVIDENCE_INSUFFICIENT", "UNMET").contains(requirement.matchStatus()) || !Set.of("EXACT", "SEMANTIC", "RELATED", "NO_MATCH").contains(requirement.matchType()) || !Set.of("SKILLS", "PROJECT_EXPERIENCE", "WORK_CONTENT", "EDUCATION_EXPERIENCE", "SOFT_SKILLS").contains(requirement.component()) || requirement.evidence() == null || !Set.of("NONE", "LOW", "MEDIUM", "HIGH").contains(requirement.evidenceStrength()) || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(requirement.suggestionState()) || !finiteBetween(requirement.componentScore())) throw new EvidenceReferenceException();
+            if (("SATISFIED".equals(requirement.matchStatus()) || "PARTIALLY_SATISFIED".equals(requirement.matchStatus())) && requirement.evidence().isEmpty()) throw new EvidenceReferenceException();
+            if (("SUPPORTED_FACT".equals(requirement.suggestionState()) || "WORDING_ONLY_REWRITE".equals(requirement.suggestionState())) && requirement.evidence().isEmpty()) throw new EvidenceReferenceException();
+        }
+        for (var suggestion : result.suggestions()) if (suggestion == null || suggestion.suggestionId() == null || suggestion.requirementId() == null || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(suggestion.state()) || blank(suggestion.proposedText()) || suggestion.evidenceIds() == null || (("SUPPORTED_FACT".equals(suggestion.state()) || "WORDING_ONLY_REWRITE".equals(suggestion.state())) && suggestion.evidenceIds().isEmpty())) throw new EvidenceReferenceException();
+    }
+    private static boolean blank(String value) { return value == null || value.isBlank(); }
+    private static boolean finiteBetween(double value) { return Double.isFinite(value) && value >= 0 && value <= 1; }
     private static String randomToken() { byte[] bytes = new byte[48]; new java.security.SecureRandom().nextBytes(bytes); return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes); }
+    private static URI callbackUri() { return URI.create(System.getProperty("matching.callback-url", System.getProperty("app.matching-callback-url", System.getenv().getOrDefault("MATCHING_CALLBACK_URL", "http://127.0.0.1:8080/internal/v1/analysis-results")))); }
     private record EvidenceSpec(UUID id, String location, int start, int end) {}
     private static List<EvidenceSpec> evidenceSpecs(Resume.SourceType type, byte[] bytes) {
         String text = new String(bytes, StandardCharsets.UTF_8); List<EvidenceSpec> out = new ArrayList<>();
