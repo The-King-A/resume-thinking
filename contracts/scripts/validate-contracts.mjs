@@ -89,6 +89,7 @@ const assertCacheArchivedResume = async (fixturePath, visibilityState) => {
 
 await assertValid('auth-register-valid.json', validate('RegisterRequest'));
 await assertValid('llm-profile-valid.json', validate('CreateLlmProfileRequest'));
+await assertValid('llm-profile-update-valid.json', validate('UpdateLlmProfileRequest'));
 await assertValid('match-request-valid.json', validate('CreateMatchTaskRequest'));
 await assertCacheArchivedResume('archive-user.json', 'USER_CACHE_ARCHIVED');
 await assertCacheArchivedResume('archive-admin.json', 'ADMIN_CACHE_ARCHIVED');

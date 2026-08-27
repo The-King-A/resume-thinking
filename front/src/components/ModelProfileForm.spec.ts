@@ -16,11 +16,12 @@ describe('ModelProfileForm', () => {
     expect(wrapper.text()).not.toContain('secret-api-key')
   })
 
-  it('does not emit an empty key when updating a saved profile', async () => {
+  it('omits an empty key when updating a saved profile', async () => {
     const wrapper = mount(ModelProfileForm, { props: { profile: { id: '1', displayName: 'Saved', endpointUrl: 'https://api.example.com', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' } } })
     await wrapper.get('button[type="submit"]').trigger('click')
     await flushPromises()
-    expect(wrapper.emitted('save')).toBeFalsy()
+    expect(wrapper.emitted('save')).toHaveLength(1)
+    expect(wrapper.emitted('save')?.[0]?.[0]).not.toHaveProperty('apiKey')
   })
 
   it('shows validation and does not emit for an invalid draft', async () => {

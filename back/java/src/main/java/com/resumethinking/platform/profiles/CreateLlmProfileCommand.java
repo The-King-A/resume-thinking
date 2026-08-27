@@ -1,5 +1,6 @@
 package com.resumethinking.platform.profiles;
-import jakarta.validation.constraints.*;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties; import jakarta.validation.constraints.*;
+@JsonIgnoreProperties(ignoreUnknown = false)
 public record CreateLlmProfileCommand(@NotBlank @Size(max=100) String displayName,@NotBlank @Size(max=2048) String endpointUrl,@NotBlank @Size(max=200) String modelName,@NotBlank @Size(max=4096) String apiKey,boolean selected) {
  public CreateLlmProfileCommand(String displayName,String endpointUrl,String modelName,String apiKey){this(displayName,endpointUrl,modelName,apiKey,false);}
 }

@@ -1,6 +1,8 @@
 package com.resumethinking.platform.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import org.springframework.boot.autoconfigure.jackson.Jackson2ObjectMapperBuilderCustomizer;
 import com.resumethinking.platform.auth.ApiExceptionHandler;
 import com.resumethinking.platform.auth.JwtService;
 import jakarta.servlet.FilterChain;
@@ -31,6 +33,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 @Configuration
 public class SecurityConfig {
+    @Bean
+    Jackson2ObjectMapperBuilderCustomizer strictJsonInputs() {
+        return builder -> builder.featuresToEnable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+    }
+
     public static final String INTERNAL_CALLBACK_PATH = "/internal/v1/analysis-results";
     public static final String INTERNAL_TOKEN_HEADER = "X-Internal-Service-Token";
 

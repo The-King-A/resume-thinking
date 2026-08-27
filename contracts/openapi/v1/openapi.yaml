@@ -842,8 +842,32 @@ components:
           type: boolean
           default: false
     UpdateLlmProfileRequest:
-      allOf:
-        - $ref: '#/components/schemas/CreateLlmProfileRequest'
+      type: object
+      additionalProperties: false
+      required: [displayName, endpointUrl, modelName]
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        endpointUrl:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: OpenAI-compatible endpoint base URL; private targets are rejected in production.
+        modelName:
+          type: string
+          minLength: 1
+          maxLength: 200
+        apiKey:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          writeOnly: true
+          description: Optional replacement key. Omit it to retain the encrypted key already stored.
+        selected:
+          type: boolean
+          default: false
     LlmProfile:
       type: object
       additionalProperties: false

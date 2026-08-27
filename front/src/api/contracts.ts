@@ -12,7 +12,7 @@ export class ApiError extends Error {
   get code() { return this.payload.code }
 }
 export interface CreateLlmProfileRequest { displayName: string; endpointUrl: string; modelName: string; apiKey: string; selected?: boolean }
-export type UpdateLlmProfileRequest = CreateLlmProfileRequest
+export interface UpdateLlmProfileRequest { displayName: string; endpointUrl: string; modelName: string; apiKey?: string; selected?: boolean }
 export interface LlmProfile { id: string; displayName: string; endpointUrl: string; modelName: string; hasApiKey: boolean; selected: boolean; lastTestStatus?: 'SUCCEEDED' | 'FAILED' | null; lastTestedAt?: string | null; createdAt: string; updatedAt: string }
 export interface LlmProfileTestResponse { available: boolean; testedAt: string; models?: string[]; diagnostic?: string | null }
 

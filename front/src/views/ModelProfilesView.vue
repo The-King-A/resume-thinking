@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'; import ModelProfileForm from '../components/ModelProfileForm.vue'; import { useLlmProfileStore } from '../stores/llmProfiles'; import type { CreateLlmProfileRequest, LlmProfile } from '../api/contracts'
+import { onMounted, ref } from 'vue'; import ModelProfileForm from '../components/ModelProfileForm.vue'; import { useLlmProfileStore } from '../stores/llmProfiles'; import type { CreateLlmProfileRequest, UpdateLlmProfileRequest, LlmProfile } from '../api/contracts'
 const store = useLlmProfileStore(); const editing = ref<LlmProfile | null>(null); const notice = ref(''); const form = ref<InstanceType<typeof ModelProfileForm> | null>(null)
 onMounted(async () => { try { await store.list() } catch { notice.value = 'Unable to load profiles.' } })
-async function save(payload: CreateLlmProfileRequest) { try { if (editing.value) await store.update(editing.value.id, payload); else await store.create(payload); form.value?.clearApiKey(); editing.value = null; notice.value = 'Profile saved.' } catch { notice.value = 'Unable to save profile.' } }
-async function testConnection(payload: CreateLlmProfileRequest) {
+async function save(payload: CreateLlmProfileRequest | UpdateLlmProfileRequest) { try { if (editing.value) await store.update(editing.value.id, payload); else if ('apiKey' in payload && payload.apiKey) await store.create(payload); else { notice.value = 'API key is required.'; return } form.value?.clearApiKey(); editing.value = null; notice.value = 'Profile saved.' } catch { notice.value = 'Unable to save profile.' } }
+async function testConnection(payload: CreateLlmProfileRequest | UpdateLlmProfileRequest) {
   if (!editing.value) { notice.value = 'Save the profile before testing the connection.'; return }
   const unchanged = payload.displayName === editing.value.displayName && payload.endpointUrl === editing.value.endpointUrl && payload.modelName === editing.value.modelName && payload.selected === editing.value.selected && payload.apiKey === ''
   if (!unchanged) { notice.value = 'Save changes before testing the connection.'; return }

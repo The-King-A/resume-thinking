@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'; import { ElForm, ElFormItem, type FormInstance, type FormRules } from 'element-plus'; import type { LlmProfile, CreateLlmProfileRequest } from '../api/contracts'
-const props = defineProps<{ profile?: LlmProfile | null }>(); const emit = defineEmits<{ save: [payload: CreateLlmProfileRequest]; test: [payload: CreateLlmProfileRequest] }>(); const testing = ref(false); const modelOptions = ref<string[]>([]); const formRef = ref<FormInstance>(); const validationMessage = ref('')
+import { reactive, ref, watch } from 'vue'; import { ElForm, ElFormItem, type FormInstance, type FormRules } from 'element-plus'; import type { LlmProfile, CreateLlmProfileRequest, UpdateLlmProfileRequest } from '../api/contracts'
+type ProfileFormPayload = CreateLlmProfileRequest | UpdateLlmProfileRequest
+const props = defineProps<{ profile?: LlmProfile | null }>(); const emit = defineEmits<{ save: [payload: ProfileFormPayload]; test: [payload: ProfileFormPayload] }>(); const testing = ref(false); const modelOptions = ref<string[]>([]); const formRef = ref<FormInstance>(); const validationMessage = ref('')
 const form = reactive<CreateLlmProfileRequest>({ displayName: '', endpointUrl: 'https://api.openai.com/v1', modelName: '', apiKey: '', selected: false })
 watch(() => props.profile, (profile) => { if (profile) { form.displayName = profile.displayName; form.endpointUrl = profile.endpointUrl; form.modelName = profile.modelName; form.selected = profile.selected; form.apiKey = '' } }, { immediate: true })
 const presets = [{ label: 'OpenAI', url: 'https://api.openai.com/v1' }, { label: 'Azure OpenAI', url: 'https://your-resource.openai.azure.com' }, { label: 'Custom', url: '' }]
@@ -19,8 +20,9 @@ async function validateForm(requireApiKey: boolean) {
   else if (!validationMessage.value && form.apiKey.length > 4096) validationMessage.value = 'API key must be at most 4096 characters'
   return !validationMessage.value
 }
-async function save() { if (!(await validateForm(true))) return; emit('save', { ...form }) }
-async function test() { if (!(await validateForm(false))) return; emit('test', { ...form }) }
+function payload(): ProfileFormPayload { const value: Record<string, unknown> = { ...form }; if (props.profile && !form.apiKey) delete value.apiKey; return value as ProfileFormPayload }
+async function save() { if (!(await validateForm(!props.profile?.hasApiKey))) return; emit('save', payload()) }
+async function test() { if (!(await validateForm(false))) return; emit('test', payload()) }
 function choose(url: string) { form.endpointUrl = url }
 function setModels(models: string[]) { modelOptions.value = models }
 function clearApiKey() { form.apiKey = '' }

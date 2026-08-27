@@ -37,7 +37,6 @@ class MatchTaskServiceTest {
 
         assertThat(second.id()).isEqualTo(first.id());
     }
-
     @Test
     void dispatchUsesDecryptedResumeBytesAndBoundedEvidence() {
         var crypto = new com.resumethinking.platform.crypto.AesGcmCryptoService("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
@@ -164,6 +163,7 @@ class MatchTaskServiceTest {
         var callback = new AnalysisCallbackRequest(task.id(), 1, UUID.randomUUID(), task.callbackTokenForTests(), "", "SUCCEEDED", result, null, UUID.randomUUID()).withComputedPayloadHash();
         assertThat(service.acceptCallback(callback).code()).isEqualTo("MODEL_OUTPUT_INVALID");
     }
+
 
     private static final class CapturingClient extends PythonAnalysisClient {
         private InternalAnalysisJob job;

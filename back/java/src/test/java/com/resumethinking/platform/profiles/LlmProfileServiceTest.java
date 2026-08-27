@@ -29,4 +29,20 @@ class LlmProfileServiceTest {
         assertThat(new ObjectMapper().findAndRegisterModules().writeValueAsString(profile)).doesNotContain("secret-key");
         assertThatThrownBy(() -> profileService.decryptForDispatch(otherUserId, profile.id())).isInstanceOf(ResourceNotFoundException.class);
     }
+
+    @Test
+    void updateWithoutApiKeyKeepsTheExistingEncryptedKey() {
+        var ownerId = UUID.randomUUID();
+        var repository = new InMemoryRepositories.LlmProfileRepositoryStub();
+        var profileService = new LlmProfileService(repository,
+                new AesGcmCryptoService("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="), false);
+
+        var profile = profileService.create(ownerId,
+                new CreateLlmProfileCommand("work", "https://1.1.1.1/v1", "model-a", "secret-key"));
+        var updated = profileService.update(ownerId, profile.id(),
+                new UpdateLlmProfileCommand("renamed", "https://1.1.1.1/v1", "model-b", null, false));
+
+        assertThat(profileService.decryptForDispatch(ownerId, updated.id()).apiKey()).isEqualTo("secret-key");
+        assertThat(updated.hasApiKey()).isTrue();
+    }
 }

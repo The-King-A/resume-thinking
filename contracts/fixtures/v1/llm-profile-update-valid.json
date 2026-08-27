@@ -1,0 +1,6 @@
+{
+  "displayName": "Local provider",
+  "endpointUrl": "https://api.example.test/v1",
+  "modelName": "custom-model",
+  "selected": true
+}

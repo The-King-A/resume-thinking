@@ -39,6 +39,29 @@ class LlmProfileBoundaryTest {
   assertThat(invokeModelsUri(service, java.net.URI.create("https://provider.test/v1%20api"))).isEqualTo(java.net.URI.create("https://provider.test/v1%20api/models"));
  }
 
+ @Test void endpointSyntaxRejectsUserInfoQueryFragmentAndTraversal() {
+  var service = new LlmProfileService(new com.resumethinking.platform.auth.InMemoryRepositories.LlmProfileRepositoryStub(),
+    new AesGcmCryptoService("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="), false);
+  for (String endpoint : new String[]{
+    "https://user:pass@provider.example/v1",
+    "https://provider.example/v1?token=secret",
+    "https://provider.example/v1#fragment",
+    "https://provider.example/v1/%2e%2e/private",
+    "https://provider.example/v1\\private"}) {
+   assertThatThrownBy(() -> service.create(UUID.randomUUID(), new CreateLlmProfileCommand("x", endpoint, "m", "k")))
+     .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("MODEL_ENDPOINT_REJECTED");
+  }
+ }
+
+ @Test void bothEdgesOf19818ReservedRangeAreRejected() {
+  var service = new LlmProfileService(new com.resumethinking.platform.auth.InMemoryRepositories.LlmProfileRepositoryStub(),
+    new AesGcmCryptoService("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="), false);
+  for (String endpoint : new String[]{"https://198.18.0.0", "https://198.19.255.255"}) {
+   assertThatThrownBy(() -> service.create(UUID.randomUUID(), new CreateLlmProfileCommand("x", endpoint, "m", "k")))
+     .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("MODEL_ENDPOINT_REJECTED");
+  }
+ }
+
  private static java.net.URI invokeModelsUri(LlmProfileService service, java.net.URI base) {
   try {
    var method = LlmProfileService.class.getDeclaredMethod("modelsUri", java.net.URI.class);
