@@ -60,7 +60,7 @@
 | --- | --- | --- |
 | `pnpm --dir contracts run lint` | 通过 | OpenAPI v1 语法和代码检查规则 |
 | `pnpm --dir contracts run validate` | 通过 | 13 个有效示例，加上预期无效的匹配示例 |
-| `E:\maven\...\mvn.cmd clean test`（在 `back/java` 中） | 通过，85 项测试 | Java 单元测试和 HTTP 边界测试；未连接真实 DB/Redis |
+| `E:\maven\...\mvn.cmd clean test`（在 `back/java` 中） | 通过，88 项测试 | Java 单元测试和 HTTP 边界测试；未连接真实 DB/Redis |
 | Python 3.11 `pytest back/python/tests tests/integration -q` | 通过，67 项测试 | 脱敏、解析、回调规则、示例和离线流程断言 |
 | `pnpm --dir front exec vitest run` | 通过，56 项测试 | jsdom 下的 Vue/API 行为 |
 | `pnpm --dir front run build` | 通过 | `vue-tsc` 和 Vite 生产构建 |
