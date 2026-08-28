@@ -67,20 +67,36 @@ public class DemoDataSeedService {
 
         int created = 0;
         for (ResumeSpec spec : specs) {
-            if (resumes.findById(spec.id()).isPresent()) continue;
+            Optional<Resume> existing = resumes.findById(spec.id());
+            if (existing.isPresent()) {
+                reconcileExistingResume(spec, existing.get());
+                continue;
+            }
             Resume resume = newResume(spec);
             resumes.save(resume);
             if (spec.lifecycle() == Lifecycle.ACTIVE) {
                 cacheAfterCommit(() -> cache.put(resume));
             } else {
                 cacheAfterCommit(() -> cache.evict(resume.getId()));
-                audits.save(new ResumeAuditRepository.ResumeLifecycleAudit(resume.getId(), null,
+                audits.save(new ResumeAuditRepository.ResumeLifecycleAudit(resume.getId(), spec.lifecycleActorId(),
                         spec.lifecycle().auditAction(), VisibilityState.ACTIVE, resume.getVisibilityState(),
                         clock.instant(), UUID.randomUUID()));
             }
             created++;
         }
         return new SeedResult(created, specs.size() - created);
+    }
+
+    private void reconcileExistingResume(ResumeSpec spec, Resume resume) {
+        if (spec.lifecycle() == Lifecycle.ACTIVE) {
+            cacheAfterCommit(() -> cache.put(resume));
+            return;
+        }
+        cacheAfterCommit(() -> cache.evict(resume.getId()));
+        if (spec.lifecycleActorId() != null) {
+            audits.backfillNullActorForLifecycleAudit(resume.getId(), spec.lifecycleActorId(),
+                    spec.lifecycle().auditAction(), VisibilityState.ACTIVE, resume.getVisibilityState());
+        }
     }
 
     private User verifyAccount(String username, String email, UserRole role, String password) {

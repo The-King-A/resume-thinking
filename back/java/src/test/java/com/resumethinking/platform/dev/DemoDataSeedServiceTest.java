@@ -88,6 +88,26 @@ class DemoDataSeedServiceTest {
     }
 
     @Test
+    void recordsSoftDeleteActorsAndLeavesArchiveAuditActorsNull() {
+        service.seed(credentials);
+
+        assertThat(audits.all()).filteredOn(audit -> audit.newVisibilityState()
+                        == VisibilityState.USER_SOFT_DELETED)
+                .singleElement()
+                .satisfies(audit -> assertThat(audit.actorId())
+                        .isEqualTo(resume(audit.resumeId()).getSoftDeletedBy()));
+        assertThat(audits.all()).filteredOn(audit -> audit.newVisibilityState()
+                        == VisibilityState.ADMIN_SOFT_DELETED)
+                .singleElement()
+                .satisfies(audit -> assertThat(audit.actorId())
+                        .isEqualTo(resume(audit.resumeId()).getSoftDeletedBy()));
+        assertThat(audits.all()).filteredOn(audit -> audit.newVisibilityState()
+                        == VisibilityState.USER_CACHE_ARCHIVED
+                        || audit.newVisibilityState() == VisibilityState.ADMIN_CACHE_ARCHIVED)
+                .allSatisfy(audit -> assertThat(audit.actorId()).isNull());
+    }
+
+    @Test
     void archivedSamplesHaveElapsedTheirVisibilityRetentionWindows() {
         service.seed(credentials);
 
@@ -109,17 +129,39 @@ class DemoDataSeedServiceTest {
     }
 
     @Test
-    void matchingRerunCreatesNoExtraRowsAuditsOrCacheEntries() {
+    void matchingRerunReconcilesCacheAndBackfillsOnlyMissingSoftDeleteActor() {
         service.seed(credentials);
-        int cacheEventsAfterFirstRun = cache.events.size();
+        List<Resume> active = allResumes().stream()
+                .filter(resume -> resume.getVisibilityState() == VisibilityState.ACTIVE)
+                .toList();
+        List<Resume> hidden = allResumes().stream()
+                .filter(resume -> resume.getVisibilityState() != VisibilityState.ACTIVE)
+                .toList();
+        active.forEach(resume -> cache.values.remove(resume.getId()));
+        hidden.forEach(cache::put);
+
+        int userSoftDeleteIndex = auditIndex(VisibilityState.USER_SOFT_DELETED);
+        ResumeAuditRepository.ResumeLifecycleAudit userSoftDelete = audits.all().get(userSoftDeleteIndex);
+        audits.all().set(userSoftDeleteIndex, new ResumeAuditRepository.ResumeLifecycleAudit(
+                userSoftDelete.resumeId(), null, userSoftDelete.action(), userSoftDelete.priorVisibilityState(),
+                userSoftDelete.newVisibilityState(), userSoftDelete.occurredAt(), userSoftDelete.correlationId()));
+        int auditCount = audits.all().size();
 
         DemoDataSeedService.SeedResult result = service.seed(credentials);
 
         assertThat(result.createdResumeCount()).isZero();
         assertThat(result.reusedResumeCount()).isEqualTo(6);
         assertThat(allResumes()).hasSize(6);
-        assertThat(audits.all()).hasSize(4);
-        assertThat(cache.events).hasSize(cacheEventsAfterFirstRun);
+        assertThat(audits.all()).hasSize(auditCount);
+        assertThat(audits.all().get(userSoftDeleteIndex).actorId())
+                .isEqualTo(resume(userSoftDelete.resumeId()).getSoftDeletedBy());
+        assertThat(audits.all()).filteredOn(audit -> audit.newVisibilityState()
+                        == VisibilityState.ADMIN_SOFT_DELETED)
+                .singleElement()
+                .satisfies(audit -> assertThat(audit.actorId())
+                        .isEqualTo(resume(audit.resumeId()).getSoftDeletedBy()));
+        assertThat(cache.values).containsOnlyKeys(active.get(0).getId(), active.get(1).getId());
+        assertThat(hidden).allSatisfy(resume -> assertThat(cache.get(resume.getId())).isEmpty());
     }
 
     @Test
@@ -155,6 +197,17 @@ class DemoDataSeedServiceTest {
 
     private List<Resume> allResumes() {
         return resumes.findByVisibilityStateIn(List.of(VisibilityState.values()), PageRequest.of(0, 20)).getContent();
+    }
+
+    private Resume resume(UUID id) {
+        return resumes.findById(id).orElseThrow();
+    }
+
+    private int auditIndex(VisibilityState state) {
+        return java.util.stream.IntStream.range(0, audits.all().size())
+                .filter(index -> audits.all().get(index).newVisibilityState() == state)
+                .findFirst()
+                .orElseThrow();
     }
 
     private static final class InMemoryUserRepository implements UserRepository {
