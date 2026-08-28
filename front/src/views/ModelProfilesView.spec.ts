@@ -37,7 +37,7 @@ describe('ModelProfilesView connection testing', () => {
     await wrapper.get('.profile-row button').trigger('click')
     await wrapper.get('.test-changed').trigger('click')
     expect(store.testConnection).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Save changes before testing the connection.')
+    expect(wrapper.text()).toContain('请先保存更改，再测试连接。')
 
     await wrapper.get('.test-saved').trigger('click')
     await flushPromises()
@@ -49,14 +49,14 @@ describe('ModelProfilesView connection testing', () => {
     const wrapper = mount(ModelProfilesView, { global: { stubs: { ModelProfileForm: ModelProfileFormStub } } })
     await wrapper.get('.test-changed').trigger('click')
     expect(store.testConnection).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Save the profile before testing the connection.')
+    expect(wrapper.text()).toContain('请先保存模型配置，再测试连接。')
   })
 
   it('shows a safe message when profile listing fails', async () => {
     store.list.mockRejectedValueOnce(new Error('backend details'))
     const wrapper = mount(ModelProfilesView, { global: { stubs: { ModelProfileForm: ModelProfileFormStub } } })
     await flushPromises()
-    expect(wrapper.text()).toContain('Unable to load profiles.')
+    expect(wrapper.text()).toContain('无法加载模型配置。')
     expect(wrapper.text()).not.toContain('backend details')
   })
 
@@ -66,7 +66,7 @@ describe('ModelProfilesView connection testing', () => {
     const wrapper = mount(ModelProfilesView, { global: { stubs: { ModelProfileForm: ModelProfileFormStub } } })
     await wrapper.get('.save-draft').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('Unable to save profile.')
+    expect(wrapper.text()).toContain('无法保存模型配置。')
     expect(wrapper.text()).not.toContain('backend details')
   })
 
@@ -76,7 +76,7 @@ describe('ModelProfilesView connection testing', () => {
     await wrapper.get('.profile-row button').trigger('click')
     await wrapper.get('.save-draft').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('Unable to save profile.')
+    expect(wrapper.text()).toContain('无法保存模型配置。')
     expect(wrapper.text()).not.toContain('backend details')
   })
 
@@ -94,7 +94,7 @@ describe('ModelProfilesView connection testing', () => {
     store.create.mockResolvedValueOnce({ id: '2', displayName: 'New', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' })
     const wrapper = mount(ModelProfilesView, { global: { stubs: { RouterLink: true } } })
     await wrapper.get('input').setValue('New')
-    await wrapper.get('input[placeholder="e.g. gpt-4o-mini"]').setValue('gpt')
+    await wrapper.get('input[placeholder="例如 gpt-4o-mini"]').setValue('gpt')
     const key = wrapper.get('input[autocomplete="new-password"]')
     await key.setValue('success-key')
     await wrapper.get('button[type="submit"]').trigger('click')
@@ -107,7 +107,7 @@ describe('ModelProfilesView connection testing', () => {
     store.create.mockRejectedValueOnce(new Error('backend details'))
     const wrapper = mount(ModelProfilesView, { global: { stubs: { RouterLink: true } } })
     await wrapper.get('input').setValue('New')
-    await wrapper.get('input[placeholder="e.g. gpt-4o-mini"]').setValue('gpt')
+    await wrapper.get('input[placeholder="例如 gpt-4o-mini"]').setValue('gpt')
     const key = wrapper.get('input[autocomplete="new-password"]')
     await key.setValue('failed-key')
     await wrapper.get('button[type="submit"]').trigger('click')

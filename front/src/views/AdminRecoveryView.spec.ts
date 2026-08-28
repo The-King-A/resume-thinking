@@ -35,7 +35,7 @@ describe('AdminRecoveryView role boundary', () => {
 
     expect(request).not.toHaveBeenCalled()
     expect(wrapper.text()).not.toContain('admin-visible-resume')
-    expect(wrapper.text()).toContain('Administrator access required')
+    expect(wrapper.text()).toContain('需要管理员权限')
   })
 
   it('uses only the administrator route and renders owner context for an ADMIN', async () => {

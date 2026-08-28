@@ -1,9 +1,12 @@
 package com.resumethinking.platform.profiles;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.resumethinking.platform.crypto.AesGcmCryptoService; import org.springframework.stereotype.Service; import org.springframework.beans.factory.annotation.Autowired; import org.springframework.beans.factory.annotation.Value; import java.net.*; import java.net.http.*; import java.time.*; import java.security.*; import java.util.*; import java.util.regex.*;
 
 @Service public class LlmProfileService {
  private final LlmProfileRepository repository; private final AesGcmCryptoService crypto; private final boolean allowLocal;
+ private final ObjectMapper objectMapper = new ObjectMapper();
  @Autowired public LlmProfileService(LlmProfileRepository repository,AesGcmCryptoService crypto,@Value("${app.allow-local-model-endpoints:false}") boolean allowLocal){this.repository=repository;this.crypto=crypto;this.allowLocal=allowLocal;}
  public LlmProfileService(LlmProfileRepository repository,AesGcmCryptoService crypto){this(repository,crypto,false);}
  public LlmProfile create(UUID owner,CreateLlmProfileCommand command){
@@ -33,10 +36,29 @@ import com.resumethinking.platform.crypto.AesGcmCryptoService; import org.spring
  public LlmProfileTestResponse testConnection(UUID owner, UUID id) {
   LlmProfile profile=get(owner,id); URI base=validate(profile.getBaseUrl(), true); Instant tested=java.time.Instant.now();
   try { HttpClient client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).followRedirects(HttpClient.Redirect.NEVER).build();
-   HttpRequest request=HttpRequest.newBuilder(modelsUri(base)).timeout(Duration.ofSeconds(5)).header("Authorization","Bearer "+crypto.decrypt(profile.getCiphertext(),profile.getNonce())).GET().build();
+   String apiKey=crypto.decrypt(profile.getCiphertext(),profile.getNonce());
+   HttpRequest request=HttpRequest.newBuilder(modelsUri(base)).timeout(Duration.ofSeconds(5)).header("Authorization","Bearer "+apiKey).GET().build();
    HttpResponse<String> response=client.send(request,HttpResponse.BodyHandlers.ofString()); if(response.statusCode()/100!=2){profile.markTest("FAILED",tested);repository.save(profile);return new LlmProfileTestResponse(false,tested,List.of(),"Provider returned HTTP "+response.statusCode());}
-   Matcher matcher=Pattern.compile("\\\"id\\\"\\s*:\\s*\\\"([^\\\"]{1,200})\\\"").matcher(response.body()); List<String> models=new ArrayList<>(); while(matcher.find()&&models.size()<100) models.add(matcher.group(1)); profile.markTest("SUCCEEDED",tested);repository.save(profile); return new LlmProfileTestResponse(true,tested,models,null);
+   List<String> models=safeModelIds(response.body(),apiKey); profile.markTest("SUCCEEDED",tested);repository.save(profile); return new LlmProfileTestResponse(true,tested,models,null);
   } catch(Exception e){ profile.markTest("FAILED",tested);repository.save(profile); return new LlmProfileTestResponse(false,tested,List.of(),"Provider unavailable"); }
+ }
+ private List<String> safeModelIds(String body,String secret){
+  if(body==null||body.isBlank()) return List.of();
+  try { List<String> models=new ArrayList<>(); collectModelIds(objectMapper.readTree(body),secret,models); return List.copyOf(models); }
+  catch(Exception ignored){ return List.of(); }
+ }
+ private static void collectModelIds(JsonNode node,String secret,List<String> models){
+  if(node==null||models.size()>=100) return;
+  if(node.isObject()){
+   node.fields().forEachRemaining(entry->{
+    if(models.size()>=100) return;
+    if("id".equals(entry.getKey())&&entry.getValue().isTextual()){
+     String value=entry.getValue().textValue();
+     if(value.length()<=200&&(secret==null||secret.isEmpty()||!value.contains(secret))&&!models.contains(value)) models.add(value);
+    }
+    collectModelIds(entry.getValue(),secret,models);
+   });
+  } else if(node.isArray()) node.forEach(child->collectModelIds(child,secret,models));
  }
  private URI validate(String raw){return validate(raw,false);}
  private URI validate(String raw,boolean requestTime){

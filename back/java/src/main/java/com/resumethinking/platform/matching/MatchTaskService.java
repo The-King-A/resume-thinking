@@ -201,13 +201,14 @@ public class MatchTaskService {
         boolean resumeActive = lifecycle.lockActiveAtVersion(taskSnapshot.getResumeId(), taskSnapshot.getResumeVersion()).isPresent();
         MatchTask task = tasks.lockById(request.taskId()).orElseThrow(TaskGoneException::new);
         if (request.attempt() < task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
+        if (request.attempt() != task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
+        if (!task.tokenMatches(request.callbackToken()) || task.getState() == MatchTask.State.BLOCKED) {
+            return CallbackResponse.error("TASK_GONE");
+        }
         if (!resumeActive) {
             blockIfInFlight(task);
             return CallbackResponse.error("TASK_GONE");
         }
-        if (request.attempt() != task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
-        if (!task.tokenMatches(request.callbackToken())) return CallbackResponse.error("TASK_GONE");
-        if (task.getState() == MatchTask.State.BLOCKED) return CallbackResponse.error("TASK_GONE");
 
         var old = receipts.findByCallbackId(request.callbackId());
         if (old.isPresent()) {
@@ -275,12 +276,12 @@ public class MatchTaskService {
         boolean resumeActive = lifecycle.lockActiveAtVersion(taskSnapshot.getResumeId(), taskSnapshot.getResumeVersion()).isPresent();
         MatchTask task = tasks.lockById(request.taskId()).orElseThrow(TaskGoneException::new);
         if (request.attempt() < task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
-        if (!resumeActive) {
-            blockIfInFlight(task);
-            return CallbackResponse.error("TASK_GONE");
-        }
         if (request.attempt() != task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
         if (!task.tokenMatches(request.callbackToken()) || task.getState() == MatchTask.State.BLOCKED) {
+            return CallbackResponse.error("TASK_GONE");
+        }
+        if (!resumeActive) {
+            blockIfInFlight(task);
             return CallbackResponse.error("TASK_GONE");
         }
         return request.payloadHash().equals(raced.get().payloadHash())

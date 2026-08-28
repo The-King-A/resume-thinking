@@ -30,7 +30,7 @@ describe('RegisterView', () => {
     await wrapper.get('[data-test="register-submit"]').trigger('click')
     await flushPromises()
     expect(mockRegister).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Username is required')
+    expect(wrapper.text()).toContain('用户名不能为空')
   })
 
   it('does not register values that violate the OpenAPI username pattern', async () => {
@@ -41,7 +41,7 @@ describe('RegisterView', () => {
     await wrapper.get('[data-test="register-submit"]').trigger('click')
     await flushPromises()
     expect(mockRegister).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Username may contain only letters, numbers, dot, underscore, or hyphen')
+    expect(wrapper.text()).toContain('用户名只能包含字母、数字、点、下划线或连字符')
   })
 
   it('does not register an invalid email accepted by the manual guard', async () => {
@@ -52,6 +52,6 @@ describe('RegisterView', () => {
     await wrapper.get('[data-test="register-submit"]').trigger('click')
     await flushPromises()
     expect(mockRegister).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Enter a valid email')
+    expect(wrapper.text()).toContain('请输入有效的邮箱地址')
   })
 })

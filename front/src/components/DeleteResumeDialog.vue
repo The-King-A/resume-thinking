@@ -19,17 +19,17 @@ function confirmDelete() {
 <template>
   <div v-if="open" class="dialog-backdrop" @click.self="emit('cancel')">
     <section class="dialog-panel" role="dialog" aria-modal="true" aria-labelledby="delete-resume-title">
-      <p class="eyebrow danger-text">Deliberate deletion</p>
-      <h2 id="delete-resume-title">Remove this resume?</h2>
-      <p class="muted">It leaves active views immediately. Recoverable metadata remains in MySQL under the retention policy.</p>
+      <p class="eyebrow danger-text">谨慎删除</p>
+      <h2 id="delete-resume-title">删除这份简历？</h2>
+      <p class="muted">删除后将立即从当前页面移除。可恢复的简历元数据仍会按保留策略存储在数据库中。</p>
       <label>
-        Type <strong>{{ phrase }}</strong> to continue
+        请输入 <strong>{{ phrase }}</strong> 以继续
         <input v-model="confirmation" autocomplete="off" :disabled="busy" />
       </label>
       <div class="form-actions">
-        <button type="button" class="button-secondary" :disabled="busy" @click="emit('cancel')">Cancel</button>
+        <button type="button" class="button-secondary" :disabled="busy" @click="emit('cancel')">取消</button>
         <button data-test="confirm-delete" type="button" class="button-danger" :disabled="!canDelete" @click="confirmDelete">
-          {{ busy ? 'Deleting…' : 'Delete resume' }}
+          {{ busy ? '删除中...' : '删除简历' }}
         </button>
       </div>
     </section>

@@ -27,7 +27,7 @@ describe('LoginView', () => {
     await wrapper.get('button[type="submit"]').trigger('click')
     await flushPromises()
     expect(mockLogin).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Identifier must be at most 254 characters')
+    expect(wrapper.text()).toContain('用户名或邮箱长度不能超过 254 个字符')
   })
 
   it('rejects a password longer than the LoginRequest limit', async () => {
@@ -37,6 +37,6 @@ describe('LoginView', () => {
     await wrapper.get('button[type="submit"]').trigger('click')
     await flushPromises()
     expect(mockLogin).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Password must be at most 128 characters')
+    expect(wrapper.text()).toContain('密码长度不能超过 128 个字符')
   })
 })

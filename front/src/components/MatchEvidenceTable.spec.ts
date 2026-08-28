@@ -12,14 +12,14 @@ describe('MatchEvidenceTable', () => {
       gap: 'No production context is evidenced.', suggestionState: 'NEEDS_USER_CONFIRMATION',
     }] } })
 
-    for (const heading of ['Requirement', 'Evidence', 'Location', 'Type', 'Score', 'Strength', 'Gap']) expect(wrapper.text()).toContain(heading)
+    for (const heading of ['岗位要求', '简历证据', '位置', '匹配类型', '得分', '证据强度', '差距']) expect(wrapper.text()).toContain(heading)
     expect(wrapper.text()).toContain('Production Redis experience')
     expect(wrapper.text()).toContain('requirement-1')
     expect(wrapper.text()).toContain('Used a cache in a course project')
     expect(wrapper.text()).toContain('Projects / paragraph 2')
     expect(wrapper.text()).toContain('DOCX')
     expect(wrapper.text()).toContain('evidence-1')
-    expect(wrapper.text()).toContain('Characters 120-164')
+    expect(wrapper.text()).toContain('字符 120-164')
     expect(wrapper.text()).toContain('35%')
     expect(wrapper.get('tbody tr').attributes('data-positive')).toBe('false')
   })

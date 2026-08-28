@@ -1,99 +1,125 @@
-# Resume Matching Platform Architecture and MVP Design
+# 简历匹配平台架构与 MVP 设计
 
-**Status:** Approved architecture, ready for implementation planning
+**状态：** 架构已批准，可进入实施规划
 
-**Product source:** `ai-resume-job-matching-project.md.docx`
+**产品来源：** `ai-resume-job-matching-project.md.docx`
 
-**Scope source:** This document records the decisions approved during design. It is the architecture source of truth until a versioned OpenAPI contract and shared fixtures are created.
+**范围来源：** 本文记录设计阶段批准的决策。在创建版本化 OpenAPI 契约和共享
+测试样例之前，本文是架构的事实依据。
 
-## 1. Product Outcome
+## 1. 产品目标
 
-Build a trustworthy job-assistance platform for new graduates. The first releasable vertical slice serves only the **Java backend development** role family. It lets a registered user configure an OpenAI-compatible model profile, upload a TXT or DOCX resume, paste a Java-backend job description, receive an evidence-backed match result, and manage visibility through soft deletion and archival recovery.
+为应届毕业生构建可信的求职辅助平台。首个可发布的功能切片只服务于
+**Java 后端开发**岗位族。注册用户可以配置 OpenAI 兼容的模型配置、上传 TXT 或
+DOCX 简历、粘贴 Java 后端岗位描述，获得有证据支撑的匹配结果，并通过软删除与归档
+恢复管理可见性。
 
-The product is not a generic resume generator. A match must connect each job requirement to cited resume evidence. Unsupported facts, numbers, outcomes, or experience must never appear in a generated suggestion or export.
+本产品不是通用的简历生成器。每条岗位要求都必须关联到有引用的简历证据。未经支持的
+事实、数字、结果或经历绝不能出现在生成的建议或导出内容中。
 
-## 2. Approved Scope
+## 2. 已批准范围
 
-### First vertical slice
+### 首个功能切片
 
-- Public registration with a selectable `USER` or `ADMIN` role.
-- JWT login and role/ownership enforcement on every protected route.
-- Per-user OpenAI-compatible API profiles: endpoint URL, model name, encrypted API key, connection test, selection, and a manual model-name fallback.
-- TXT and DOCX resume upload; PDF is an explicit unsupported-file outcome in this slice.
-- Java-backend job descriptions entered as text and parsed into structured requirements.
-- Hybrid, explainable matching with fixed weights: skills 0.40, projects 0.25, work content 0.15, education/experience 0.10, and soft skills 0.10.
-- Requirement-level evidence view, including job source text, resume excerpt/location, match status, component score, evidence strength, gap, and suggestion state.
-- GitHub-style soft-delete confirmation: the caller enters the exact phrase `确认删除简历` before the action is accepted.
-- Role-aware soft-delete recovery and cache-expiry archival recovery.
+- 公开注册，可选择 `USER` 或 `ADMIN` 角色。
+- JWT 登录，并在每个受保护路由上执行角色/所有权校验。
+- 每用户独立的 OpenAI 兼容 API 配置：接口地址、模型名称、加密 API 密钥、连接测试、
+  选择，以及手动填写模型名称的备用方式。
+- 支持 TXT 和 DOCX 简历上传；本切片对 PDF 明确返回不支持文件的结果。
+- 以文本输入 Java 后端岗位描述，并解析为结构化要求。
+- 可解释的混合匹配，固定权重为：技能 0.40、项目经历 0.25、工作内容 0.15、
+  教育/经历 0.10、软技能 0.10。
+- 按要求展示证据，包括岗位原文、简历摘录/位置、匹配状态、分项得分、证据强度、差距
+  和建议状态。
+- GitHub 风格的软删除确认：调用方必须输入精确短语 `确认删除简历`，操作才会被接受。
+- 按角色控制的软删除恢复与缓存到期归档恢复。
 
-### Explicit non-goals for the first slice
+### 首个切片明确不包含
 
-- PDF parsing, other job families, Nginx, full Docker Compose, Redis clustering, vector persistence, interview practice, resume export, and formal fairness experiments.
-- A user-facing hard-delete endpoint. Physical deletion is an operator-only direct MySQL operation and is irreversible.
-- A claim that unrestricted administrator self-registration is secure for production.
+- PDF 解析、其他岗位族、Nginx、完整 Docker Compose、Redis 集群、向量持久化、面试练习、
+  简历导出，以及正式的公平性实验。
+- 面向用户的硬删除接口。物理删除只能由运维人员直接执行 MySQL 操作，且不可逆。
+- 不宣称不受限制的管理员自助注册在生产环境中是安全的。
 
-## 3. Local Runtime Architecture
+## 3. 本地运行架构
 
-The first slice uses the approved hybrid development topology:
+首个切片使用批准的混合开发拓扑：
 
 ```text
-Vue 3 + TypeScript (native pnpm dev server, port 5173)
+Vue 3 + TypeScript（本地 pnpm 开发服务器，端口 5173）
               |
               v
-Spring Boot 3 / JDK 21 (native, port 8080) <-> MySQL 8.4 (local, port 3306)
+Spring Boot 3 / JDK 21（本地运行，端口 8080） <-> MySQL 8.4（本地，端口 3306）
               |                                      |
               |                                      v
-              +----------------------------------> Redis resume-view cache (one Docker container, port 6379)
+              +----------------------------------> Redis 简历视图缓存（单个 Docker 容器，端口 6379）
               |
               v
-FastAPI / Python 3.11 (native, port 8000) -> user-selected OpenAI-compatible API
+FastAPI / Python 3.11（本地运行，端口 8000） -> 用户选择的 OpenAI 兼容 API
 ```
 
-Spring Boot is the sole public API, authorization, orchestration, task-state, and persistence authority. FastAPI has no public user login, no user authorization decision, and no direct MySQL or Redis write path. It performs extraction, redaction, parsing, matching, guarded model calls, and returns structured work results only to Java.
+Spring Boot 是唯一的公共 API、授权、编排、任务状态和持久化权威。FastAPI 没有公共用户
+登录、用户授权决策或直接写入 MySQL/Redis 的路径。它负责提取、脱敏、解析、匹配和受控
+模型调用，并且只向 Java 返回结构化工作结果。
 
-The code compiles and runs with JDK 21. The local environment provides Maven 3.9.16; the Maven Wrapper remains available for reproducible commands. Python execution is pinned to the available Python 3.11 installation, not the machine-default Python 3.13/3.14 interpreters. Docker is initially needed only for Redis; full Compose is a later deployment phase.
+代码使用 JDK 21 编译和运行。本地环境提供 Maven 3.9.16；Maven Wrapper 仍可用于
+可复现的命令。Python 执行固定使用可用的 Python 3.11 安装，不使用机器默认的
+Python 3.13/3.14 解释器。初期 Docker 只用于 Redis；完整 Compose 属于后续部署阶段。
 
-## 4. User, Role, and Model Rules
+## 4. 用户、角色与模型规则
 
-### Roles
+### 角色
 
-- `USER` registers through the public registration flow, owns its resume records, and can only read, soft-delete, archive-recover, or user-recover its own eligible records.
-- `ADMIN` can be selected directly during registration by product decision. It can inspect and recover records across users and can initiate an administrator soft-delete.
+- `USER` 通过公开注册流程注册，拥有自己的简历记录，并且只能读取、软删除、归档恢复或
+  用户恢复自己符合条件的记录。
+- 根据产品决策，注册时可以直接选择 `ADMIN`。该角色可以跨用户查看和恢复记录，并可以
+  发起管理员软删除。
 
-All public role checks remain enforced server-side. The deliberate ability for any registrant to choose `ADMIN` means the system has a known deployment-security risk: a registrant can obtain global resume access. This must be recorded in the UI privacy disclosure, test report, and final project documentation. It is not silently treated as a production-safe permission model.
+所有公共角色校验仍由服务器端强制执行。允许任意注册者选择 `ADMIN` 是已知的部署安全
+风险：注册者可以获得全局简历访问权限。必须在 UI 隐私披露、测试报告和最终项目文档中
+记录这一点，不能默认为生产安全的权限模型。
 
-### Per-user model configuration
+### 每用户模型配置
 
-Each logged-in user owns model profiles with a display name, endpoint URL, model name, encrypted API key, optional connection-test metadata, and selected/default marker. The key is accepted by Java over the authenticated API, encrypted at rest, never returned in a read response, never logged, and decrypted only in memory when a task needs it.
+每个登录用户拥有自己的模型配置，包括显示名称、接口地址、模型名称、加密 API 密钥、可选
+的连接测试元数据以及选中/默认标记。API 密钥通过已认证 API 由 Java 接收，静态
+加密保存，从不在读取响应中返回或写入日志；只有任务需要时才在内存中解密。
 
-The UI offers known-compatible presets and a custom OpenAI-compatible profile. It attempts a model-list query when the provider supports it, with manual model-name entry as a fallback. A connection test returns only safe status and diagnostics. Custom endpoints must be validated before a server-side request; production mode accepts HTTPS endpoints and rejects private/reserved network targets unless a specifically configured local-development exception exists.
+UI 提供已知兼容的预设和自定义 OpenAI 兼容配置。模型服务支持时会尝试查询模型列表，并
+以手动输入模型名称作为备用方式。连接测试只返回安全的状态和诊断信息。自定义接口地址
+必须在服务器请求前校验；生产模式接受 HTTPS 地址，并拒绝私有/保留网络目标，除非存在
+明确配置的本地开发例外。
 
-Java passes a narrow, short-lived internal task configuration to Python. Python redacts resume material before any external-model request and must not persist API keys or raw resume text in logs, errors, queues, or analytics.
+Java 向 Python 传递范围受限且短时有效的内部任务配置。Python 在任何外部模型请求前都会
+脱敏简历材料，并且不得在日志、错误、队列或分析数据中持久化 API 密钥或原始简历文本。
 
-## 5. Data Model and Lifecycle
+## 5. 数据模型与生命周期
 
-MySQL is the durable source of truth. Resume content and sensitive parsed fields are encrypted at rest. In this MVP, Redis is only a short-lived derived page-view cache (`resume:view:{resumeId}`); task progress, idempotency keys, callback receipts, and matching results remain authoritative in MySQL. Redis loss therefore cannot change task state or durable resume data. A future slice may add Redis acceleration for task progress/idempotency without changing that authority boundary.
+MySQL 是持久化的事实来源。简历内容和敏感的解析字段均静态加密。在本 MVP 中，Redis
+仅作为短时派生的页面缓存（`resume:view:{resumeId}`）；任务进度、幂等键、回调凭据和
+匹配结果仍以 MySQL 为权威。因此 Redis 丢失不会改变任务状态或持久化简历数据。后续切片
+可以为任务进度/幂等处理增加 Redis 加速，但不改变这一权威边界。
 
-### Principal records
+### 主要记录
 
-| Record | Purpose |
+| 记录 | 用途 |
 | --- | --- |
-| `users` | Account identity, password hash, selected role, timestamps. |
-| `llm_profiles` | User-owned endpoint/model metadata and encrypted API key. |
-| `resumes` | Owner, title, source type, encrypted raw content, parser version, display lifecycle, deletion status, version, and retention timestamps. |
-| `resume_evidence` | Parsed fields, stable source offsets/excerpts, confidence, and manual-correction provenance. |
-| `job_descriptions` / `job_requirements` | Java-backend posting text and normalized mandatory/preferred requirements. |
-| `analysis_tasks` / `analysis_results` | Task state, attempt, callback receipt, matching result, and evidence links. |
-| `resume_recovery_audit` | Actor, action, prior/new lifecycle state, timestamp, and correlation ID. |
+| `users` | 账号身份、密码哈希、所选角色和时间戳。 |
+| `llm_profiles` | 所有者的接口/模型元数据与加密 API 密钥。 |
+| `resumes` | 所有者、标题、来源类型、加密原始内容、解析器版本、展示生命周期、删除状态、版本和保留时间戳。 |
+| `resume_evidence` | 解析字段、稳定的来源偏移/摘录、置信度和人工修正来源。 |
+| `job_descriptions` / `job_requirements` | Java 后端岗位文本，以及规范化的必选/优选要求。 |
+| `analysis_tasks` / `analysis_results` | 任务状态、尝试次数、回调凭据、匹配结果和证据链接。 |
+| `resume_recovery_audit` | 操作者、操作、变更前后生命周期状态、时间戳和关联 ID。 |
 
-### Resume state fields
+### 简历状态字段
 
-`resumes.status` honors the user decision:
+`resumes.status` 遵循用户决定：
 
-- `0`: not soft-deleted.
-- `1`: soft deletion completed successfully.
+- `0`：未软删除。
+- `1`：软删除已成功完成。
 
-`resumes.visibility_state` is a separate enum so cache archival is not confused with deletion:
+`resumes.visibility_state` 使用独立枚举，避免将缓存归档与删除混淆：
 
 - `ACTIVE`
 - `USER_SOFT_DELETED`
@@ -101,76 +127,107 @@ MySQL is the durable source of truth. Resume content and sensitive parsed fields
 - `USER_CACHE_ARCHIVED`
 - `ADMIN_CACHE_ARCHIVED`
 
-The record also carries `owner_id`, `soft_deleted_by`, `soft_deleted_at`, `visible_until`, `archived_at`, `restored_at`, and optimistic-lock `version` fields.
+记录还包含 `owner_id`、`soft_deleted_by`、`soft_deleted_at`、`visible_until`、
+`archived_at`、`restored_at` 和乐观锁 `version` 字段。
 
-On creation or successful restore, `visible_until` is fixed rather than extended by reads: seven days for a record created by a `USER`, and thirty days for one created by an `ADMIN`. A Java scheduler uses MySQL's durable timestamp as the authority, transitions an eligible active record to the matching cache-archived state, and deletes its Redis keys. A subsequent ordinary page visit does not reload an archived record from MySQL; an explicit recovery does.
+创建或成功恢复时，`visible_until` 会固定，不会因读取而延长：`USER` 创建的记录为七天，
+`ADMIN` 创建的记录为三十天。Java 调度器以 MySQL 的持久化时间戳为依据，将符合
+条件的活动记录转换为对应的缓存归档状态，并删除其 Redis 键。之后普通页面访问不会从
+MySQL 重新加载已归档记录；必须执行显式恢复。
 
-### Deletion and recovery rules
+### 删除与恢复规则
 
-- A normal deletion requires authentication, ownership/role authorization, the typed confirmation phrase, and an expected record version. Java sets `status=1`, moves the record to a soft-deleted state, clears Redis keys, writes an audit record, and prevents late analysis callbacks from restoring visibility.
-- A `USER` can recover only its own `USER_SOFT_DELETED` and its own `USER_CACHE_ARCHIVED` records.
-- An `ADMIN` can inspect and recover eligible soft-deleted or archived records for every user. An administrator-soft-deleted record is excluded from the owner's normal and recovery views; only an administrator can restore it.
-- The recovery search is an indexed, owner/role-scoped query, not an unbounded in-memory table scan.
-- A direct MySQL physical delete is outside application functionality. It removes recoverability and must be performed by an authorized operator according to a separate operating procedure.
+- 普通删除要求完成身份认证、通过所有权/角色授权校验、输入确认短语并提供预期记录版本。
+  Java 设置 `status=1`，将记录移到软删除状态，清理 Redis 键，写入审计记录，并阻止
+  迟到的分析回调恢复可见性。
+- `USER` 只能恢复自己的 `USER_SOFT_DELETED` 和 `USER_CACHE_ARCHIVED` 记录。
+- `ADMIN` 可以查看并恢复所有用户符合条件的软删除或归档记录。管理员软删除的记录会从
+  所有者的普通视图和恢复视图中排除，只有管理员可以恢复。
+- 恢复搜索是带索引、按所有者/角色范围执行的查询，不是无界的内存表扫描。
+- 直接 MySQL 物理删除不属于应用功能。它会移除恢复能力，必须由授权运维人员按独立的
+  操作流程执行。
 
-The user-facing privacy disclosure must say plainly that Redis expiry and soft deletion do not physically remove MySQL data. MySQL resume data persists until a direct operator deletion.
+面向用户的隐私披露必须明确说明：Redis 过期和软删除不会物理移除 MySQL 数据。MySQL 中
+的简历数据会一直保留，直到运维人员直接删除。
 
-## 6. Processing and Matching Flow
+## 6. 处理与匹配流程
 
-1. A user registers/logs in, selects a permitted personal model profile, and uploads a TXT/DOCX resume with a Java-backend job description.
-2. Java validates file type/size, ownership, task idempotency, and model-profile ownership; it creates a queued task and records a lifecycle version.
-3. Java sends a scoped internal work request to Python. No undocumented host path is shared between services.
-4. Python extracts text, detects/redacts sensitive fields, identifies resume evidence and job requirements, and calls the selected OpenAI-compatible API only with redacted material.
-5. Python validates the structured model response. It returns requirement references, evidence identifiers, match state, component scores, strength, gap, and guarded suggestions to Java.
-6. Java validates evidence references against the current resume version and writes the result only when the task and resume are still eligible. Python never writes user-facing data directly.
-7. Vue reads the result solely through Java and renders evidence, task state, errors, recovery controls, and deletion controls appropriate to the caller's role.
+1. 用户注册/登录，选择获准的个人模型配置，并上传 TXT/DOCX 简历和 Java 后端岗位描述。
+2. Java 校验文件类型/大小、所有权、任务幂等性和模型配置所有权；创建排队任务并记录
+   生命周期版本。
+3. Java 向 Python 发送范围受限的内部工作请求。服务之间不共享未文档化的主机路径。
+4. Python 提取文本，检测/脱敏敏感字段，识别简历证据和岗位要求，并且只使用脱敏材料
+   调用选定的 OpenAI 兼容 API。
+5. Python 校验结构化模型响应，向 Java 返回要求引用、证据标识、匹配状态、分项得分、
+   强度、差距和受保护的建议。
+6. Java 针对当前简历版本校验证据引用，仅在任务与简历仍符合条件时写入结果。Python
+   从不直接写入面向用户的数据。
+7. Vue 只通过 Java 读取结果，并根据调用方角色展示证据、任务状态、错误、恢复控件和
+   删除控件。
 
-The score is the documented weighted composite. A requirement state is exactly one of `SATISFIED`, `PARTIALLY_SATISFIED`, `RELATED_BUT_EVIDENCE_INSUFFICIENT`, or `UNMET`. The last two never become a positive match. Suggestions are classified as `SUPPORTED_FACT`, `WORDING_ONLY_REWRITE`, `NEEDS_USER_CONFIRMATION`, or `RISKY_OR_UNSUPPORTED`; only the first two may be shown as safe candidates, and neither can invent facts.
+得分使用文档规定的加权组合。要求状态必须且只能是
+`SATISFIED`、`PARTIALLY_SATISFIED`、`RELATED_BUT_EVIDENCE_INSUFFICIENT` 或
+`UNMET` 之一，后两者绝不会成为正向匹配。建议分为
+`SUPPORTED_FACT`、`WORDING_ONLY_REWRITE`、`NEEDS_USER_CONFIRMATION` 或
+`RISKY_OR_UNSUPPORTED`；只有前两类可以作为安全候选展示，且都不能捏造事实。
 
-## 7. Contract, State, and Failure Rules
+## 7. 契约、状态与失败规则
 
-Before implementation fanout, a single contract guardian creates these authoritative artifacts:
+在并行实施之前，由单一契约负责人创建以下权威制品：
 
-- `contracts/openapi/v1/openapi.yaml` for public Java APIs.
-- `contracts/internal/v1/analysis-callback.schema.json` for Java/Python handoff and callback payloads.
-- `contracts/fixtures/v1/` for valid, invalid, timeout, duplicate-message, stale-callback, archival, user-delete, admin-delete, authorization, and legacy fixtures where a consumer exists.
+- `contracts/openapi/v1/openapi.yaml`：公共 Java API。
+- `contracts/internal/v1/analysis-callback.schema.json`：Java/Python 交接和回调负载。
+- `contracts/fixtures/v1/`：有效、无效、超时、重复消息、过期回调、归档、用户删除、
+  管理员删除、授权，以及存在使用方时的旧版测试样例。
 
-Every response uses an error envelope containing a stable code, safe user message, correlation ID, retryability, and non-sensitive validation detail. Tasks use guarded transitions equivalent to `QUEUED -> PROCESSING -> SUCCEEDED | FAILED | TIMED_OUT`; an archival or soft-delete transition blocks result persistence. A callback carries task ID, attempt, callback ID, payload hash, and service credential. Identical retries are accepted idempotently, stale or deleted work is rejected without recreating data, and malformed model output is a recoverable failure rather than a fabricated result.
+每个响应都使用错误信封，包含稳定代码、安全的用户消息、关联 ID、是否可重试以及
+非敏感校验详情。任务使用等价于 `QUEUED -> PROCESSING -> SUCCEEDED | FAILED | TIMED_OUT`
+的受保护状态转换；归档或软删除转换会阻止结果持久化。回调携带任务 ID、尝试次数、
+`callbackId`（回调 ID）、`payloadHash`（负载哈希）和服务凭据。相同的重试会被幂等接受；过期或已删除的工作会被
+拒绝且不会重建数据；格式错误的模型输出会作为可恢复的失败，而不是伪造结果。
 
-## 8. UX Commitments
+## 8. 用户体验承诺
 
-- Registration exposes role selection as approved.
-- Model configuration uses presets, custom endpoints, test connection, selectable models, manual fallback, safe error messages, and no secret re-display.
-- The evidence result view prioritizes scanning requirements, cited resume proof, gaps, confidence, and failures.
-- Delete is a deliberate modal flow requiring the exact confirmation phrase; it does not rely on a client-only check.
-- User recovery lists only the user's eligible records. Administrator recovery lists eligible records across owners with clear owner context.
-- Archived, deleted, pending, partial/low-confidence, model-failure, and no-data states are explicit UI states.
+- 注册页面按批准范围展示角色选择。
+- 模型配置提供预设、自定义接口地址、连接测试、可选模型、手动备用方式和安全错误消息，
+  且不再次展示密钥。
+- 证据结果视图优先展示便于扫描的要求、引用的简历证明、差距、置信度和失败信息。
+- 删除是需要精确确认短语的明确弹窗流程，不依赖仅在客户端执行的检查。
+- 用户恢复只列出该用户符合条件的记录；管理员恢复跨所有者列出符合条件的记录，并清晰
+  显示所有者信息。
+- 归档、删除、等待中、部分/低置信度、模型失败和无数据都是明确的 UI 状态。
 
-## 9. Verification Gates
+## 9. 验证门槛
 
-The vertical slice is complete only after fresh evidence demonstrates:
+只有新的证据证明以下各项后，功能切片才算完成：
 
-- shared contract validation against all required fixtures;
-- Java unit/integration tests for authorization, lifecycle transitions, encryption boundaries, task idempotency, and callback version checks;
-- Python tests for redaction, TXT/DOCX parsing, structured-output validation, fixed scoring, evidence integrity, and model-failure handling;
-- real Java-to-Python integration for one controlled resume/job input;
-- authorization tests for guessed IDs, user-owned recovery, cross-user denial, administrator recovery, and administrator soft-delete hiding an owner's record;
-- Redis expiry/archive and explicit restore tests for the 7-day and 30-day owner-role policies;
-- delete-during-processing, duplicate callback, stale attempt, and late callback tests;
-- scans showing API keys, raw resume body, phone numbers, emails, and names do not appear in logs or error payloads;
-- Vue evidence for all operational states, including delete confirmation and recovery dialogs.
+- 针对全部必需测试样例的共享契约校验；
+- Java 单元/集成测试，覆盖授权、生命周期转换、加密边界、任务幂等性和回调版本检查；
+- Python 测试，覆盖脱敏、TXT/DOCX 解析、结构化输出校验、固定评分、证据完整性和模型
+  失败处理；
+- 针对一份受控简历/岗位输入的真实 Java 到 Python 集成；
+- 针对猜测 ID、用户所有者恢复、跨用户拒绝、管理员恢复，以及管理员软删除隐藏所有者
+  记录的授权测试；
+- 针对 7 天和 30 天所有者角色策略的 Redis 过期/归档与显式恢复测试；
+- 处理中删除、重复回调、过期尝试和迟到回调测试；
+- 扫描证明 API 密钥、原始简历正文、电话号码、电子邮件和姓名不会出现在日志或错误负载中；
+- Vue 对所有操作状态的证据，包括删除确认和恢复对话框。
 
-## 10. Delivery Sequence
+## 10. 交付顺序
 
-1. Initialize Git and record the pre-implementation baseline.
-2. Create and review the versioned contracts, state table, error codes, fixtures, retention inventory, and slice brief in one contract-guardian lane.
-3. After contract freeze, implement the Java, Python, and Vue lanes with non-overlapping ownership.
-4. Integrate the real handoff, run the shared evidence suite, and obtain independent review focused on security, privacy, concurrency, and requirements.
-5. Add PDF, other job families, full Compose/Nginx, interview practice, and evaluation work through separate approved slices.
+1. 初始化 Git，并记录实施前的基线。
+2. 在一个契约负责人工作流中创建并审查版本化契约、状态表、错误代码、测试样例、保留
+   清单和切片说明。
+3. 契约冻结后，按不重叠的所有权实现 Java、Python 和 Vue 工作流。
+4. 集成真实交接，运行共享证据套件，并获得聚焦安全、隐私、并发和需求的独立审查。
+5. 通过单独批准的切片添加 PDF、其他岗位族、完整 Compose/Nginx、面试练习和评估工作。
 
-## 11. Residual Risks and Honest Claims
+## 11. 残余风险与诚实声明
 
-- Open administrator self-registration is an intentional product decision but not a secure production-role issuance strategy.
-- Long-lived MySQL resume storage conflicts with the product document's usual minimum-retention intent; the application discloses this explicitly and does not call cache expiry a physical deletion.
-- A custom model endpoint may fail, change behavior, retain data under provider policy, or return invalid structured output. The system exposes such failure rather than claiming a successful analysis.
-- The first slice proves the specified local workflow only. It does not prove production readiness, fairness, model accuracy, or support for formats/features outside the approved scope.
+- 开放管理员自助注册是有意的产品决策，但不是安全的生产角色签发策略。
+- 长期保留 MySQL 简历存储与产品文档通常的最短保留意图冲突；应用会明确披露这一点，不会
+  把缓存过期称为物理删除。
+- 自定义模型接口可能失败、改变行为、按模型服务策略保留数据，或返回无效的结构化输出。
+  系统会暴露这类失败，而不是声称分析成功。
+- 首个切片只证明规定的本地工作流，不证明生产可用性、公平性、模型准确度，也不支持批准
+  范围之外的格式/功能。

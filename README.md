@@ -1,18 +1,16 @@
-# Resume Matching Platform
+# 简历匹配平台
 
-This repository contains the initial hybrid runtime for the resume matching
-platform: a Spring Boot public API, a FastAPI analysis service, and a Vue web
-application. Versioned API and internal-message contracts live in
-[`contracts/`](contracts/README.md) and are the shared interface authority.
+本仓库包含简历匹配平台的首个混合运行环境：Spring Boot 公共 API、FastAPI
+分析服务和 Vue 网页应用。版本化 API 与内部消息契约位于
+[`contracts/`](contracts/README.md)，它们是各服务共同遵循的接口依据。
 
-## Local Setup
+## 本地配置
 
-Copy `.env.example` to a local `.env` and replace its placeholder values with
-authorized development credentials. Do not commit `.env` files.
+将 `.env.example` 复制为本地 `.env`，并把占位值替换为已获授权的开发凭据。
+不要提交任何 `.env` 文件。
 
-The Java service reads these values from the process environment. To launch
-the local Spring profile from PowerShell, export the assignments from `.env`
-first:
+Java 服务从进程环境变量读取这些值。要从 PowerShell 启动本地 Spring 配置，
+请先从 `.env` 导出变量：
 
 ```powershell
 Get-Content .env |
@@ -26,27 +24,23 @@ try { .\mvnw.cmd spring-boot:run '-Dspring-boot.run.profiles=local' }
 finally { Pop-Location }
 ```
 
-`back/java/src/main/resources/application-local.yml` is tracked and contains
-only environment-variable references; it is activated by the `local` profile.
+`back/java/src/main/resources/application-local.yml` 已纳入版本控制，其中只包含
+环境变量引用；启用 `local` 配置后会加载它。
 
-The FastAPI worker's internal analysis route is protected by the
-`X-Internal-Service-Token` HTTP header. Configure the same locally generated
-value as `PYTHON_INTERNAL_SERVICE_TOKEN` for the Java caller and Python
-worker; the value is intentionally not part of the JSON job contract and must
-not be committed. The callback target is restricted to loopback by default,
-plus the origin/path configured by `JAVA_CALLBACK_BASE_URL`. Additional exact
-callback bases can be supplied as a comma-separated
-`PYTHON_CALLBACK_ALLOWED_BASE_URLS` value. Invalid or unconfigured targets are
-rejected before any network request.
+FastAPI 工作进程的内部分析路由由 `X-Internal-Service-Token` HTTP 请求标头保护。
+请为 Java 调用方和 Python 工作进程配置同一个本地生成的
+`PYTHON_INTERNAL_SERVICE_TOKEN`；该值有意不放入 JSON 任务契约，且不得提交。
+回调目标默认仅允许回环地址，以及 `JAVA_CALLBACK_BASE_URL` 配置的来源/路径。
+还可以通过逗号分隔的 `PYTHON_CALLBACK_ALLOWED_BASE_URLS` 添加额外的精确回调基址。
+无效或未配置的目标会在发起网络请求前被拒绝。
 
-Run the local Redis-only dependency definition with Docker Compose when Docker
-Desktop is available:
+如果 Docker Desktop 可用，请使用 Docker Compose 启动仅包含 Redis 的本地依赖：
 
 ```powershell
 docker compose -f docker-compose.redis.yml up -d
 ```
 
-Build and test the service roots:
+构建并测试各服务根目录：
 
 ```powershell
 back\java\mvnw.cmd -q -DskipTests compile
@@ -56,29 +50,26 @@ pnpm --dir front install
 pnpm --dir front run build
 ```
 
-## Controlled MVP Flow
+## 受控 MVP 流程
 
-The cross-service fixture checks are kept under
-[`tests/integration/`](tests/integration). They run without a database or
-provider and validate the checked-in TXT/DOCX/PDF inputs:
+跨服务测试样例检查位于 [`tests/integration/`](tests/integration)。这些检查无需
+数据库或模型服务即可运行，并会验证仓库中已提交的 TXT/DOCX/PDF 输入：
 
 ```powershell
 C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest tests/integration/assert_mvp_flow.py -q
 ```
 
-To exercise the Java-to-Python handoff, first copy `.env.example` to `.env`,
-replace every placeholder with authorized local values, and make Redis
-available. Then run:
+要验证 Java 到 Python 的交接，先将 `.env.example` 复制为 `.env`，把所有占位值
+替换为已获授权的本地值，并确保 Redis 可用，然后运行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/integration/run_mvp_flow.ps1
 ```
 
-The launcher defaults to an explicit `SKIP` when services or credentials are
-missing. Use `-RequireLive` (or `MVP_REQUIRE_LIVE=1`) for a CI failure instead.
-The live runner uses a temporary loopback fake provider and keeps its
-credential in memory; it never prints JWTs, API keys, callback tokens, or
-resume contents. The Playwright lifecycle check is opt-in:
+当服务或凭据缺失时，启动器默认明确输出 `SKIP`。在持续集成（CI）中如需将其视为失败，
+请使用 `-RequireLive`（或 `MVP_REQUIRE_LIVE=1`）。实时运行器使用临时的
+回环地址模拟模型服务，并将其凭据保存在内存中；它绝不会打印 JWT、API 密钥、
+回调令牌或简历内容。Playwright 生命周期检查需要显式启用：
 
 ```powershell
 $env:E2E_LIVE = '1'
@@ -87,5 +78,5 @@ $env:E2E_PROVIDER_URL = 'http://127.0.0.1:<fake-provider-port>'
 pnpm --dir front exec playwright test e2e/resume-lifecycle.spec.ts
 ```
 
-See [`tests/integration/task-10-report.md`](tests/integration/task-10-report.md)
-for the covered states and prerequisite behavior.
+覆盖的状态和前置条件行为请参阅
+[`tests/integration/task-10-report.md`](tests/integration/task-10-report.md)。

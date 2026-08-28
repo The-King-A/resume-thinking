@@ -1,41 +1,61 @@
-# Resume Matching Platform MVP Implementation Plan
+# 简历匹配平台 MVP 实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (- [ ]) syntax for tracking.
+> **面向智能体执行者：** 必须使用
+> `superpowers:subagent-driven-development`（推荐）或
+> `superpowers:executing-plans`，按任务逐项实施本计划。步骤使用复选框（`- [ ]`）跟踪。
 
-**Goal:** Deliver the first working, evidence-backed Java-backend resume-to-job matching vertical slice with per-user OpenAI-compatible model profiles, role-aware lifecycle controls, and Redis archival recovery.
+**目标：** 交付首个可运行、以证据为依据的 Java 后端简历与岗位匹配功能切片，包含
+每用户的 OpenAI 兼容模型配置、按角色控制的生命周期，以及 Redis 归档恢复。
 
-**Architecture:** Vue 3 is the operational client. Spring Boot 3 on JDK 21 is the only public API, authorization, orchestration, and persistence authority. FastAPI on Python 3.11 performs extraction, redaction, matching, and guarded model calls. MySQL holds encrypted durable records plus authoritative task progress, idempotency keys, callback receipts, and results; Redis holds only the derived `resume:view:{resumeId}` page cache in this MVP. Java owns every MySQL/Redis write, including Python callbacks. Redis-backed task progress/idempotency is reserved for a later slice.
+**架构：** Vue 3 是操作客户端。运行在 JDK 21 上的 Spring Boot 3 是唯一的公共 API、
+授权、编排和持久化权威。Python 3.11 上的 FastAPI 负责提取、脱敏、匹配和受控模型调用。
+MySQL 保存加密的持久记录，以及权威的任务进度、幂等键、回调凭据和结果；本 MVP 中 Redis
+只保存派生的 `resume:view:{resumeId}` 页面缓存。所有 MySQL/Redis 写入（包括 Python 回调）
+均由 Java 负责。Redis 任务进度/幂等处理留到后续切片。
 
-**Tech Stack:** Vue 3, TypeScript, Vite, Element Plus, Pinia, Vitest, Playwright, Spring Boot 3, Java 21, Maven Wrapper, Spring Security, JPA, Flyway, MySQL 8.4, Redis 7 Docker container, FastAPI, Pydantic, httpx, python-docx, pytest, OpenAPI, JSON Schema.
+**技术栈：** Vue 3、TypeScript、Vite、Element Plus、Pinia、Vitest、Playwright、
+Spring Boot 3、Java 21、Maven Wrapper、Spring Security、JPA、Flyway、MySQL 8.4、
+Redis 7（Docker 容器）、FastAPI、Pydantic、httpx、python-docx、pytest、OpenAPI、
+JSON Schema。
 
-**Spec:** docs/superpowers/specs/2026-08-27-resume-matching-platform-design.md
+**规范：** docs/superpowers/specs/2026-08-27-resume-matching-platform-design.md
 
-## Global Constraints
+## 全局约束
 
-- Only the Java-backend job family is in this slice. TXT and DOCX are supported; PDF returns UNSUPPORTED_FILE.
-- Compile and run Java with JDK 21. Run Python only with the installed Python 3.11 executable.
-- Java is the sole public business, authorization, task-state, MySQL, and Redis authority. Python has no user login and no direct MySQL/Redis writes.
-- Freeze OpenAPI, internal callback schema, lifecycle states, error envelope, and fixtures before implementation fanout.
-- Treat resumes, job text, provider output, and user configuration as untrusted. Redact before an external call and do not log secrets or full resume text.
-- resumes.status=0 means not soft-deleted; resumes.status=1 means soft deletion succeeded. visibility_state records ACTIVE, USER_SOFT_DELETED, ADMIN_SOFT_DELETED, USER_CACHE_ARCHIVED, or ADMIN_CACHE_ARCHIVED.
-- MySQL retains records until an authorized operator physically deletes them. Seven-day and thirty-day policies delete Redis keys and archive page visibility only.
-- USER restores only its own eligible resume. ADMIN can recover eligible resumes for every owner. An administrator soft deletion is invisible and unrecoverable to the normal owner.
-- Public registration permits USER and ADMIN roles by product decision. Continue all server-side authorization checks and document the global-access risk.
-- Matching uses exactly 0.40 skills, 0.25 projects, 0.15 work content, 0.10 education/experience, and 0.10 soft skills.
-- Every user owns OpenAI-compatible profiles. Persist API keys encrypted and never return or log them.
-- Execute contract work sequentially. After contract freeze, use agents only for non-overlapping Java, Python, and frontend ownership in an isolated Git worktree.
+- 本切片只包含 Java 后端岗位族。支持 TXT 和 DOCX；PDF 返回 UNSUPPORTED_FILE。
+- 使用 JDK 21 编译和运行 Java。Python 只使用已安装的 Python 3.11 解释器。
+- Java 是唯一的公共业务、授权、任务状态、MySQL 和 Redis 权威。Python 没有用户登录，
+  也不能直接写入 MySQL/Redis。
+- 在并行实施前冻结 OpenAPI、内部回调模式、生命周期状态、错误信封和测试样例。
+- 将简历、岗位文本、模型服务输出和用户配置视为不可信。外部调用前先脱敏，且不要记录
+  敏感信息或完整简历文本。
+- `resumes.status=0` 表示未软删除；`resumes.status=1` 表示软删除成功。`visibility_state`
+  记录 `ACTIVE`、`USER_SOFT_DELETED`、`ADMIN_SOFT_DELETED`、`USER_CACHE_ARCHIVED` 或
+  `ADMIN_CACHE_ARCHIVED`。
+- MySQL 会保留记录，直到授权运维人员物理删除。七天和三十天策略只删除 Redis 键
+  并归档页面可见性。
+- `USER` 只能恢复自己的符合条件的简历。`ADMIN` 可恢复每个所有者的符合条件简历。管理员
+  软删除对普通所有者不可见且不可恢复。
+- 按产品决策，公开注册允许 USER 和 ADMIN 角色。继续执行所有服务器端授权检查，并记录
+  全局访问风险。
+- 匹配严格使用 0.40 技能、0.25 项目经历、0.15 工作内容、0.10
+  教育/经历和 0.10 软技能。
+- 每个用户拥有 OpenAI 兼容配置。API 密钥必须加密持久化，绝不返回或记录。
+- 契约相关工作按顺序执行。契约冻结后，只能在隔离 Git 工作树中让智能体处理所有权
+  不重叠的 Java、Python 和前端工作。
 
 ---
 
-## Execution Preconditions
+## 执行前置条件
 
-- Use using-git-worktrees before Task 1 starts implementation in an isolated checkout.
-- Start Docker Desktop before starting the Redis container.
-- Obtain the authorized MySQL URL, database name, username, and password before Flyway runs. Store values only in an untracked .env file.
-- Generate a base64 AES-GCM master key and JWT signing key locally; never commit either value.
-- Automated tests use a local fake OpenAI-compatible server. Real provider credentials enter through the completed UI only.
+- 任务 1 开始在隔离工作树实施前，先使用 `using-git-worktrees`。
+- 启动 Redis 容器前先启动 Docker Desktop。
+- 在运行 Flyway 前取得已授权的 MySQL URL、数据库名、用户名和密码。只将值
+  存在未跟踪的 `.env` 文件中。
+- 在本地生成 base64 AES-GCM master key 和 JWT signing key；两者都不得提交。
+- 自动化测试使用本地模拟 OpenAI 兼容服务。真实模型服务凭据只通过完成后的 UI 输入。
 
-## Planned File Structure
+## 计划的文件结构
 
 ~~~
 contracts/
@@ -76,20 +96,20 @@ tests/integration/
 docs/verification/
 ~~~
 
-## Task 1: Contract Guardian - Freeze Public API and Lifecycle
+## 任务 1：契约负责人 - 冻结公共 API 与生命周期
 
-**Files:**
-- Create: contracts/README.md
-- Create: contracts/package.json
-- Create: contracts/openapi/v1/openapi.yaml
-- Create: contracts/internal/v1/analysis-job.schema.json
-- Create: contracts/internal/v1/analysis-callback.schema.json
+**文件：**
+- 新建：contracts/README.md
+- 新建：contracts/package.json
+- 新建：contracts/openapi/v1/openapi.yaml
+- 新建：contracts/internal/v1/analysis-job.schema.json
+- 新建：contracts/internal/v1/analysis-callback.schema.json
 
-**Interfaces:**
-- Consumes: approved design specification.
-- Produces: the authoritative public Java API contract and Java-to-Python handoff contract.
+**接口：**
+- 输入：已批准的设计规范。
+- 输出：权威的公共 Java API 契约与 Java 到 Python 的交接契约。
 
-- [ ] **Step 1: Define error and state schemas before any endpoint.**
+- [ ] **步骤 1：在任何接口之前定义错误和状态模式。**
 
 ~~~yaml
 ApiError:
@@ -97,7 +117,7 @@ ApiError:
   required: [code, message, correlationId, retryable]
   properties:
     code: { type: string, example: RESUME_ARCHIVED }
-    message: { type: string, example: The resume is archived and must be restored first. }
+    message: { type: string, example: 简历已归档，请先恢复。 }
     correlationId: { type: string, format: uuid }
     retryable: { type: boolean }
 VisibilityState:
@@ -108,9 +128,14 @@ TaskState:
   enum: [QUEUED, PROCESSING, SUCCEEDED, FAILED, TIMED_OUT, BLOCKED]
 ~~~
 
-- [ ] **Step 2: Define exact public routes and ownership rules.**
+- [ ] **步骤 2：定义精确的公共路由和所有权规则。**
 
-Create routes for POST /api/v1/auth/register, POST /api/v1/auth/login, GET /api/v1/auth/me, CRUD /api/v1/llm-profiles, POST /api/v1/llm-profiles/{profileId}/test, POST /api/v1/resumes, GET /api/v1/resumes, GET /api/v1/resumes/{resumeId}, DELETE /api/v1/resumes/{resumeId}, GET/POST recovery routes, POST /api/v1/match-tasks, GET /api/v1/match-tasks/{taskId}, GET /api/v1/match-tasks/{taskId}/result, and administrator recovery/delete/restore routes.
+创建以下路由：POST /api/v1/auth/register、POST /api/v1/auth/login、GET
+/api/v1/auth/me、CRUD /api/v1/llm-profiles、POST /api/v1/llm-profiles/{profileId}/test、
+POST /api/v1/resumes、GET /api/v1/resumes、GET /api/v1/resumes/{resumeId}、DELETE
+/api/v1/resumes/{resumeId}、GET/POST 恢复路由、POST /api/v1/match-tasks、GET
+/api/v1/match-tasks/{taskId}、GET /api/v1/match-tasks/{taskId}/result，以及管理员
+恢复/删除/还原路由。
 
 ~~~yaml
 DeleteResumeRequest:
@@ -129,9 +154,10 @@ CreateMatchTaskRequest:
     idempotencyKey: { type: string, minLength: 16, maxLength: 128 }
 ~~~
 
-Every protected path declares bearer authentication and returns the same RESOURCE_NOT_FOUND envelope for an unknown ID and a foreign ID.
+每个受保护路径都声明 Bearer 认证；未知 ID 和外部 ID 必须返回相同的
+RESOURCE_NOT_FOUND 错误信封。
 
-- [ ] **Step 3: Define internal analysis job and callback payloads without user identity.**
+- [ ] **步骤 3：定义不含用户身份的内部分析任务和回调负载。**
 
 ~~~json
 {
@@ -150,13 +176,15 @@ Every protected path declares bearer authentication and returns the same RESOURC
 }
 ~~~
 
-The callback schema requires taskId, attempt, callbackId, callbackToken, and evidence IDs that refer to evidence supplied in the job. It forbids ownerId, database credentials, plaintext passwords, and arbitrary persistence fields.
+回调模式要求 taskId、attempt（尝试次数）、callbackId、callbackToken，以及指向任务中所提供证据的
+证据 ID。它禁止 ownerId、数据库凭据、明文密码和任意持久化字段。
 
-- [ ] **Step 4: Record state transitions and error codes in contracts/README.md.**
+- [ ] **步骤 4：在 contracts/README.md 中记录状态转换和错误代码。**
 
-Record QUEUED -> PROCESSING -> SUCCEEDED|FAILED|TIMED_OUT and any active task -> BLOCKED after soft deletion or archival. Record ACTIVE -> USER_SOFT_DELETED|ADMIN_SOFT_DELETED|USER_CACHE_ARCHIVED|ADMIN_CACHE_ARCHIVED, plus role-limited restore to ACTIVE. Define TASK_GONE, STALE_ATTEMPT, IDEMPOTENCY_CONFLICT, RESUME_ARCHIVED, RESUME_SOFT_DELETED, RESOURCE_NOT_FOUND, MODEL_UNAVAILABLE, MODEL_OUTPUT_INVALID, MODEL_ENDPOINT_REJECTED, and UNSUPPORTED_FILE.
+记录 `QUEUED -> PROCESSING -> SUCCEEDED|FAILED|TIMED_OUT`，以及软删除或归档后任意活动
+任务 -> `BLOCKED`。记录 `ACTIVE -> USER_SOFT_DELETED|ADMIN_SOFT_DELETED|USER_CACHE_ARCHIVED|ADMIN_CACHE_ARCHIVED`，并记录受角色限制的恢复到 `ACTIVE`。定义 `TASK_GONE`、`STALE_ATTEMPT`、`IDEMPOTENCY_CONFLICT`、`RESUME_ARCHIVED`、`RESUME_SOFT_DELETED`、`RESOURCE_NOT_FOUND`、`MODEL_UNAVAILABLE`、`MODEL_OUTPUT_INVALID`、`MODEL_ENDPOINT_REJECTED` 和 `UNSUPPORTED_FILE`。
 
-- [ ] **Step 5: Create the linter package, lint the contract, and commit it.**
+- [ ] **步骤 5：创建契约检查工具包，执行契约检查并提交。**
 
 ~~~json
 {
@@ -169,38 +197,38 @@ Record QUEUED -> PROCESSING -> SUCCEEDED|FAILED|TIMED_OUT and any active task ->
 }
 ~~~
 
-Run: pnpm --dir contracts install --frozen-lockfile=false
+运行：pnpm --dir contracts install --frozen-lockfile=false
 
-Run: pnpm --dir contracts exec redocly lint openapi/v1/openapi.yaml
+运行：pnpm --dir contracts exec redocly lint openapi/v1/openapi.yaml
 
-Expected: no OpenAPI errors.
+预期：没有 OpenAPI 错误。
 
 ~~~bash
 git add contracts/README.md contracts/package.json contracts/pnpm-lock.yaml contracts/openapi/v1/openapi.yaml contracts/internal/v1
 git commit -m "feat(contracts): freeze v1 API and analysis handoff"
 ~~~
 
-## Task 2: Contract Guardian - Fixture Matrix and Validation Harness
+## 任务 2：契约负责人 - 测试样例矩阵与验证工具
 
-**Files:**
-- Create: contracts/scripts/validate-contracts.mjs
-- Create: contracts/fixtures/v1/auth-register-valid.json
-- Create: contracts/fixtures/v1/llm-profile-valid.json
-- Create: contracts/fixtures/v1/match-request-valid.json
-- Create: contracts/fixtures/v1/match-request-invalid.json
-- Create: contracts/fixtures/v1/callback-valid.json
-- Create: contracts/fixtures/v1/callback-duplicate.json
-- Create: contracts/fixtures/v1/callback-stale.json
-- Create: contracts/fixtures/v1/callback-after-soft-delete.json
-- Create: contracts/fixtures/v1/archive-user.json
-- Create: contracts/fixtures/v1/archive-admin.json
-- Create: contracts/fixtures/v1/error-envelope.json
+**文件：**
+- 新建：contracts/scripts/validate-contracts.mjs
+- 新建：contracts/fixtures/v1/auth-register-valid.json
+- 新建：contracts/fixtures/v1/llm-profile-valid.json
+- 新建：contracts/fixtures/v1/match-request-valid.json
+- 新建：contracts/fixtures/v1/match-request-invalid.json
+- 新建：contracts/fixtures/v1/callback-valid.json
+- 新建：contracts/fixtures/v1/callback-duplicate.json
+- 新建：contracts/fixtures/v1/callback-stale.json
+- 新建：contracts/fixtures/v1/callback-after-soft-delete.json
+- 新建：contracts/fixtures/v1/archive-user.json
+- 新建：contracts/fixtures/v1/archive-admin.json
+- 新建：contracts/fixtures/v1/error-envelope.json
 
-**Interfaces:**
-- Consumes: schemas from Task 1.
-- Produces: fixtures that Java and Python tests consume without reinterpreting fields.
+**接口：**
+- 输入：任务 1 的模式。
+- 输出：Java 和 Python 测试可直接使用、无需重新解释字段的测试样例。
 
-- [ ] **Step 1: Add validation scripts to the Task 1 package.**
+- [ ] **步骤 1：向任务 1 的工具包添加校验脚本。**
 
 ~~~json
 {
@@ -211,9 +239,10 @@ git commit -m "feat(contracts): freeze v1 API and analysis handoff"
 }
 ~~~
 
-Merge these scripts into the existing Task 1 package without changing its pinned dependencies, then run pnpm --dir contracts install so the lockfile matches the scripts.
+将这些脚本合并到现有任务 1 的工具包，不要改变其固定依赖；然后运行
+pnpm --dir contracts install，使锁文件与脚本保持一致。
 
-- [ ] **Step 2: Write the expected-invalid match request before the validator.**
+- [ ] **步骤 2：在校验器之前编写预期无效的匹配请求。**
 
 ~~~json
 {
@@ -224,9 +253,10 @@ Merge these scripts into the existing Task 1 package without changing its pinned
 }
 ~~~
 
-Make callback-duplicate reuse callback-valid's callbackId and payload hash. Make callback-stale use an older attempt. Make callback-after-soft-delete structurally valid but semantically rejected by Java.
+让 callback-duplicate 复用 callback-valid 的 `callbackId` 和 `payloadHash`（负载哈希）；让 callback-stale
+使用较早的 attempt（尝试次数）；让 callback-after-soft-delete 在结构上有效，但由 Java 按语义拒绝。
 
-- [ ] **Step 3: Write the fixture validator and make the invalid fixture fail.**
+- [ ] **步骤 3：编写测试样例校验器，并确保无效样例失败。**
 
 ~~~js
 import Ajv from 'ajv';
@@ -241,44 +271,44 @@ const validateCallback = ajv.compile(callbackSchema);
 if (!validateCallback(callback)) throw new Error(ajv.errorsText(validateCallback.errors));
 ~~~
 
-Extend the script to assert known-valid fixtures pass and match-request-invalid is rejected by the matching request schema.
+扩展脚本，断言已知有效测试样例通过，并确认 match-request-invalid 被匹配请求模式拒绝。
 
-- [ ] **Step 4: Install and run contract validation.**
+- [ ] **步骤 4：安装并运行契约校验。**
 
-Run: pnpm --dir contracts install --frozen-lockfile=false
+运行：pnpm --dir contracts install --frozen-lockfile=false
 
-Run: pnpm --dir contracts run lint && pnpm --dir contracts run validate
+运行：pnpm --dir contracts run lint && pnpm --dir contracts run validate
 
-Expected: every valid fixture passes, and the validator reports the invalid fixture rejection as expected.
+预期：每个有效测试样例都通过，校验器按预期报告无效测试样例被拒绝。
 
-- [ ] **Step 5: Commit the fixture baseline.**
+- [ ] **步骤 5：提交测试样例基线。**
 
 ~~~bash
 git add contracts/package.json contracts/pnpm-lock.yaml contracts/scripts contracts/fixtures
 git commit -m "test(contracts): add v1 fixture matrix"
 ~~~
 
-## Task 3: Bootstrap Hybrid Runtime and Local Configuration
+## 任务 3：初始化混合运行环境与本地配置
 
-**Files:**
-- Create: .gitignore
-- Create: .env.example
-- Create: docker-compose.redis.yml
-- Create: README.md
-- Create: back/java Spring Boot Maven Wrapper project
-- Create: back/java/src/main/resources/application.yml
-- Create: back/java/src/main/resources/application-local.yml.example
-- Create: back/python/pyproject.toml
-- Create: back/python/app/__init__.py
-- Create: back/python/app/main.py
-- Create: back/python/tests/test_health.py
-- Create: front Vue 3 TypeScript Vite project
+**文件：**
+- 新建：.gitignore
+- 新建：.env.example
+- 新建：docker-compose.redis.yml
+- 新建：README.md
+- 新建：back/java Spring Boot Maven Wrapper 项目
+- 新建：back/java/src/main/resources/application.yml
+- 新建：back/java/src/main/resources/application-local.yml.example
+- 新建：back/python/pyproject.toml
+- 新建：back/python/app/__init__.py
+- 新建：back/python/app/main.py
+- 新建：back/python/tests/test_health.py
+- 新建：front Vue 3 TypeScript Vite 项目
 
-**Interfaces:**
-- Consumes: frozen contracts.
-- Produces: buildable Java, Python, and Vue roots plus a Redis-only container definition.
+**接口：**
+- 输入：已冻结的契约。
+- 输出：可构建的 Java、Python、Vue 项目根目录，以及仅含 Redis 的容器定义。
 
-- [ ] **Step 1: Add secret and generated-file exclusions.**
+- [ ] **步骤 1：添加密钥和生成文件排除规则。**
 
 ~~~gitignore
 .env
@@ -293,7 +323,7 @@ playwright-report/
 test-results/
 ~~~
 
-- [ ] **Step 2: Add the non-secret environment template.**
+- [ ] **步骤 2：添加非敏感环境变量模板。**
 
 ~~~dotenv
 MYSQL_URL=jdbc:mysql://127.0.0.1:3306/resume_thinking
@@ -307,7 +337,7 @@ PYTHON_ANALYSIS_BASE_URL=http://127.0.0.1:8000
 JAVA_CALLBACK_BASE_URL=http://127.0.0.1:8080
 ~~~
 
-- [ ] **Step 3: Define and validate the Redis-only Compose file.**
+- [ ] **步骤 3：定义并校验仅含 Redis 的 Compose 文件。**
 
 ~~~yaml
 services:
@@ -322,13 +352,13 @@ volumes:
   resume_redis_data:
 ~~~
 
-Run: docker compose -f docker-compose.redis.yml config
+运行：docker compose -f docker-compose.redis.yml config
 
-Expected: exactly one redis service and one named volume.
+预期：恰好包含一个 Redis 服务和一个命名卷。
 
-- [ ] **Step 4: Create compatible Java, Python, and frontend shells.**
+- [ ] **步骤 4：创建兼容的 Java、Python 和前端项目骨架。**
 
-Run this exact non-interactive Java bootstrap from the repository root:
+在仓库根目录执行以下完全相同的非交互式 Java 初始化：
 
 ~~~powershell
 $bootstrapRoot = Join-Path $env:TEMP ('resume-platform-' + [guid]::NewGuid())
@@ -340,15 +370,15 @@ New-Item -ItemType Directory -Force -Path 'back' | Out-Null
 Move-Item -LiteralPath (Join-Path $bootstrapRoot 'resume-platform-api') -Destination 'back\java'
 ~~~
 
-Generate the Vue shell with:
+使用以下命令生成 Vue 项目骨架：
 
-Run: pnpm create vite front --template vue-ts --no-interactive
+运行：pnpm create vite front --template vue-ts --no-interactive
 
-Run: pnpm --dir front add axios element-plus pinia vue-router
+运行：pnpm --dir front add axios element-plus pinia vue-router
 
-Run: pnpm --dir front add -D vitest jsdom @testing-library/vue @playwright/test
+运行：pnpm --dir front add -D vitest jsdom @testing-library/vue @playwright/test
 
-Create back/python/pyproject.toml:
+创建 back/python/pyproject.toml：
 
 ~~~toml
 [build-system]
@@ -374,7 +404,7 @@ test = ["pytest>=8.3,<9", "pytest-asyncio>=0.24,<1"]
 packages = ["app"]
 ~~~
 
-Create the initial Python health endpoint and its one passing test:
+创建初始 Python 健康检查接口及其一个通过的测试：
 
 ~~~python
 from fastapi import FastAPI
@@ -394,7 +424,7 @@ def test_health() -> None:
     assert TestClient(app).get('/health').json() == {'status': 'ok'}
 ~~~
 
-Create application-local.yml.example with environment-only connection settings:
+创建 application-local.yml.example，其中只放置环境变量形式的连接设置：
 
 ~~~yaml
 spring:
@@ -412,46 +442,48 @@ app:
   python-analysis-base-url: ${PYTHON_ANALYSIS_BASE_URL}
 ~~~
 
-- [ ] **Step 5: Run the smallest build check for every root.**
+- [ ] **步骤 5：对每个项目根目录运行最小构建检查。**
 
-Run: back\java\mvnw.cmd -q -DskipTests compile
+运行：back\java\mvnw.cmd -q -DskipTests compile
 
-Run: C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pip install -e "back/python[test]"
+运行：C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pip install -e "back/python[test]"
 
-Run: C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest back/python/tests -q
+运行：C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest back/python/tests -q
 
-Run: pnpm --dir front install && pnpm --dir front run build
+运行：pnpm --dir front install && pnpm --dir front run build
 
-Expected: Java and frontend build. Python reports one passing health test.
+预期：Java 和前端构建成功；Python 报告一个通过的健康检查测试。
 
-- [ ] **Step 6: Commit bootstrap files without local secrets.**
+- [ ] **步骤 6：在不包含本地密钥的情况下提交初始化文件。**
 
 ~~~bash
 git add .gitignore .env.example docker-compose.redis.yml README.md back/java back/python front
 git commit -m "chore: bootstrap hybrid application runtime"
 ~~~
 
-## Task 4: Java Lane - Identity, Encryption, and Model Profile Ownership
+## 任务 4：Java 工作流 - 身份、加密与模型配置所有权
 
-**Files:**
-- Create: back/java/src/main/resources/db/migration/V1__users_and_llm_profiles.sql
-- Create: back/java/src/main/java/com/resumethinking/platform/auth/User.java
-- Create: back/java/src/main/java/com/resumethinking/platform/auth/UserRole.java
-- Create: back/java/src/main/java/com/resumethinking/platform/auth/AuthService.java
-- Create: back/java/src/main/java/com/resumethinking/platform/auth/AuthController.java
-- Create: back/java/src/main/java/com/resumethinking/platform/auth/JwtService.java
-- Create: back/java/src/main/java/com/resumethinking/platform/config/SecurityConfig.java
-- Create: back/java/src/main/java/com/resumethinking/platform/crypto/AesGcmCryptoService.java
-- Create: back/java/src/main/java/com/resumethinking/platform/profiles/LlmProfileService.java
-- Create: back/java/src/main/java/com/resumethinking/platform/profiles/LlmProfileController.java
-- Test: back/java/src/test/java/com/resumethinking/platform/auth/AuthServiceTest.java
-- Test: back/java/src/test/java/com/resumethinking/platform/profiles/LlmProfileServiceTest.java
+**文件：**
+- 新建：back/java/src/main/resources/db/migration/V1__users_and_llm_profiles.sql
+- 新建：back/java/src/main/java/com/resumethinking/platform/auth/User.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/auth/UserRole.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/auth/AuthService.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/auth/AuthController.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/auth/JwtService.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/config/SecurityConfig.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/crypto/AesGcmCryptoService.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/profiles/LlmProfileService.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/profiles/LlmProfileController.java
+- 测试：back/java/src/test/java/com/resumethinking/platform/auth/AuthServiceTest.java
+- 测试：back/java/src/test/java/com/resumethinking/platform/profiles/LlmProfileServiceTest.java
 
-**Interfaces:**
-- Consumes: Task 1 auth/profile routes and Task 2 fixtures.
-- Produces: AuthService.register(RegisterCommand), AuthService.login(LoginCommand), LlmProfileService.create(UUID, CreateLlmProfileCommand), and LlmProfileService.decryptForDispatch(UUID, UUID).
+**接口：**
+- 输入：任务 1 的认证/配置路由和任务 2 的测试样例。
+- 输出：AuthService.register(RegisterCommand)、AuthService.login(LoginCommand)、
+  LlmProfileService.create(UUID, CreateLlmProfileCommand) 和
+  LlmProfileService.decryptForDispatch(UUID, UUID)。
 
-- [ ] **Step 1: Write failing identity and profile tests.**
+- [ ] **步骤 1：编写失败的身份和配置测试。**
 
 ~~~java
 @Test
@@ -469,15 +501,18 @@ void profileReadNeverReturnsApiKeyAndCrossOwnerDecryptFails() throws Exception {
 }
 ~~~
 
-- [ ] **Step 2: Run the tests to prove the layer is absent.**
+- [ ] **步骤 2：运行测试，证明该层尚不存在。**
 
-Run: back\java\mvnw.cmd -Dtest=AuthServiceTest,LlmProfileServiceTest test
+运行：back\java\mvnw.cmd -Dtest=AuthServiceTest,LlmProfileServiceTest test
 
-Expected: FAIL because the services and migration-backed entities do not exist.
+预期：FAIL，因为服务和由迁移支持的实体尚不存在。
 
-- [ ] **Step 3: Implement V1 schema, BCrypt/JWT, AES-GCM, and profile services.**
+- [ ] **步骤 3：实现 V1 模式、BCrypt/JWT、AES-GCM 和配置服务。**
 
-Use unique username/email, bcrypt password hashes, and JWT role claims. Llm profiles hold owner_id, endpoint URL, model name, ciphertext, nonce, key version, and selected flag. AesGcmCryptoService uses the base64 256-bit application key, a fresh 12-byte nonce per encryption, and GCM authentication.
+使用唯一的用户名/邮箱、bcrypt 密码哈希和 JWT 角色声明。模型配置
+保存 owner_id、接口 URL、模型名称、密文、随机数、密钥版本和 `selected`
+标记。AesGcmCryptoService 使用 base64 编码的 256 位应用密钥，每次加密使用新的
+12 字节随机数，并启用 GCM 完整性校验。
 
 ~~~java
 public record DispatchLlmProfile(URI baseUrl, String model, String apiKey) {}
@@ -490,40 +525,43 @@ public DispatchLlmProfile decryptForDispatch(UUID actorId, UUID profileId) {
 }
 ~~~
 
-- [ ] **Step 4: Implement endpoint validation and bounded profile test.**
+- [ ] **步骤 4：实现接口地址校验和有界配置测试。**
 
-Reject non-HTTPS custom URLs and private/reserved targets in production. Allow http://127.0.0.1 only when app.allow-local-model-endpoints=true. The test endpoint calls /models with fixed connect/read timeouts and returns sanitized status/model names only.
+生产环境拒绝非 HTTPS 的自定义 URL 和私有/保留目标。仅当
+app.allow-local-model-endpoints=true 时允许 http://127.0.0.1。测试接口使用固定
+连接/读取超时调用 /models，并且只返回清理后的状态和模型名称。
 
-- [ ] **Step 5: Run focused tests and commit.**
+- [ ] **步骤 5：运行定向测试并提交。**
 
-Run: back\java\mvnw.cmd -Dtest=AuthServiceTest,LlmProfileServiceTest test
+运行：back\java\mvnw.cmd -Dtest=AuthServiceTest,LlmProfileServiceTest test
 
-Expected: PASS with no password or API key in assertion output or logs.
+预期：通过，且断言输出或日志中不包含密码或 API 密钥。
 
 ~~~bash
 git add back/java/pom.xml back/java/src/main back/java/src/test/java/com/resumethinking/platform/auth back/java/src/test/java/com/resumethinking/platform/profiles
 git commit -m "feat(java): add auth and encrypted model profiles"
 ~~~
 
-## Task 5: Java Lane - Resume Lifecycle, Redis Archival, and Recovery
+## 任务 5：Java 工作流 - 简历生命周期、Redis 归档与恢复
 
-**Files:**
-- Create: back/java/src/main/resources/db/migration/V2__resumes_and_lifecycle.sql
-- Create: back/java/src/main/java/com/resumethinking/platform/resumes/Resume.java
-- Create: back/java/src/main/java/com/resumethinking/platform/resumes/VisibilityState.java
-- Create: back/java/src/main/java/com/resumethinking/platform/resumes/ResumeLifecycleService.java
-- Create: back/java/src/main/java/com/resumethinking/platform/resumes/ArchiveScheduler.java
-- Create: back/java/src/main/java/com/resumethinking/platform/resumes/ResumeController.java
-- Create: back/java/src/main/java/com/resumethinking/platform/config/RedisConfig.java
-- Test: back/java/src/test/java/com/resumethinking/platform/resumes/ResumeLifecycleServiceTest.java
-- Test: back/java/src/test/java/com/resumethinking/platform/resumes/ArchiveSchedulerTest.java
-- Create: back/java/src/test/java/com/resumethinking/platform/resumes/ResumeControllerTest.java
+**文件：**
+- 新建：back/java/src/main/resources/db/migration/V2__resumes_and_lifecycle.sql
+- 新建：back/java/src/main/java/com/resumethinking/platform/resumes/Resume.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/resumes/VisibilityState.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/resumes/ResumeLifecycleService.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/resumes/ArchiveScheduler.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/resumes/ResumeController.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/config/RedisConfig.java
+- 测试：back/java/src/test/java/com/resumethinking/platform/resumes/ResumeLifecycleServiceTest.java
+- 测试：back/java/src/test/java/com/resumethinking/platform/resumes/ArchiveSchedulerTest.java
+- 新建：back/java/src/test/java/com/resumethinking/platform/resumes/ResumeControllerTest.java
 
-**Interfaces:**
-- Consumes: actor identity from Task 4 and lifecycle contract from Task 1.
-- Produces: softDelete(DeleteResumeCommand), recover(UUID, UUID, UserRole, long), archiveDue(Instant), and Redis keys under resume:view:{resumeId}.
+**接口：**
+- 输入：任务 4 的操作者身份和任务 1 的生命周期契约。
+- 输出：softDelete(DeleteResumeCommand)、recover(UUID, UUID, UserRole, long)、
+  archiveDue(Instant)，以及 resume:view:{resumeId} 下的 Redis 键。
 
-- [ ] **Step 1: Write failing lifecycle tests.**
+- [ ] **步骤 1：编写失败的生命周期测试。**
 
 ~~~java
 @Test
@@ -546,15 +584,18 @@ void administratorSoftDeleteCannotBeRecoveredByOwner() {
 }
 ~~~
 
-- [ ] **Step 2: Run the tests to verify lifecycle behavior is absent.**
+- [ ] **步骤 2：运行测试，验证生命周期行为尚不存在。**
 
-Run: back\java\mvnw.cmd -Dtest=ResumeLifecycleServiceTest,ArchiveSchedulerTest test
+运行：back\java\mvnw.cmd -Dtest=ResumeLifecycleServiceTest,ArchiveSchedulerTest test
 
-Expected: FAIL because resume transitions and cache adapter do not exist.
+预期：失败，因为简历状态转换和缓存适配器尚不存在。
 
-- [ ] **Step 3: Implement V2 persistence and one transactional lifecycle service.**
+- [ ] **步骤 3：实现 V2 持久化和单一事务型生命周期服务。**
 
-Add owner ID, title, source type, encrypted raw content, status, visibility_state, visible_until, soft_deleted_by, soft_deleted_at, archived_at, restored_at, and JPA version. On create/recover, use creator role to set visible_until: seven days for USER, thirty days for ADMIN.
+添加所有者 ID、标题、来源类型、加密原始内容、status、visibility_state、
+visible_until、soft_deleted_by、soft_deleted_at、archived_at、restored_at 和 JPA version。
+在创建/恢复时，根据创建者角色设置 visible_until：USER 为七天，ADMIN
+为三十天。
 
 ~~~java
 public ResumeView recover(UUID resumeId, UUID actorId, UserRole role, long expectedVersion) {
@@ -567,49 +608,55 @@ public ResumeView recover(UUID resumeId, UUID actorId, UserRole role, long expec
 }
 ~~~
 
-- [ ] **Step 4: Implement durable archival instead of Redis keyspace-event logic.**
+- [ ] **步骤 4：实现持久化归档，替代 Redis 键空间事件逻辑。**
 
-Each minute, page through active rows whose visible_until is due. Transition each to USER_CACHE_ARCHIVED or ADMIN_CACHE_ARCHIVED according to creator role and evict all resume cache keys. Normal read/list routes exclude non-ACTIVE rows. Recovery routes use indexed, owner/role-scoped SQL queries and never physically delete MySQL rows.
+每分钟分页处理 visible_until 已到期的活动记录。根据创建者角色将每条记录转换为
+USER_CACHE_ARCHIVED 或 ADMIN_CACHE_ARCHIVED，并清除全部简历缓存键。普通
+读取/列表路由排除非 ACTIVE 记录。恢复路由使用带索引、按所有者/角色限定的
+SQL 查询，绝不物理删除 MySQL 行。
 
-- [ ] **Step 5: Add controller fixture tests and run focused checks.**
+- [ ] **步骤 5：添加控制器测试样例并运行定向检查。**
 
-Test normal user delete/restore, admin delete/restore, owner denial after admin delete, archive after fixed-clock advancement, duplicate delete, and duplicate restore. Assert foreign and unknown resume IDs return the same RESOURCE_NOT_FOUND envelope.
+测试普通用户删除/恢复、管理员删除/恢复、管理员删除后的所有者拒绝、固定时钟推进后的
+归档、重复删除和重复恢复。断言外部猜测的简历 ID 与未知简历 ID 返回相同的
+RESOURCE_NOT_FOUND 错误信封。
 
-Run: back\java\mvnw.cmd -Dtest=ResumeLifecycleServiceTest,ArchiveSchedulerTest test
+运行：back\java\mvnw.cmd -Dtest=ResumeLifecycleServiceTest,ArchiveSchedulerTest test
 
-Expected: PASS with no raw resume text in logs.
+预期：通过，且日志中不包含原始简历文本。
 
-- [ ] **Step 6: Commit the lifecycle lane.**
+- [ ] **步骤 6：提交生命周期工作流。**
 
 ~~~bash
 git add back/java/src/main back/java/src/test/java/com/resumethinking/platform/resumes
 git commit -m "feat(java): add resume lifecycle and archival recovery"
 ~~~
 
-## Task 6: Python Lane - Extraction, Redaction, Matching, and Guarded Model Calls
+## 任务 6：Python 工作流 - 提取、脱敏、匹配与受保护的模型调用
 
-**Files:**
-- Create: back/python/app/settings.py
-- Create: back/python/app/models.py
-- Create: back/python/app/redaction.py
-- Create: back/python/app/extraction.py
-- Create: back/python/app/matching.py
-- Create: back/python/app/openai_compatible.py
-- Create: back/python/app/analysis_service.py
-- Create: back/python/app/callback_client.py
-- Modify: back/python/app/main.py
-- Create: back/python/tests/test_redaction.py
-- Create: back/python/tests/test_extraction.py
-- Create: back/python/tests/test_matching.py
-- Create: back/python/tests/test_openai_compatible.py
-- Create: back/python/tests/test_analysis_service.py
-- Create: back/python/test_support/fake_openai_server.py
+**文件：**
+- 新建：back/python/app/settings.py
+- 新建：back/python/app/models.py
+- 新建：back/python/app/redaction.py
+- 新建：back/python/app/extraction.py
+- 新建：back/python/app/matching.py
+- 新建：back/python/app/openai_compatible.py
+- 新建：back/python/app/analysis_service.py
+- 新建：back/python/app/callback_client.py
+- 修改：back/python/app/main.py
+- 新建：back/python/tests/test_redaction.py
+- 新建：back/python/tests/test_extraction.py
+- 新建：back/python/tests/test_matching.py
+- 新建：back/python/tests/test_openai_compatible.py
+- 新建：back/python/tests/test_analysis_service.py
+- 新建：back/python/test_support/fake_openai_server.py
 
-**Interfaces:**
-- Consumes: Task 1 internal schemas and Task 2 fixtures.
-- Produces: POST /internal/v1/analysis-jobs, redact_text(text), extract_resume(source_type, bytes), and analyze_job(job).
+**接口：**
+- 输入：任务 1 的内部模式和任务 2 的测试样例。
+- 输出：POST /internal/v1/analysis-jobs、redact_text(text)、
+  extract_resume(source_type, bytes) 和 analyze_job(job)。
 
-- [ ] **Step 1: Write failing redaction, extraction, score, and invalid-model tests.**
+- [ ] **步骤 1：编写失败的脱敏、提取、评分和无效模型测试。**
 
 ~~~python
 def test_redaction_removes_email_phone_and_identity_number() -> None:
@@ -628,15 +675,17 @@ async def test_invalid_model_json_returns_model_output_invalid() -> None:
         await client.complete_structured(valid_request())
 ~~~
 
-- [ ] **Step 2: Run tests to prove the service is absent.**
+- [ ] **步骤 2：运行测试，证明该服务尚不存在。**
 
-Run: C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest back/python/tests -q
+运行：C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest back/python/tests -q
 
-Expected: FAIL at collection because the modules do not exist.
+预期：在收集阶段失败，因为模块尚不存在。
 
-- [ ] **Step 3: Implement deterministic extraction and redaction before the model adapter.**
+- [ ] **步骤 3：在模型适配器之前实现确定性的文本提取和脱敏。**
 
-TXT decodes UTF-8 with a documented replacement strategy. DOCX uses python-docx paragraphs and stable paragraph/character offsets. Detect email, phone, identity number, and address patterns conservatively. Return redacted text plus replacement metadata. Reject every source type other than TXT/DOCX with UNSUPPORTED_FILE.
+TXT 按文档化的替换策略解码 UTF-8。DOCX 使用 python-docx 段落和稳定的
+段落/字符偏移。以保守方式检测邮箱、电话、身份证号和地址模式。返回脱敏文本及替换元数据。
+除 TXT/DOCX 外的所有来源类型均以 UNSUPPORTED_FILE 拒绝。
 
 ~~~python
 def composite_score(*, skills: float, projects: float, work_content: float,
@@ -645,42 +694,50 @@ def composite_score(*, skills: float, projects: float, work_content: float,
                  + 0.10 * education_experience + 0.10 * soft_skills, 4)
 ~~~
 
-- [ ] **Step 4: Implement the OpenAI-compatible adapter with strict Pydantic validation.**
+- [ ] **步骤 4：使用严格的 Pydantic 校验实现 OpenAI 兼容适配器。**
 
-Post only redacted data to {base_url}/chat/completions with fixed connect/read timeouts. Validate requirement IDs, evidence IDs, match states, component scores, strength, gap, and suggestion classification. Do not log HTTP headers, API keys, request content, or raw provider responses. Translate timeout to MODEL_UNAVAILABLE and invalid JSON/schema to MODEL_OUTPUT_INVALID.
+使用固定的连接/读取超时，仅向 {base_url}/chat/completions 发送脱敏数据。
+校验岗位要求 ID、证据 ID、匹配状态、分项得分、证据强度、差距和建议分类。不要记录 HTTP
+请求头、API 密钥、请求内容或原始模型服务响应。将超时转换为 MODEL_UNAVAILABLE，将无效
+JSON/模式转换为
+MODEL_OUTPUT_INVALID。
 
-- [ ] **Step 5: Implement callback retry behavior.**
+- [ ] **步骤 5：实现回调重试行为。**
 
-FastAPI validates the internal job, starts background work, and posts exactly the contract callback fields. Retry transport failures or 5xx responses with the same callbackId. Stop on TASK_GONE, STALE_ATTEMPT, IDEMPOTENCY_CONFLICT, or success. Strip callback response bodies before logs.
+FastAPI 校验内部任务，启动后台工作，并严格发送契约规定的回调字段。
+对传输失败或 5xx 响应使用相同 callbackId 重试。收到 TASK_GONE、
+STALE_ATTEMPT、IDEMPOTENCY_CONFLICT 或成功响应时停止。写入日志前剥离回调响应正文。
 
-- [ ] **Step 6: Run Python checks and commit the lane.**
+- [ ] **步骤 6：运行 Python 检查并提交该工作流。**
 
-Run: C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest back/python/tests -q
+运行：C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest back/python/tests -q
 
-Expected: PASS for TXT/DOCX evidence offsets, PII redaction, documented weighting, malformed provider output, and callback stop conditions.
+预期：TXT/DOCX 证据偏移、个人信息脱敏、文档规定的权重、错误的模型服务输出和回调停止
+条件均通过。
 
 ~~~bash
 git add back/python
 git commit -m "feat(python): add guarded analysis service"
 ~~~
 
-## Task 7: Java Lane - Upload, Task Orchestration, and Race-Safe Callback Persistence
+## 任务 7：Java 工作流 - 上传、任务编排与竞态安全的回调持久化
 
-**Files:**
-- Create: back/java/src/main/resources/db/migration/V3__matching_tasks_results_and_evidence.sql
-- Create: back/java/src/main/java/com/resumethinking/platform/matching/MatchTask.java
-- Create: back/java/src/main/java/com/resumethinking/platform/matching/MatchTaskService.java
-- Create: back/java/src/main/java/com/resumethinking/platform/matching/MatchTaskController.java
-- Create: back/java/src/main/java/com/resumethinking/platform/matching/PythonAnalysisClient.java
-- Create: back/java/src/main/java/com/resumethinking/platform/matching/InternalAnalysisCallbackController.java
-- Test: back/java/src/test/java/com/resumethinking/platform/matching/MatchTaskServiceTest.java
-- Test: back/java/src/test/java/com/resumethinking/platform/matching/InternalAnalysisCallbackControllerTest.java
+**文件：**
+- 新建：back/java/src/main/resources/db/migration/V3__matching_tasks_results_and_evidence.sql
+- 新建：back/java/src/main/java/com/resumethinking/platform/matching/MatchTask.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/matching/MatchTaskService.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/matching/MatchTaskController.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/matching/PythonAnalysisClient.java
+- 新建：back/java/src/main/java/com/resumethinking/platform/matching/InternalAnalysisCallbackController.java
+- 测试：back/java/src/test/java/com/resumethinking/platform/matching/MatchTaskServiceTest.java
+- 测试：back/java/src/test/java/com/resumethinking/platform/matching/InternalAnalysisCallbackControllerTest.java
 
-**Interfaces:**
-- Consumes: Tasks 4-6 and frozen fixtures.
-- Produces: createTask(CreateMatchTaskCommand), getTask(UUID, UUID, UserRole), and acceptCallback(AnalysisCallbackRequest).
+**接口：**
+- 输入：任务 4-6 和已冻结的测试样例。
+- 输出：createTask(CreateMatchTaskCommand)、getTask(UUID, UUID, UserRole) 和
+  acceptCallback(AnalysisCallbackRequest)。
 
-- [ ] **Step 1: Write failing idempotency and late-callback tests.**
+- [ ] **步骤 1：编写失败的幂等性和迟到回调测试。**
 
 ~~~java
 @Test
@@ -700,21 +757,25 @@ void callbackAfterArchiveReturnsTaskGoneAndDoesNotPersistResult() {
 }
 ~~~
 
-- [ ] **Step 2: Run focused orchestration tests.**
+- [ ] **步骤 2：运行定向任务编排测试。**
 
-Run: back\java\mvnw.cmd -Dtest=MatchTaskServiceTest,InternalAnalysisCallbackControllerTest test
+运行：back\java\mvnw.cmd -Dtest=MatchTaskServiceTest,InternalAnalysisCallbackControllerTest test
 
-Expected: FAIL because task persistence and callbacks are absent.
+预期：失败，因为任务持久化和回调尚不存在。
 
-- [ ] **Step 3: Implement V3 schema and creation checks.**
+- [ ] **步骤 3：实现 V3 模式和创建校验。**
 
-Store task ID, resume ID, resume lifecycle version, creator ID, idempotency key, attempt, callback token hash, task state, and optimistic lock. Store callback receipt callbackId and payload hash uniquely. Reject archived/deleted resumes and foreign model profiles with the same not-found behavior used for unknown resources.
+保存任务 ID、简历 ID、简历生命周期版本、创建者 ID、幂等键、尝试次数、
+回调令牌哈希、任务状态和乐观锁。对回调凭据的 `callbackId` 和 `payloadHash`（负载哈希）建立唯一保存约束。
+已归档/已删除的简历和其他所有者的模型配置，使用与未知资源相同的未找到行为拒绝。
 
-- [ ] **Step 4: Dispatch a scoped internal request to Python.**
+- [ ] **步骤 4：向 Python 派发范围受限的内部请求。**
 
-PythonAnalysisClient decrypts only in Java memory, creates a callback token, and sends the Task 1 payload to PYTHON_ANALYSIS_BASE_URL/internal/v1/analysis-jobs. It sends no user ID, host filesystem path, MySQL credential, or persistence command.
+PythonAnalysisClient 只在 Java 内存中解密，创建回调令牌，并将任务 1 的负载
+发送到 PYTHON_ANALYSIS_BASE_URL/internal/v1/analysis-jobs。它不发送用户 ID、主机文件系统
+路径、MySQL 凭据或持久化命令。
 
-- [ ] **Step 5: Persist callbacks in one guarded transaction.**
+- [ ] **步骤 5：在受保护事务中持久化回调。**
 
 ~~~java
 if (receiptRepository.existsByCallbackId(request.callbackId())) return acceptedReplay(request);
@@ -728,39 +789,41 @@ resultRepository.save(AnalysisResult.from(request));
 task.markSucceeded();
 ~~~
 
-Return TASK_GONE for archived/soft-deleted work, STALE_ATTEMPT for old attempts, and IDEMPOTENCY_CONFLICT for changed payload under a reused callback ID.
+已归档/软删除的任务返回 TASK_GONE，旧尝试返回 STALE_ATTEMPT，复用 callback
+ID 但负载改变返回 IDEMPOTENCY_CONFLICT。
 
-- [ ] **Step 6: Run task tests and commit.**
+- [ ] **步骤 6：运行任务测试并提交。**
 
-Run: back\java\mvnw.cmd -Dtest=MatchTaskServiceTest,InternalAnalysisCallbackControllerTest test
+运行：back\java\mvnw.cmd -Dtest=MatchTaskServiceTest,InternalAnalysisCallbackControllerTest test
 
-Expected: PASS for duplicate submission, duplicate callback, stale attempt, archive/delete before callback, and no late-result recreation.
+预期：重复提交、重复回调、过期尝试、回调前归档/删除以及不重新创建迟到结果均通过。
 
 ~~~bash
 git add back/java/src/main back/java/src/test/java/com/resumethinking/platform/matching
 git commit -m "feat(java): orchestrate matching tasks and callbacks"
 ~~~
 
-## Task 8: Frontend Lane - Authentication and Model Profile UX
+## 任务 8：前端工作流 - 身份认证与模型配置界面
 
-**Files:**
-- Create: front/src/api/http.ts
-- Create: front/src/api/contracts.ts
-- Create: front/src/stores/auth.ts
-- Create: front/src/stores/llmProfiles.ts
-- Create: front/src/router/index.ts
-- Create: front/src/views/LoginView.vue
-- Create: front/src/views/RegisterView.vue
-- Create: front/src/views/ModelProfilesView.vue
-- Create: front/src/components/ModelProfileForm.vue
-- Test: front/src/views/RegisterView.spec.ts
-- Test: front/src/components/ModelProfileForm.spec.ts
+**文件：**
+- 新建：front/src/api/http.ts
+- 新建：front/src/api/contracts.ts
+- 新建：front/src/stores/auth.ts
+- 新建：front/src/stores/llmProfiles.ts
+- 新建：front/src/router/index.ts
+- 新建：front/src/views/LoginView.vue
+- 新建：front/src/views/RegisterView.vue
+- 新建：front/src/views/ModelProfilesView.vue
+- 新建：front/src/components/ModelProfileForm.vue
+- 测试：front/src/views/RegisterView.spec.ts
+- 测试：front/src/components/ModelProfileForm.spec.ts
 
-**Interfaces:**
-- Consumes: Task 1 public routes.
-- Produces: authStore.register(), authStore.login(), llmProfileStore.create(), llmProfileStore.testConnection(), and route guards.
+**接口：**
+- 输入：任务 1 的公共路由。
+- 输出：authStore.register()、authStore.login()、llmProfileStore.create()、
+  llmProfileStore.testConnection() 和路由守卫。
 
-- [ ] **Step 1: Write failing role-selection and secret-re-display tests.**
+- [ ] **步骤 1：编写失败的角色选择和密钥不回显测试。**
 
 ~~~ts
 it('submits selected ADMIN role during registration', async () => {
@@ -776,53 +839,58 @@ it('never renders a saved API key', async () => {
 })
 ~~~
 
-- [ ] **Step 2: Run the tests to verify the UI is absent.**
+- [ ] **步骤 2：运行测试，验证 UI 尚不存在。**
 
-Run: pnpm --dir front exec vitest run src/views/RegisterView.spec.ts src/components/ModelProfileForm.spec.ts
+运行：pnpm --dir front exec vitest run src/views/RegisterView.spec.ts src/components/ModelProfileForm.spec.ts
 
-Expected: FAIL because stores, views, and components do not exist.
+预期：失败，因为存储、视图和组件尚不存在。
 
-- [ ] **Step 3: Implement typed HTTP and route guards.**
+- [ ] **步骤 3：实现类型化 HTTP 和路由守卫。**
 
-Make api/http.ts attach JWTs, convert only contract error envelopes into typed ApiError values, and clear auth after a confirmed authentication failure. Copy API types from OpenAPI into api/contracts.ts. Persist only safe identity metadata and token; never persist a profile key.
+让 api/http.ts 附加 JWT，将契约错误信封转换为类型化 ApiError，并在确认认证失败后清除登录
+状态。将 API 类型从 OpenAPI 复制到 api/contracts.ts。只持久化安全的身份元数据和 token；
+绝不持久化模型配置密钥。
 
-- [ ] **Step 4: Implement usable provider configuration.**
+- [ ] **步骤 4：实现可用的模型服务配置。**
 
-Use Element Plus validation, preset selection, custom endpoint input, model dropdown from the safe test response, manual model fallback, test button, default-profile control, and a password input that clears after save. Registration explains the actual role scope: an ADMIN can process recovery records across owners; it does not call this a demo-only mode. Do not render ciphertext, nonce, API key, or raw provider error text.
+使用 Element Plus 校验、预设选择、自定义接口地址输入、来自安全测试响应的模型下拉框、
+手动模型备用输入、测试按钮、默认配置控件，以及保存后会清空的密码输入框。注册页面说明
+实际角色范围：ADMIN 可以处理跨所有者的恢复记录；不将其称为仅演示模式。不要渲染
+密文、随机数、API 密钥或原始模型服务错误文本。
 
-- [ ] **Step 5: Run frontend tests and build, then commit.**
+- [ ] **步骤 5：运行前端测试和构建，然后提交。**
 
-Run: pnpm --dir front exec vitest run src/views/RegisterView.spec.ts src/components/ModelProfileForm.spec.ts
+运行：pnpm --dir front exec vitest run src/views/RegisterView.spec.ts src/components/ModelProfileForm.spec.ts
 
-Run: pnpm --dir front run build
+运行：pnpm --dir front run build
 
-Expected: PASS without secrets in produced assets.
+预期：通过，且生成的构建资源中不含敏感信息。
 
 ~~~bash
 git add front/src front/package.json front/pnpm-lock.yaml
 git commit -m "feat(web): add auth and model profile workflows"
 ~~~
 
-## Task 9: Frontend Lane - Resume, Evidence, Deletion, Archive, and Recovery
+## 任务 9：前端工作流 - 简历、证据、删除、归档与恢复
 
-**Files:**
-- Create: front/src/views/ResumeListView.vue
-- Create: front/src/views/UploadMatchView.vue
-- Create: front/src/views/MatchResultView.vue
-- Create: front/src/views/RecoveryView.vue
-- Create: front/src/views/AdminRecoveryView.vue
-- Create: front/src/components/DeleteResumeDialog.vue
-- Create: front/src/components/MatchEvidenceTable.vue
-- Create: front/src/components/RecoveryDialog.vue
-- Test: front/src/components/DeleteResumeDialog.spec.ts
-- Test: front/src/views/RecoveryView.spec.ts
-- Test: front/src/views/AdminRecoveryView.spec.ts
+**文件：**
+- 新建：front/src/views/ResumeListView.vue
+- 新建：front/src/views/UploadMatchView.vue
+- 新建：front/src/views/MatchResultView.vue
+- 新建：front/src/views/RecoveryView.vue
+- 新建：front/src/views/AdminRecoveryView.vue
+- 新建：front/src/components/DeleteResumeDialog.vue
+- 新建：front/src/components/MatchEvidenceTable.vue
+- 新建：front/src/components/RecoveryDialog.vue
+- 测试：front/src/components/DeleteResumeDialog.spec.ts
+- 测试：front/src/views/RecoveryView.spec.ts
+- 测试：front/src/views/AdminRecoveryView.spec.ts
 
-**Interfaces:**
-- Consumes: Task 1 lifecycle/task routes and Tasks 5/7 response shapes.
-- Produces: upload, task polling, evidence display, user recovery, and administrator recovery flows.
+**接口：**
+- 输入：任务 1 的生命周期/任务路由以及任务 5/7 的响应结构。
+- 输出：上传、任务轮询、证据展示、用户恢复和管理员恢复流程。
 
-- [ ] **Step 1: Write failing deletion and role-scoped recovery tests.**
+- [ ] **步骤 1：编写失败的删除和按角色范围恢复测试。**
 
 ~~~ts
 it('keeps delete disabled until the exact confirmation phrase is entered', async () => {
@@ -840,54 +908,61 @@ it('does not render another owner in the USER recovery list', async () => {
 })
 ~~~
 
-- [ ] **Step 2: Run lifecycle UI tests and observe failure.**
+- [ ] **步骤 2：运行生命周期 UI 测试并观察失败。**
 
-Run: pnpm --dir front exec vitest run src/components/DeleteResumeDialog.spec.ts src/views/RecoveryView.spec.ts src/views/AdminRecoveryView.spec.ts
+运行：pnpm --dir front exec vitest run src/components/DeleteResumeDialog.spec.ts src/views/RecoveryView.spec.ts src/views/AdminRecoveryView.spec.ts
 
-Expected: FAIL because lifecycle UI is absent.
+预期：失败，因为生命周期 UI 尚不存在。
 
-- [ ] **Step 3: Implement upload and task-progress states.**
+- [ ] **步骤 3：实现上传和任务进度状态。**
 
-Accept only .txt and .docx. Show explicit PDF unsupported state. Require selected model profile and Java-backend job text. Send an idempotency key. Poll only while QUEUED or PROCESSING and show timeout, failure, archived, and no-data states without inventing results.
+只接受 .txt 和 .docx。明确显示 PDF 不支持状态。要求选择模型配置并填写
+Java 后端岗位文本。发送幂等键。仅在 QUEUED 或 PROCESSING 时轮询，并在不
+捏造结果的情况下展示超时、失败、归档和无数据状态。
 
-- [ ] **Step 4: Implement evidence-first matching UI.**
+- [ ] **步骤 4：实现证据优先的匹配 UI。**
 
-MatchEvidenceTable renders requirement text, requirement type, evidence excerpt/location, match state, score component, strength, and gap. Render RELATED_BUT_EVIDENCE_INSUFFICIENT and UNMET as non-positive. Render suggestion state separately and never present an unconfirmed fact as an applied change.
+MatchEvidenceTable 渲染岗位要求文本、要求类型、证据摘录/位置、匹配状态、分项得分、证据
+强度和差距。将 RELATED_BUT_EVIDENCE_INSUFFICIENT 与 UNMET 渲染为非正向状态。单独渲染
+建议状态，绝不把未经确认的事实呈现为已应用的
+变更。
 
-- [ ] **Step 5: Implement deletion and recovery controls.**
+- [ ] **步骤 5：实现删除和恢复控件。**
 
-Send exactly { confirmationText: '确认删除简历', expectedVersion }. Remove an accepted deletion from the active list. USER recovery calls only user routes. ADMIN recovery calls administrator routes, includes owner context, and is role-guarded. Archive and soft-delete states disclose MySQL retention.
+严格发送 { confirmationText: '确认删除简历', expectedVersion }。接受删除后从活动列表移除。
+USER 恢复只能调用用户路由。ADMIN 恢复调用管理员路由，包含所有者上下文，
+并受角色守卫保护。归档和软删除状态要披露 MySQL 保留策略。
 
-- [ ] **Step 6: Run tests/build and commit.**
+- [ ] **步骤 6：运行测试/构建并提交。**
 
-Run: pnpm --dir front exec vitest run src/components/DeleteResumeDialog.spec.ts src/views/RecoveryView.spec.ts src/views/AdminRecoveryView.spec.ts
+运行：pnpm --dir front exec vitest run src/components/DeleteResumeDialog.spec.ts src/views/RecoveryView.spec.ts src/views/AdminRecoveryView.spec.ts
 
-Run: pnpm --dir front run build
+运行：pnpm --dir front run build
 
-Expected: PASS and responsive layouts with no clipped confirmation controls.
+预期：通过，且响应式布局不会裁切确认控件。
 
 ~~~bash
 git add front/src
 git commit -m "feat(web): add matching lifecycle and recovery views"
 ~~~
 
-## Task 10: Cross-Service Integration and Controlled End-to-End Fixture
+## 任务 10：跨服务集成与受控端到端测试样例
 
-**Files:**
-- Create: tests/integration/run_mvp_flow.ps1
-- Create: tests/integration/fixtures/java-backend-job.txt
-- Create: tests/integration/fixtures/student-resume.txt
-- Create: tests/integration/fixtures/student-resume.docx
-- Create: tests/integration/fixtures/invalid-resume.pdf
-- Create: tests/integration/assert_mvp_flow.py
-- Create: front/e2e/resume-lifecycle.spec.ts
-- Modify: README.md
+**文件：**
+- 新建：tests/integration/run_mvp_flow.ps1
+- 新建：tests/integration/fixtures/java-backend-job.txt
+- 新建：tests/integration/fixtures/student-resume.txt
+- 新建：tests/integration/fixtures/student-resume.docx
+- 新建：tests/integration/fixtures/invalid-resume.pdf
+- 新建：tests/integration/assert_mvp_flow.py
+- 新建：front/e2e/resume-lifecycle.spec.ts
+- 修改：README.md
 
-**Interfaces:**
-- Consumes: real services from Tasks 4-9 and fake provider from Task 6.
-- Produces: repeatable proof of one controlled resume/job flow.
+**接口：**
+- 输入：任务 4-9 的真实服务和任务 6 的模拟模型服务。
+- 输出：一条受控简历/岗位流程的可重复证明。
 
-- [ ] **Step 1: Write the end-to-end assertion before service wiring.**
+- [ ] **步骤 1：在服务连接之前编写端到端断言。**
 
 ~~~python
 from pathlib import Path
@@ -911,11 +986,11 @@ def test_match_result_binds_requirements_to_existing_evidence(api: ApiClient) ->
                for item in result["requirements"] if item["evidence"])
 ~~~
 
-- [ ] **Step 2: Start controlled dependencies and verify health endpoints.**
+- [ ] **步骤 2：启动受控依赖并验证健康检查接口。**
 
-Run: docker compose -f docker-compose.redis.yml up -d
+运行：docker compose -f docker-compose.redis.yml up -d
 
-Start native services as hidden PowerShell processes:
+以隐藏的 PowerShell 进程启动本地服务：
 
 ~~~powershell
 $envFile = Get-Content -LiteralPath '.env' | Where-Object { $_ -match '^[A-Z0-9_]+=' }
@@ -934,43 +1009,49 @@ foreach ($url in @('http://127.0.0.1:8080/actuator/health', 'http://127.0.0.1:80
 }
 ~~~
 
-Expected: Java health, Python health, Flyway migration, and Redis ping succeed before submissions.
+预期：提交请求前，Java 健康检查、Python 健康检查、Flyway 数据库迁移和 Redis PING 均成功。
 
-- [ ] **Step 3: Implement sanitized startup/orchestration script.**
+- [ ] **步骤 3：实现经过清理的启动/编排脚本。**
 
-The script validates required environment variables, starts fake provider, registers users, creates profiles, uploads fixtures, starts a match task, waits with a fixed deadline, prints only IDs/statuses, and stops fake provider in finally. It never prints resume text, JWTs, API keys, or callback tokens.
+脚本校验必需的环境变量，启动模拟模型服务，注册用户，创建模型配置，
+上传测试样例，启动匹配任务，在固定期限内等待，只打印 ID/状态，并在 finally 块
+中停止模拟模型服务。它绝不会打印简历文本、JWT、API 密钥或回调令牌。
 
-- [ ] **Step 4: Add race and archival checks.**
+- [ ] **步骤 4：添加竞态和归档检查。**
 
-Pause fake provider before callback, soft-delete the resume, release callback, and assert TASK_GONE, zero result rows, no Redis result key, and no user-visible resume. Repeat with duplicate callback and stale attempt. Inject a Clock bean: production uses Clock.systemUTC(), while the integration profile injects a mutable fixed clock that advances seven or thirty days before calling ArchiveScheduler. Assert explicit restore is the only path back to ACTIVE.
+在回调前暂停模拟模型服务，软删除简历，释放回调，并断言 TASK_GONE、
+结果行数为零、无 Redis 结果键且用户不可见简历。使用重复回调和
+过期尝试重复测试。注入 Clock Bean（时钟 Bean）：生产环境使用 Clock.systemUTC()，集成
+配置注入可变固定时钟，在调用 ArchiveScheduler 前推进七天或三十天。断言
+显式恢复是返回 ACTIVE 的唯一途径。
 
-- [ ] **Step 5: Run complete controlled flow and commit.**
+- [ ] **步骤 5：运行完整受控流程并提交。**
 
-Run: powershell -ExecutionPolicy Bypass -File tests/integration/run_mvp_flow.ps1
+运行：powershell -ExecutionPolicy Bypass -File tests/integration/run_mvp_flow.ps1
 
-Run: C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest tests/integration/assert_mvp_flow.py -q
+运行：C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest tests/integration/assert_mvp_flow.py -q
 
-Expected: real Java/Python handoff, lifecycle gates, and deterministic fake-provider match all pass.
+预期：真实 Java/Python 交接、生命周期门禁和确定性的模拟模型服务匹配流程全部通过。
 
 ~~~bash
 git add tests/integration front/e2e README.md
 git commit -m "test: add controlled cross-service MVP flow"
 ~~~
 
-## Task 11: Security, Visual, and Release Evidence Gate
+## 任务 11：安全、可视化与发布证据门槛
 
-**Files:**
-- Create: docs/verification/mvp-evidence.md
-- Create: docs/verification/log-scan-patterns.txt
-- Modify: back/java/src/test/java/com/resumethinking/platform/resumes/ResumeControllerTest.java
-- Create: back/python/tests/test_log_safety.py
-- Modify: README.md
+**文件：**
+- 新建：docs/verification/mvp-evidence.md
+- 新建：docs/verification/log-scan-patterns.txt
+- 修改：back/java/src/test/java/com/resumethinking/platform/resumes/ResumeControllerTest.java
+- 新建：back/python/tests/test_log_safety.py
+- 修改：README.md
 
-**Interfaces:**
-- Consumes: all prior implementation and tests.
-- Produces: reproducible evidence separating verified behavior, deterministic simulation, known risk, and excluded scope.
+**接口：**
+- 输入：之前的全部实现和测试。
+- 输出：可重复的证据，将已验证行为、确定性模拟、已知风险和排除范围分开记录。
 
-- [ ] **Step 1: Add failing authorization and log-leak tests.**
+- [ ] **步骤 1：添加失败的授权和日志泄露测试。**
 
 ~~~java
 @Test
@@ -993,48 +1074,57 @@ def test_log_scan_has_no_fixture_email_phone_or_api_key() -> None:
     assert "fake-api-key" not in text
 ~~~
 
-- [ ] **Step 2: Run every contract, unit, integration, and frontend check from a clean service state.**
+- [ ] **步骤 2：从干净的服务状态运行所有契约、单元、集成和前端检查。**
 
-Run: pnpm --dir contracts run lint && pnpm --dir contracts run validate
+运行：pnpm --dir contracts run lint && pnpm --dir contracts run validate
 
-Run: back\java\mvnw.cmd test
+运行：back\java\mvnw.cmd test
 
-Run: C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest back/python/tests tests/integration -q
+运行：C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest back/python/tests tests/integration -q
 
-Run: pnpm --dir front exec vitest run && pnpm --dir front run build
+运行：pnpm --dir front exec vitest run && pnpm --dir front run build
 
-Expected: every command exits zero and evidence records sanitized fixture names and results.
+预期：每条命令都以零退出，证据记录经过清理的测试样例名称和结果。
 
-- [ ] **Step 3: Run visual Playwright checks.**
+- [ ] **步骤 3：运行可视化 Playwright 检查。**
 
-Run: pnpm --dir front exec playwright test e2e/resume-lifecycle.spec.ts --project=chromium
+运行：pnpm --dir front exec playwright test e2e/resume-lifecycle.spec.ts --project=chromium
 
-Capture desktop/mobile screenshots for role registration, model configuration, upload, pending task, evidence result, delete confirmation, archived no-data, user recovery, and administrator recovery. Check blank screens, overlap, clipping, hidden confirm button, and secret values in the DOM.
+为角色注册、模型配置、上传、等待中的任务、证据结果、删除确认、归档无数据、用户恢复和
+管理员恢复捕获桌面/移动端截图。检查空白页面、重叠、裁切、隐藏的确认按钮，以及 DOM 中
+是否存在敏感值。
 
-- [ ] **Step 4: Write evidence report and commit.**
+- [ ] **步骤 4：编写证据报告并提交。**
 
-The report includes commands/results, fixture coverage, lifecycle races, cache policy, fake-provider scope, public-admin-role risk, MySQL retention policy, and excluded features. It does not claim production readiness, fairness, or real-provider quality.
+报告包含命令/结果、测试样例覆盖范围、生命周期竞态、缓存策略、模拟模型服务范围、公开
+管理员角色风险、MySQL 保留策略和排除功能。报告不宣称已达到生产可用性、公平性或真实
+模型服务质量。
 
 ~~~bash
 git add docs/verification README.md
 git commit -m "docs: record MVP verification evidence"
 ~~~
 
-## Plan Self-Review
+## 计划自审
 
-### Spec Coverage
+### 规范覆盖
 
-- JDK 21, hybrid native runtime, Redis-only Docker, Java-backend-only scope, TXT/DOCX, and PDF rejection are implemented by Tasks 3, 5, 6, 9, and 10.
-- Selectable registration roles, JWT, encrypted per-user model profiles, safe endpoints, and secret non-re-display are implemented by Tasks 4 and 8.
-- MySQL retention, status, visibility lifecycle, archive dates, Redis cleanup, and user/admin recovery are implemented by Tasks 5 and 9.
-- Redaction, evidence-backed fixed weighting, OpenAI-compatible calls, fact classification, and model failure are implemented by Tasks 6 and 7.
-- Contract freeze, fixtures, callback idempotency, race handling, and cross-service proof are implemented by Tasks 1, 2, 7, and 10.
-- Authorization, PII/log safeguards, visual checks, and residual-risk reporting are implemented by Task 11.
+- JDK 21、混合本地运行环境、仅 Redis 的 Docker、仅 Java 后端岗位范围、TXT/DOCX 以及
+  PDF 拒绝由任务 3、5、6、9 和 10 实现。
+- 可选择的注册角色、JWT、每用户加密模型配置、安全接口地址和不再次显示密钥由任务 4 和
+  8 实现。
+- MySQL 保留、status、可见性生命周期、归档日期、Redis 清理以及用户/管理员恢复由任务
+  5 和 9 实现。
+- 脱敏、基于证据的固定权重、OpenAI 兼容调用、事实分类和模型失败处理由任务 6 和 7 实现。
+- 契约冻结、测试样例、回调幂等、竞态处理和跨服务证明由任务 1、2、7 和 10 实现。
+- 授权、个人信息/日志防护、可视化检查和残余风险报告由任务 11 实现。
 
-### Completeness Scan
+### 完整性扫描
 
-The plan contains exact files, interfaces, test commands, expected results, and commit commands for every task. No unassigned implementation item remains.
+计划为每个任务列出确切文件、接口、测试命令、预期结果和提交命令。没有遗留未分配的
+实现事项。
 
-### Type Consistency
+### 类型一致性
 
-The contract establishes UUID IDs, expectedVersion, status, visibilityState, task attempt, callbackId, and callbackToken. Java, Python, and frontend tasks use those names consistently and copy API shapes from the frozen contract.
+契约定义 UUID ID、expectedVersion、status、visibilityState、任务尝试次数、callbackId 和
+callbackToken。Java、Python 与前端任务一致使用这些名称，并从已冻结的契约复制 API 结构。

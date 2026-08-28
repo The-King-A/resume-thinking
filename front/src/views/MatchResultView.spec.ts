@@ -24,11 +24,13 @@ describe('MatchResultView task lifecycle', () => {
       .mockResolvedValueOnce({ id: 'task-1', state: 'FAILED', failureCode: 'MODEL_OUTPUT_INVALID' })
     const wrapper = mount(MatchResultView, { global: { stubs: { RouterLink: true, MatchEvidenceTable: true } } })
     await flushPromises()
-    expect(wrapper.text()).toContain('Queued')
+    expect(wrapper.text()).toContain('排队中')
 
     await vi.advanceTimersByTimeAsync(1500)
     await flushPromises()
-    expect(wrapper.text()).toContain('Failed')
+    expect(wrapper.text()).toContain('失败')
+    expect(wrapper.text()).toContain('模型返回的数据无法解析')
+    expect(wrapper.text()).not.toContain('MODEL_OUTPUT_INVALID')
     await vi.advanceTimersByTimeAsync(3000)
     expect(lifecycleApi.getMatchTask).toHaveBeenCalledTimes(2)
     expect(lifecycleApi.getMatchResult).not.toHaveBeenCalled()
@@ -39,7 +41,7 @@ describe('MatchResultView task lifecycle', () => {
     lifecycleApi.getMatchResult.mockRejectedValue(new ApiError({ code: 'TASK_NOT_READY', message: 'private backend detail', correlationId: 'c', retryable: true }, 409))
     const wrapper = mount(MatchResultView, { global: { stubs: { RouterLink: true, MatchEvidenceTable: true } } })
     await flushPromises()
-    expect(wrapper.text()).toContain('Result not ready')
+    expect(wrapper.text()).toContain('结果尚未就绪')
     expect(wrapper.text()).not.toContain('private backend detail')
   })
 
@@ -51,20 +53,20 @@ describe('MatchResultView task lifecycle', () => {
     const wrapper = mount(MatchResultView, { global: { stubs: { RouterLink: true, MatchEvidenceTable: true } } })
     await flushPromises()
     expect(lifecycleApi.getMatchResult).toHaveBeenCalledTimes(1)
-    expect(wrapper.text()).toContain('Result not ready')
+    expect(wrapper.text()).toContain('结果尚未就绪')
 
     await vi.advanceTimersByTimeAsync(1500)
     await flushPromises()
     expect(lifecycleApi.getMatchResult).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('Java backend engineer.')
-    expect(wrapper.text()).not.toContain('Result not ready')
+    expect(wrapper.text()).not.toContain('结果尚未就绪')
   })
 
   it('shows archived state on a 410 TASK_GONE', async () => {
     lifecycleApi.getMatchTask.mockRejectedValue(new ApiError({ code: 'TASK_GONE', message: 'private backend detail', correlationId: 'c', retryable: false }, 410))
     const wrapper = mount(MatchResultView, { global: { stubs: { RouterLink: true, MatchEvidenceTable: true } } })
     await flushPromises()
-    expect(wrapper.text()).toContain('Task archived')
+    expect(wrapper.text()).toContain('任务已归档')
     expect(wrapper.text()).not.toContain('private backend detail')
   })
 
@@ -89,13 +91,13 @@ describe('MatchResultView task lifecycle', () => {
     routeParams.proxy.taskId = 'task-2'
     await nextTick()
     await flushPromises()
-    expect(wrapper.text()).toContain('Failed')
+    expect(wrapper.text()).toContain('失败')
 
     resolveOld({ id: 'task-1', state: 'PROCESSING' })
     await flushPromises()
     await vi.advanceTimersByTimeAsync(1500)
-    expect(wrapper.text()).toContain('Failed')
-    expect(wrapper.text()).not.toContain('Matching in progress')
+    expect(wrapper.text()).toContain('失败')
+    expect(wrapper.text()).not.toContain('正在匹配')
     expect(lifecycleApi.getMatchTask).toHaveBeenCalledWith('task-2')
   })
 
@@ -105,12 +107,12 @@ describe('MatchResultView task lifecycle', () => {
       .mockRejectedValueOnce(new ApiError({ code: 'TASK_GONE', message: 'private backend detail', correlationId: 'c', retryable: false }, 410))
     const wrapper = mount(MatchResultView, { global: { stubs: { RouterLink: true, MatchEvidenceTable: true } } })
     await flushPromises()
-    expect(wrapper.text()).toContain('Matching in progress')
+    expect(wrapper.text()).toContain('正在匹配')
 
     await vi.advanceTimersByTimeAsync(1500)
     await flushPromises()
-    expect(wrapper.text()).toContain('Task archived')
-    expect(wrapper.text()).not.toContain('Matching in progress')
+    expect(wrapper.text()).toContain('任务已归档')
+    expect(wrapper.text()).not.toContain('正在匹配')
   })
 
   it('shows the Java job description on a completed result', async () => {
