@@ -70,32 +70,45 @@
 离线集成断言覆盖受控 TXT/DOCX/PDF 示例、证据与评分不变量、保留期限计算、回调竞态
 示例及已清理的错误行为。它们不会连接 Java、MySQL、Redis 或外部模型服务。
 
-## 受控模拟
+## 本地受控基线、迁移与运行时验证
 
-`tests/integration/assert_mvp_flow.py --live` 包含仅在内存中运行、只允许回环地址的
-OpenAI 兼容模型服务以及临时凭据。这是确定性的交接模拟器，不能证明真实模型服务的质量或
-可用性。PowerShell 启动器只转发允许列表中的 ID、状态、HTTP 状态码和稳定的错误
-类别。它将 `PYTHON_INTERNAL_SERVICE_TOKEN` 作为进程配置加载，在实时尝试前（连同其他服务
-凭据）要求该值存在，并且绝不回显或将其作为命令参数传递。
+验证于 2026-08-28 在已授权的本地 MySQL 和 `127.0.0.1:6379` Redis 上完成。未跟踪的
+`.env` 仅被逐行加载到当前进程；只确认了必需变量名存在，未输出、记录或提交任何值。
 
-## 未验证真实集成
+启动前，MySQL 服务处于运行状态，Redis `PING` 返回 `PONG`。使用
+`E:\mysql\bin\mysql.exe` 执行了仅含 `COUNT(*)`、状态分组和 Flyway 基线计数的查询；
+密码只通过该查询子进程的 `MYSQL_PWD` 传入，并在查询后从进程环境清除。启动前的安全聚合
+结果为 0 个用户、0 份简历、0 条恢复审计记录，并且没有 Flyway 历史表。
 
-本报告没有声称执行过实时跨服务运行。验证时的情况如下：
+随后以 `local` profile 隐藏启动 Java 服务，并轮询
+`http://127.0.0.1:8080/actuator/health` 至 `UP`。Flyway 自行创建历史表并写入版本 `6` 的
+`BASELINE` 记录；没有执行任何手工建表、Flyway 历史写入、重置或删除。条件化演示初始化器
+随后完成一次种子写入。使用指定 Python 3.11 解释器隐藏启动 FastAPI，并轮询
+`http://127.0.0.1:8000/health` 至 `ok`。两个服务在验证结束后继续分别监听 8080 和 8000。
 
-- 工作树中没有可用的、已授权的本地 `.env`；
-- MySQL Windows 服务正在运行，但无法连接 `127.0.0.1:6379` 上的 Redis；
-- 因此启动器在预检阶段停止，没有启动 Java 或 Python、针对 MySQL 运行 Flyway，
-  也没有执行回调流程；
-- 没有联系真实的 OpenAI 兼容模型服务，也没有捕获 Playwright 浏览器截图。
+| 运行时断言 | 实际结果 |
+| --- | --- |
+| Flyway 创建的 version `6` baseline | 通过，1 条 `BASELINE` 记录 |
+| MySQL 用户数 | 2 |
+| MySQL 简历数 | 6 |
+| `resume_recovery_audit` 数 | 4 |
+| `ACTIVE` | 2，`status=0` |
+| `USER_SOFT_DELETED` | 1，`status=1` |
+| `USER_CACHE_ARCHIVED` | 1，`status=0` |
+| `ADMIN_SOFT_DELETED` | 1，`status=1` |
+| `ADMIN_CACHE_ARCHIVED` | 1，`status=0` |
+| Redis `resume:view:*` 键数 | 2 |
+| Java 健康端点 | `UP` |
+| Python 健康端点 | `ok` |
 
-如需获得实时证据，请在未跟踪的 `.env` 中配置已授权的值，启动 Redis，然后运行：
+本地登录仅在内存中用于授权检查，未输出或保存密码、访问令牌或原始响应。普通用户恢复列表
+恰有 `USER_SOFT_DELETED` 和 `USER_CACHE_ARCHIVED` 两个状态；管理员恢复列表恰有四个可恢复
+状态：`USER_SOFT_DELETED`、`USER_CACHE_ARCHIVED`、`ADMIN_SOFT_DELETED` 和
+`ADMIN_CACHE_ARCHIVED`。验证没有调用恢复、删除或匹配任务接口。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File tests/integration/run_mvp_flow.ps1 -RequireLive
-```
-
-只有当命令报告 Java/Python 健康状态、MySQL TCP 就绪、Redis PING 以及受控流程均成功后，
-结果才能被视为实时证据。
+该运行证明缓存仅保留两个 `ACTIVE` 页面视图；软删除和缓存归档均保留 MySQL 中的加密记录及
+审计，不构成物理删除。外部模型集成没有被调用或验证，也没有声称真实模型质量、延迟、成本、
+安全性或可用性。
 
 ## 残余风险与后续工作
 
