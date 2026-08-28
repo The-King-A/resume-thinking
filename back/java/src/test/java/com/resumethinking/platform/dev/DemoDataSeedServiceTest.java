@@ -88,6 +88,16 @@ class DemoDataSeedServiceTest {
     }
 
     @Test
+    void archivedSamplesHaveElapsedTheirVisibilityRetentionWindows() {
+        service.seed(credentials);
+
+        assertThat(allResumes()).filteredOn(resume -> resume.getVisibilityState() == VisibilityState.USER_CACHE_ARCHIVED
+                        || resume.getVisibilityState() == VisibilityState.ADMIN_CACHE_ARCHIVED)
+                .hasSize(2)
+                .allSatisfy(resume -> assertThat(resume.getVisibleUntil()).isBeforeOrEqualTo(NOW));
+    }
+
+    @Test
     void encryptsAsciiContentInsteadOfPersistingPlaintext() {
         service.seed(credentials);
 

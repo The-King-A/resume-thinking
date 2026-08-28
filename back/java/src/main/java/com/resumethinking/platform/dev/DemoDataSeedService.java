@@ -10,6 +10,7 @@ import com.resumethinking.platform.resumes.ResumeCache;
 import com.resumethinking.platform.resumes.ResumeRepository;
 import com.resumethinking.platform.resumes.VisibilityState;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -110,9 +111,14 @@ public class DemoDataSeedService {
 
     private Resume newResume(ResumeSpec spec) {
         Instant now = clock.instant();
+        Instant createdAt = switch (spec.lifecycle()) {
+            case USER_CACHE_ARCHIVED -> now.minus(Duration.ofDays(8));
+            case ADMIN_CACHE_ARCHIVED -> now.minus(Duration.ofDays(31));
+            default -> now;
+        };
         AesGcmCryptoService.EncryptedValue encrypted = crypto.encrypt(spec.title());
         Resume resume = new Resume(spec.id(), spec.owner().getId(), spec.title(), Resume.SourceType.TXT,
-                spec.creatorRole(), encrypted.ciphertext(), encrypted.nonce(), now, "v1");
+                spec.creatorRole(), encrypted.ciphertext(), encrypted.nonce(), createdAt, "v1");
         if (spec.lifecycle() == Lifecycle.USER_SOFT_DELETED) resume.softDelete(spec.lifecycleActorId(), UserRole.USER, now);
         if (spec.lifecycle() == Lifecycle.ADMIN_SOFT_DELETED) resume.softDelete(spec.lifecycleActorId(), UserRole.ADMIN, now);
         if (spec.lifecycle() == Lifecycle.USER_CACHE_ARCHIVED || spec.lifecycle() == Lifecycle.ADMIN_CACHE_ARCHIVED) resume.archive(now);
