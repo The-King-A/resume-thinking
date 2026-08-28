@@ -1,3 +1,5 @@
+-- 手工建表路径：仅用于空数据库；Java 首次启动时设置 Flyway baseline-on-migrate=true、baseline-version=6，
+-- 让 Flyway 创建自己的基线记录。不要手工创建或写入 flyway_schema_history，也不要再执行 V1-V6 迁移。
 -- 简历匹配平台 MySQL 建表脚本
 
 

@@ -29,13 +29,24 @@ finally { Pop-Location }
 `back/java/src/main/resources/application-local.yml` 已纳入版本控制，其中只包含
 环境变量引用；启用 `local` 配置后会加载它。
 
-### 手工建表（可选）
+### 数据库初始化（二选一）
 
-需要由数据库管理员手工创建表时，执行
-[`database/resume_thinking_schema.sql`](database/resume_thinking_schema.sql)。该文件是
-当前 Flyway 迁移最终结构的快照，包含表、索引、外键和检查约束，但不包含账号、
-简历或密钥数据。它只适用于空数据库，且与让 Spring Boot/Flyway 执行 V1 至 V6
-迁移是两条互斥路径；具体的后续基线处理说明在脚本开头。
+对于空数据库，选择以下其中一条路径，绝不要同时执行两条路径。
+
+1. 让 Java 服务首次启动时由 Flyway 自动执行 V1 至 V6 迁移。
+2. 需要由数据库管理员手工创建表时，只对空数据库执行
+   [`database/resume_thinking_schema.sql`](database/resume_thinking_schema.sql)。随后在 Java
+   服务首次启动前设置 `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true` 和
+   `SPRING_FLYWAY_BASELINE_VERSION=6`，由 Flyway 写入自己的基线记录。
+
+绝不要手工创建或写入 `flyway_schema_history`。
+
+### 本地演示数据
+
+演示数据默认关闭，只会在 `local` 配置下同时满足
+`APP_DEMO_SEED_ENABLED=true` 时运行。设置该标志前，必须在本地选择
+`DEMO_USER_PASSWORD` 和 `DEMO_ADMIN_PASSWORD`，且每个密码至少 12 个字符。启动器
+不会打印这些密码；不要在文档或版本库中记录实际值。
 
 FastAPI 工作进程的内部分析路由由 `X-Internal-Service-Token` HTTP 请求标头保护。
 请为 Java 调用方和 Python 工作进程配置同一个本地生成的
