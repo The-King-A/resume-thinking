@@ -145,6 +145,14 @@ class DemoDataSeedServiceTest {
         audits.all().set(userSoftDeleteIndex, new ResumeAuditRepository.ResumeLifecycleAudit(
                 userSoftDelete.resumeId(), null, userSoftDelete.action(), userSoftDelete.priorVisibilityState(),
                 userSoftDelete.newVisibilityState(), userSoftDelete.occurredAt(), userSoftDelete.correlationId()));
+        int adminSoftDeleteIndex = auditIndex(VisibilityState.ADMIN_SOFT_DELETED);
+        ResumeAuditRepository.ResumeLifecycleAudit adminSoftDelete = audits.all().get(adminSoftDeleteIndex);
+        UUID preservedAdminActor = UUID.randomUUID();
+        assertThat(preservedAdminActor).isNotEqualTo(resume(adminSoftDelete.resumeId()).getSoftDeletedBy());
+        audits.all().set(adminSoftDeleteIndex, new ResumeAuditRepository.ResumeLifecycleAudit(
+                adminSoftDelete.resumeId(), preservedAdminActor, adminSoftDelete.action(),
+                adminSoftDelete.priorVisibilityState(), adminSoftDelete.newVisibilityState(),
+                adminSoftDelete.occurredAt(), adminSoftDelete.correlationId()));
         int auditCount = audits.all().size();
 
         DemoDataSeedService.SeedResult result = service.seed(credentials);
@@ -155,11 +163,34 @@ class DemoDataSeedServiceTest {
         assertThat(audits.all()).hasSize(auditCount);
         assertThat(audits.all().get(userSoftDeleteIndex).actorId())
                 .isEqualTo(resume(userSoftDelete.resumeId()).getSoftDeletedBy());
-        assertThat(audits.all()).filteredOn(audit -> audit.newVisibilityState()
-                        == VisibilityState.ADMIN_SOFT_DELETED)
-                .singleElement()
-                .satisfies(audit -> assertThat(audit.actorId())
-                        .isEqualTo(resume(audit.resumeId()).getSoftDeletedBy()));
+        assertThat(audits.all().get(adminSoftDeleteIndex).actorId()).isEqualTo(preservedAdminActor);
+        assertThat(cache.values).containsOnlyKeys(active.get(0).getId(), active.get(1).getId());
+        assertThat(hidden).allSatisfy(resume -> assertThat(cache.get(resume.getId())).isEmpty());
+    }
+
+    @Test
+    void defersExistingRerunCacheReconciliationUntilTransactionCommit() {
+        service.seed(credentials);
+        List<Resume> active = allResumes().stream()
+                .filter(resume -> resume.getVisibilityState() == VisibilityState.ACTIVE)
+                .toList();
+        List<Resume> hidden = allResumes().stream()
+                .filter(resume -> resume.getVisibilityState() != VisibilityState.ACTIVE)
+                .toList();
+        active.forEach(resume -> cache.values.remove(resume.getId()));
+        hidden.forEach(cache::put);
+        int cacheEventsBeforeRerun = cache.events.size();
+
+        TransactionSynchronizationManager.initSynchronization();
+        service.seed(credentials);
+
+        assertThat(cache.events).hasSize(cacheEventsBeforeRerun);
+        assertThat(active).allSatisfy(resume -> assertThat(cache.get(resume.getId())).isEmpty());
+        assertThat(hidden).allSatisfy(resume -> assertThat(cache.get(resume.getId())).contains(resume));
+        for (TransactionSynchronization synchronization : TransactionSynchronizationManager.getSynchronizations()) {
+            synchronization.afterCommit();
+        }
+
         assertThat(cache.values).containsOnlyKeys(active.get(0).getId(), active.get(1).getId());
         assertThat(hidden).allSatisfy(resume -> assertThat(cache.get(resume.getId())).isEmpty());
     }
