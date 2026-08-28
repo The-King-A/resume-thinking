@@ -29,6 +29,14 @@ finally { Pop-Location }
 `back/java/src/main/resources/application-local.yml` 已纳入版本控制，其中只包含
 环境变量引用；启用 `local` 配置后会加载它。
 
+### 手工建表（可选）
+
+需要由数据库管理员手工创建表时，执行
+[`database/resume_thinking_schema.sql`](database/resume_thinking_schema.sql)。该文件是
+当前 Flyway 迁移最终结构的快照，包含表、索引、外键和检查约束，但不包含账号、
+简历或密钥数据。它只适用于空数据库，且与让 Spring Boot/Flyway 执行 V1 至 V6
+迁移是两条互斥路径；具体的后续基线处理说明在脚本开头。
+
 FastAPI 工作进程的内部分析路由由 `X-Internal-Service-Token` HTTP 请求标头保护。
 请为 Java 调用方和 Python 工作进程配置同一个本地生成的
 `PYTHON_INTERNAL_SERVICE_TOKEN`；该值有意不放入 JSON 任务契约，且不得提交。
