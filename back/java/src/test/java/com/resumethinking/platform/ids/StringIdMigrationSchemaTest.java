@@ -44,8 +44,13 @@ class StringIdMigrationSchemaTest {
                 "DROP INDEX ix_resume_audit_resume_occurred",
                 "DROP INDEX ix_analysis_tasks_resume",
                 "uq_analysis_task_owner_key",
+                "soft_deleted_by",
                 "ADD CONSTRAINT fk_llm_profiles_owner",
                 "ADD CONSTRAINT fk_analysis_result_resume");
+        int dropPrimary = migration.indexOf("ALTER TABLE analysis_results DROP PRIMARY KEY");
+        int dropId = migration.indexOf("DROP COLUMN id", dropPrimary);
+        assertThat(dropPrimary).isGreaterThanOrEqualTo(0).isLessThan(dropId);
+        assertThat(migration).contains("soft_deleted_by IS NOT NULL", "LEFT JOIN user_id_map");
     }
 
     @Test
@@ -67,6 +72,12 @@ class StringIdMigrationSchemaTest {
         for (String table : new String[]{"users", "llm_profiles", "resumes", "analysis_tasks", "analysis_evidence", "analysis_results", "analysis_callback_receipts", "resume_recovery_audit"}) {
             assertThat(snapshot).as("table %s", table).contains("CREATE TABLE " + table);
         }
+    }
+
+    @Test
+    void documentationBaselinesFreshV2SnapshotAfterV8() throws Exception {
+        String readme = read("../../README.md");
+        assertThat(readme).contains("SPRING_FLYWAY_BASELINE_VERSION=8");
     }
 
     private static String read(String relativePath) throws Exception {

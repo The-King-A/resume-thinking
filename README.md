@@ -39,7 +39,7 @@ finally { Pop-Location }
 2. **新库：** 仅对空数据库执行
    [`database/resume_thinking_schema.sql`](database/resume_thinking_schema.sql)，它直接创建 v2
    字符串列和 `id_sequences`。随后在 Java 服务首次启动前设置
-   `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true` 和 `SPRING_FLYWAY_BASELINE_VERSION=7`，由 Flyway
+   `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true` 和 `SPRING_FLYWAY_BASELINE_VERSION=8`，由 Flyway
    写入自己的基线记录。
 
 不要把新库快照与 V1-V7 迁移混用，也不要在未备份、未停写时执行 V8。
