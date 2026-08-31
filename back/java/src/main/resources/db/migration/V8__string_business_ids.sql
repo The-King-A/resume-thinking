@@ -88,6 +88,7 @@ ALTER TABLE analysis_callback_receipts DROP PRIMARY KEY, DROP COLUMN callback_id
 
 ALTER TABLE llm_profiles ADD CONSTRAINT fk_llm_profiles_owner FOREIGN KEY (owner_id) REFERENCES users(id);
 ALTER TABLE resumes ADD CONSTRAINT fk_resumes_owner FOREIGN KEY (owner_id) REFERENCES users(id);
+ALTER TABLE resumes ADD CONSTRAINT fk_resumes_soft_deleted_by FOREIGN KEY (soft_deleted_by) REFERENCES users(id);
 ALTER TABLE resume_recovery_audit ADD CONSTRAINT fk_resume_audit_resume FOREIGN KEY (resume_id) REFERENCES resumes(id);
 ALTER TABLE analysis_tasks ADD CONSTRAINT uq_analysis_task_owner_key UNIQUE (creator_id, idempotency_key), ADD CONSTRAINT fk_analysis_task_resume FOREIGN KEY (resume_id) REFERENCES resumes(id), ADD CONSTRAINT fk_analysis_task_profile FOREIGN KEY (llm_profile_id) REFERENCES llm_profiles(id), ADD CONSTRAINT fk_analysis_task_creator FOREIGN KEY (creator_id) REFERENCES users(id);
 ALTER TABLE analysis_evidence ADD CONSTRAINT fk_analysis_evidence_task FOREIGN KEY (task_id) REFERENCES analysis_tasks(id);

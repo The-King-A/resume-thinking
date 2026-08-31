@@ -46,6 +46,7 @@ class StringIdMigrationSchemaTest {
                 "uq_analysis_task_owner_key",
                 "soft_deleted_by",
                 "ADD CONSTRAINT fk_llm_profiles_owner",
+                "ADD CONSTRAINT fk_resumes_soft_deleted_by",
                 "ADD CONSTRAINT fk_analysis_result_resume");
         int dropPrimary = migration.indexOf("ALTER TABLE analysis_results DROP PRIMARY KEY");
         int dropId = migration.indexOf("DROP COLUMN id", dropPrimary);

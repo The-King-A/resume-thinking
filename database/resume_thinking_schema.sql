@@ -24,7 +24,7 @@ CREATE INDEX ix_llm_profiles_owner ON llm_profiles(owner_id);
 
 CREATE TABLE resumes (
  id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY COMMENT '简历唯一标识（v2字符串）', owner_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '简历所有者标识', title VARCHAR(200) NOT NULL COMMENT '简历名称', source_type VARCHAR(8) NOT NULL COMMENT '文件类型：TXT或DOCX', parser_version VARCHAR(64) NOT NULL DEFAULT 'v1' COMMENT '解析器版本', raw_content_ciphertext MEDIUMBLOB NOT NULL COMMENT 'AES-GCM加密后的简历原文', raw_content_nonce VARBINARY(12) NULL COMMENT '简历原文加密随机数（Nonce）', creator_role VARCHAR(16) NOT NULL COMMENT '创建者角色，决定默认留存期限', status TINYINT NOT NULL DEFAULT 0 COMMENT '删除标记：0未删除，1已软删除', visibility_state VARCHAR(32) NOT NULL COMMENT '页面可见性状态', visible_until TIMESTAMP(6) NULL COMMENT '页面可见截止时间', soft_deleted_by VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL COMMENT '执行软删除的用户标识', soft_deleted_at TIMESTAMP(6) NULL COMMENT '软删除时间', archived_at TIMESTAMP(6) NULL COMMENT '缓存过期归档时间', restored_at TIMESTAMP(6) NULL COMMENT '最近一次恢复时间', created_at TIMESTAMP(6) NOT NULL COMMENT '简历创建时间', updated_at TIMESTAMP(6) NOT NULL COMMENT '简历最后更新时间', version BIGINT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
- CONSTRAINT fk_resumes_owner FOREIGN KEY (owner_id) REFERENCES users(id)
+ CONSTRAINT fk_resumes_owner FOREIGN KEY (owner_id) REFERENCES users(id), CONSTRAINT fk_resumes_soft_deleted_by FOREIGN KEY (soft_deleted_by) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 CREATE INDEX ix_resumes_owner_visibility ON resumes(owner_id, visibility_state, id);
 CREATE INDEX ix_resumes_due ON resumes(visibility_state, visible_until);
