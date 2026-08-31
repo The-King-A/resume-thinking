@@ -274,7 +274,7 @@ try {
         $output = & $pythonExe $assertionScript '--live' '--api-base' $javaBase '--python-base' $pythonBase 2>&1
         $flowExit = $LASTEXITCODE
         foreach ($line in $output) {
-            if ($line -is [string] -and $line -match '^\[flow\] (?:[A-Za-z0-9 _-]+)(?: id=(?:user|profile|resume|task|callback|requirement|evidence|result|suggestion|audit)[0-9]{3,})?(?: state=[A-Z_]+)?(?: status=[0-9]+)?(?: code=[A-Z_]+)?$') {
+            if ($line -is [string] -and $line -match '^\[flow\] (?:[A-Za-z0-9 _-]+)(?: id=(?:user|profile|resume|task|callback|requirement|evidence|result|suggestion|audit)[0-9]{3,})?(?: state=[A-Z0-9_]+)?(?: status=[0-9]+)?(?: code=[A-Z_]+)?$') {
                 Write-Output $line
             }
         }
