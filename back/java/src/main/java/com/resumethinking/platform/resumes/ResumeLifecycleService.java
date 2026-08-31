@@ -50,7 +50,7 @@ public class ResumeLifecycleService {
             resume.archive(at);
             taskBlocker.blockPendingTasks(resume.getId());
             repository.save(resume);
-            cacheAfterCommit(() -> cache.evict(resume.getId()));
+            cacheAfterCommit(() -> cache.evict("resume:view:" + resume.getId()));
             audit.save(newAudit(resume.getId(), null, "ARCHIVED", prior,
                     resume.getVisibilityState(), at));
             throw new ResourceNotFoundException();
@@ -79,7 +79,7 @@ public class ResumeLifecycleService {
         resume.softDelete(command.actorId(), command.role(), at);
         taskBlocker.blockPendingTasks(resume.getId());
         repository.save(resume);
-        cacheAfterCommit(() -> cache.evict(resume.getId()));
+        cacheAfterCommit(() -> cache.evict("resume:view:" + resume.getId()));
         audit.save(newAudit(resume.getId(),command.actorId(),"SOFT_DELETED",prior,resume.getVisibilityState(),at)); return resume;
     }
 
@@ -128,7 +128,7 @@ public class ResumeLifecycleService {
                 resume.archive(at);
                 taskBlocker.blockPendingTasks(resume.getId());
                 repository.save(resume);
-                cacheAfterCommit(() -> cache.evict(resume.getId()));
+                cacheAfterCommit(() -> cache.evict("resume:view:" + resume.getId()));
                 audit.save(newAudit(resume.getId(),null,"ARCHIVED",prior,resume.getVisibilityState(),at)); count++;
             }
         } while (due.hasContent());
