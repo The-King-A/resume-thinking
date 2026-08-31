@@ -11,6 +11,7 @@ import java.util.Locale;
 @Service
 public class AuthService {
     private final UserRepository users; private final PasswordEncoder encoder; private final JwtService jwt; private final ReadableIdGenerator ids;
+    @org.springframework.beans.factory.annotation.Autowired
     public AuthService(UserRepository users, PasswordEncoder encoder, JwtService jwt, ReadableIdGenerator ids) { this.users = users; this.encoder = encoder; this.jwt = jwt; this.ids = ids; }
     public AuthService(UserRepository users, PasswordEncoder encoder, JwtService jwt) { this(users, encoder, jwt, new InMemoryReadableIdGenerator()); }
     @Transactional
