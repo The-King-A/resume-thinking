@@ -1,0 +1,14 @@
+{
+  "taskId": "task001",
+  "attempt": 2,
+  "callbackId": "callback001",
+  "callbackToken": "fixture-callback-token-not-a-secret-0001",
+  "payloadHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "outcome": "FAILED",
+  "errorCode": "MODEL_UNAVAILABLE",
+  "correlationId": "00000000-0000-4000-8000-000000000003"
+  ,"ownerId": "user001"
+  ,"apiKey": "fixture-secret-must-not-be-printed"
+  ,"unexpectedField": "reject-me"
+}
+

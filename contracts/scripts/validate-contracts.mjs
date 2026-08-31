@@ -75,6 +75,8 @@ for (const version of ['v1', 'v2']) {
     await assertCacheArchivedResume(version, 'archive-admin.json', 'ADMIN_CACHE_ARCHIVED');
   } else {
     await assertInvalid(version, 'callback-invalid.json', v.validateCallback);
+    await assertInvalid(version, 'match-request-invalid-id.json', v.validate('CreateMatchTaskRequest'));
+    await assertInvalid(version, 'callback-authority-invalid.json', v.validateCallback);
   }
 }
 
@@ -84,6 +86,12 @@ if (v2Job.callbackId !== v2Callback.callbackId) throw new Error('v2 callbackId m
 const v2Duplicate = await readJson(resolveContractPath('fixtures/v2/callback-duplicate.json'));
 if (v2Duplicate.callbackId !== v2Callback.callbackId || v2Duplicate.payloadHash !== v2Callback.payloadHash) throw new Error('v2 duplicate callback must reuse callbackId and payloadHash');
 console.log('valid: v2 callback idempotency and callbackId passthrough');
+
+const v2Mismatch = await readJson(resolveContractPath('fixtures/v2/callback-id-mismatch.json'));
+const validateV2CallbackForJob = (callback, job) => versions.v2.validateCallback(callback) && callback.callbackId === job.callbackId;
+if (!validateV2CallbackForJob(v2Callback, v2Job)) throw new Error('v2 callbackId must match its analysis job');
+if (validateV2CallbackForJob(v2Mismatch, v2Job)) throw new Error('v2 callbackId mismatch must be rejected');
+console.log('expected invalid: v2/callback-id-mismatch.json (callbackId is not the Java-issued job callbackId)');
 
 const v2User = versions.v2.validate('User');
 if (!v2User({ id: 'user001', username: 'u', email: 'u@example.test', role: 'USER', createdAt: new Date().toISOString() })) throw new Error('v2 user001 must be valid');
