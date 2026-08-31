@@ -21,8 +21,10 @@ const bundleOpenapi = (version) => {
 const versions = {};
 for (const version of ['v1', 'v2']) {
   const openapiId = `https://resume-thinking.local/contracts/openapi/${version}/openapi.json`;
-  ajv.addSchema({ ...bundleOpenapi(version), $id: openapiId }, openapiId);
+  const openapi = { ...bundleOpenapi(version), $id: openapiId };
+  ajv.addSchema(openapi, openapiId);
   versions[version] = {
+    openapi,
     validate: (name) => {
       const validator = ajv.getSchema(`${openapiId}#/components/schemas/${name}`);
       if (!validator) throw new Error(`${version} OpenAPI schema not found: ${name}`);
@@ -74,11 +76,21 @@ for (const version of ['v1', 'v2']) {
     await assertCacheArchivedResume(version, 'archive-user.json', 'USER_CACHE_ARCHIVED');
     await assertCacheArchivedResume(version, 'archive-admin.json', 'ADMIN_CACHE_ARCHIVED');
   } else {
+    await assertValid(version, 'password-reset-valid.json', v.validate('PasswordResetRequest'));
+    await assertInvalid(version, 'password-reset-invalid.json', v.validate('PasswordResetRequest'));
     await assertInvalid(version, 'callback-invalid.json', v.validateCallback);
     await assertInvalid(version, 'match-request-invalid-id.json', v.validate('CreateMatchTaskRequest'));
     await assertInvalid(version, 'callback-authority-invalid.json', v.validateCallback);
   }
 }
+
+const passwordReset = versions.v2.openapi.paths['/api/v2/auth/password-reset']?.post;
+if (!passwordReset || passwordReset.security?.length !== 0) throw new Error('v2 password reset must be a public POST operation');
+if (!passwordReset.responses['204'] || passwordReset.responses['204'].content) throw new Error('v2 password reset success must be empty 204');
+if (passwordReset.responses['404']?.$ref !== '#/components/responses/ResourceNotFound') throw new Error('v2 password reset must use generic resource-not-found for unknown or non-local accounts');
+const registerWithConfirmation = { ...(await readJson(resolveContractPath('fixtures/v2/auth-register-valid.json'))), confirmPassword: 'client-only-confirmation' };
+if (versions.v2.validate('RegisterRequest')(registerWithConfirmation)) throw new Error('v2 register confirmation must remain client-only');
+console.log('valid: v2 password-reset response privacy and client-only confirmation');
 
 const v2Job = await readJson(resolveContractPath('fixtures/v2/analysis-job-valid.json'));
 const v2Callback = await readJson(resolveContractPath('fixtures/v2/callback-valid.json'));

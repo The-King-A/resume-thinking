@@ -75,6 +75,31 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /api/v2/auth/password-reset:
+    post:
+      tags: [Authentication]
+      summary: Reset a local account password
+      operationId: resetLocalAccountPassword
+      security: []
+      description: |
+        Local-development-only recovery for an existing local account. Java must reject an
+        unknown identifier or any non-local account with the same generic `RESOURCE_NOT_FOUND`
+        response, without returning account data. This operation never returns a password,
+        password hash, token, or account data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        '204':
+          description: Password reset completed. The response has no content.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
   /api/v2/auth/me:
     get:
       tags: [Authentication]
@@ -783,6 +808,23 @@ components:
           format: password
           minLength: 1
           maxLength: 128
+    PasswordResetRequest:
+      type: object
+      additionalProperties: false
+      required: [identifier, newPassword]
+      properties:
+        identifier:
+          type: string
+          minLength: 1
+          maxLength: 254
+          description: Existing local account username or email. It is not returned by this operation.
+        newPassword:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 128
+          writeOnly: true
+          description: Replacement password. Password confirmation remains a client-only check and is not an API field.
     User:
       type: object
       additionalProperties: false
