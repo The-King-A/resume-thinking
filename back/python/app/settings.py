@@ -113,7 +113,7 @@ def is_allowed_callback_url(url: str, config: Settings | None = None) -> bool:
 
     Loopback targets are the default for local development.  Deployments can
     add the configured Java callback origin (and optional additional exact
-    origins) without changing the v1 JSON contract.
+    origins) without changing the v2 JSON contract.
     """
     parsed = _parse_http_url(url)
     if parsed is None:

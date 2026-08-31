@@ -14,7 +14,8 @@ from app.settings import is_allowed_callback_url, settings
 
 def _job(*, callback_url: str = "http://127.0.0.1:8080/callback") -> dict:
     return {
-        "taskId": str(uuid4()),
+        "taskId": "task001",
+        "callbackId": "callback001",
         "attempt": 1,
         "resumeVersion": 0,
         "sourceType": "TXT",
@@ -25,7 +26,7 @@ def _job(*, callback_url: str = "http://127.0.0.1:8080/callback") -> dict:
         },
         "allowedEvidence": [
             {
-                "evidenceId": str(uuid4()),
+                "evidenceId": "evidence001",
                 "sourceLocation": "txt:0",
                 "sourceStart": 0,
                 "sourceEnd": 11,
@@ -58,7 +59,7 @@ def test_analysis_job_requires_internal_service_auth_without_parsing_body():
     payload["callbackToken"] = "callback-secret-should-not-echo-" + "x" * 32
     payload["provider"]["apiKey"] = "api-key-should-not-echo"
 
-    response = TestClient(app).post("/internal/v1/analysis-jobs", json=payload)
+    response = TestClient(app).post("/internal/v2/analysis-jobs", json=payload)
 
     assert response.status_code == 401
     body = response.json()
@@ -81,7 +82,7 @@ def test_analysis_job_accepts_the_released_java_backend_job_family():
 
 def test_analysis_job_rejects_wrong_internal_service_auth():
     response = TestClient(app).post(
-        "/internal/v1/analysis-jobs",
+        "/internal/v2/analysis-jobs",
         headers={"X-Internal-Service-Token": "wrong-token"},
         json=_job(),
     )
@@ -94,7 +95,7 @@ def test_analysis_job_fails_closed_when_internal_token_is_not_configured(monkeyp
     monkeypatch.setattr(settings, "internal_service_token", "")
 
     response = TestClient(app).post(
-        "/internal/v1/analysis-jobs",
+        "/internal/v2/analysis-jobs",
         headers={"X-Internal-Service-Token": "t" * 32},
         json=_job(),
     )
@@ -107,7 +108,7 @@ def test_analysis_job_fails_closed_for_example_token(monkeypatch):
     monkeypatch.setattr(settings, "internal_service_token", "replace-with-shared-service-token")
 
     response = TestClient(app).post(
-        "/internal/v1/analysis-jobs",
+        "/internal/v2/analysis-jobs",
         headers={"X-Internal-Service-Token": "replace-with-shared-service-token"},
         json=_job(),
     )
@@ -117,7 +118,7 @@ def test_analysis_job_fails_closed_for_example_token(monkeypatch):
 
 def test_analysis_job_rejects_callback_url_outside_allowlist():
     response = TestClient(app).post(
-        "/internal/v1/analysis-jobs",
+        "/internal/v2/analysis-jobs",
         headers={"X-Internal-Service-Token": "t" * 32},
         json=_job(callback_url="http://169.254.169.254/latest/meta-data"),
     )
@@ -137,7 +138,7 @@ def test_validation_error_does_not_echo_sensitive_request_fields():
     payload["attempt"] = "not-an-integer"
 
     response = TestClient(app).post(
-        "/internal/v1/analysis-jobs",
+        "/internal/v2/analysis-jobs",
         headers={"X-Internal-Service-Token": "t" * 32},
         json=payload,
     )
@@ -193,17 +194,17 @@ async def test_callback_client_sends_internal_service_token_as_header():
 
     ok = await CallbackClient(
         transport=httpx.MockTransport(handler), attempts=1
-    ).post("http://127.0.0.1/callback", {"callbackId": str(uuid4())})
+    ).post("http://127.0.0.1/callback", {"callbackId": "callback001"})
 
     assert ok is True
     assert seen["token"] == "t" * 32
 
 
 def test_configured_java_callback_base_allows_same_origin_path(monkeypatch):
-    monkeypatch.setattr(settings, "java_callback_base_url", "https://java.example.test/internal/v1")
+    monkeypatch.setattr(settings, "java_callback_base_url", "https://java.example.test/internal/v2")
 
     async def fake_analyze_job(_job):
-        return {"callbackId": str(uuid4())}
+        return {"callbackId": "callback001"}
 
     class FakeCallbackClient:
         async def post(self, _url, _callback):
@@ -213,9 +214,9 @@ def test_configured_java_callback_base_allows_same_origin_path(monkeypatch):
     monkeypatch.setattr("app.main.CallbackClient", FakeCallbackClient)
 
     response = TestClient(app).post(
-        "/internal/v1/analysis-jobs",
+        "/internal/v2/analysis-jobs",
         headers={"X-Internal-Service-Token": "t" * 32},
-        json=_job(callback_url="https://java.example.test/internal/v1/analysis-results"),
+        json=_job(callback_url="https://java.example.test/internal/v2/analysis-results"),
     )
 
     assert response.status_code == 202

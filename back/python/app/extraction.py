@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from io import BytesIO
 from dataclasses import dataclass
-from uuid import uuid4
 
 from docx import Document as DocxDocument
 
@@ -49,6 +48,9 @@ def _result(text: str, location: str) -> ExtractedResume:
     for index, paragraph in enumerate(text.split("\n")):
         end = offset + len(paragraph)
         if paragraph:
-            evidence.append(Evidence(evidenceId=str(uuid4()), sourceLocation=f"{location}:{index}", sourceStart=offset, sourceEnd=end, excerpt=paragraph))
+            # Extracted evidence is transient.  Java owns persisted evidence
+            # identifiers; these local labels merely satisfy the v2 shape and
+            # make provider-facing diagnostics deterministic.
+            evidence.append(Evidence(evidenceId=f"evidence{len(evidence) + 1:03d}", sourceLocation=f"{location}:{index}", sourceStart=offset, sourceEnd=end, excerpt=paragraph))
         offset = end + 1
     return ExtractedResume(text, tuple(evidence))

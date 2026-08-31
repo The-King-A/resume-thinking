@@ -1,10 +1,29 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Annotated, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
+
+
+# Business identifiers are issued by Java and are deliberately distinguishable
+# from UUID tracking values.  Keep the constraints here as the single runtime
+# source of truth for every Python v2 envelope and model result.
+TaskId = Annotated[str, StringConstraints(pattern=r"^task[0-9]{3,}$", max_length=64)]
+CallbackId = Annotated[str, StringConstraints(pattern=r"^callback[0-9]{3,}$", max_length=64)]
+EvidenceId = Annotated[str, StringConstraints(pattern=r"^evidence[0-9]{3,}$", max_length=64)]
+RequirementId = Annotated[str, StringConstraints(pattern=r"^requirement[0-9]{3,}$", max_length=64)]
+SuggestionId = Annotated[str, StringConstraints(pattern=r"^suggestion[0-9]{3,}$", max_length=64)]
 
 
 class StrictModel(BaseModel):
@@ -17,7 +36,7 @@ class Document(StrictModel):
 
 
 class AllowedEvidence(StrictModel):
-    evidence_id: UUID = Field(alias="evidenceId")
+    evidence_id: EvidenceId = Field(alias="evidenceId")
     source_location: str = Field(alias="sourceLocation", min_length=1, max_length=500)
     source_start: StrictInt = Field(alias="sourceStart", ge=0)
     source_end: StrictInt = Field(alias="sourceEnd", ge=0)
@@ -36,7 +55,8 @@ class Provider(StrictModel):
 
 
 class AnalysisJob(StrictModel):
-    task_id: UUID = Field(alias="taskId")
+    task_id: TaskId = Field(alias="taskId")
+    callback_id: CallbackId = Field(alias="callbackId")
     attempt: StrictInt = Field(ge=1)
     resume_version: StrictInt = Field(alias="resumeVersion", ge=0)
     source_type: Literal["TXT", "DOCX"] = Field(alias="sourceType")
@@ -67,7 +87,7 @@ class AnalysisJob(StrictModel):
 
 
 class EvidenceReference(StrictModel):
-    evidence_id: UUID = Field(alias="evidenceId")
+    evidence_id: EvidenceId = Field(alias="evidenceId")
     source_start: StrictInt = Field(alias="sourceStart", ge=0)
     source_end: StrictInt = Field(alias="sourceEnd", ge=0)
     excerpt: str = Field(min_length=1, max_length=5000)
@@ -81,7 +101,7 @@ class EvidenceReference(StrictModel):
 
 
 class RequirementMatch(StrictModel):
-    requirement_id: UUID = Field(alias="requirementId")
+    requirement_id: RequirementId = Field(alias="requirementId")
     job_requirement_text: str = Field(alias="jobRequirementText", min_length=1, max_length=20000)
     requirement_type: Literal["MANDATORY", "PREFERRED"] = Field(alias="requirementType")
     match_status: Literal["SATISFIED", "PARTIALLY_SATISFIED", "RELATED_BUT_EVIDENCE_INSUFFICIENT", "UNMET"] = Field(alias="matchStatus")
@@ -103,11 +123,11 @@ class RequirementMatch(StrictModel):
 
 
 class Suggestion(StrictModel):
-    suggestion_id: UUID = Field(alias="suggestionId")
-    requirement_id: UUID = Field(alias="requirementId")
+    suggestion_id: SuggestionId = Field(alias="suggestionId")
+    requirement_id: RequirementId = Field(alias="requirementId")
     state: Literal["SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED"]
     proposed_text: str = Field(alias="proposedText", min_length=1, max_length=5000)
-    evidence_ids: list[UUID] = Field(alias="evidenceIds")
+    evidence_ids: list[EvidenceId] = Field(alias="evidenceIds")
 
     @model_validator(mode="after")
     def supported_needs_evidence(self) -> "Suggestion":
@@ -132,9 +152,9 @@ class AnalysisResult(StrictModel):
 
 
 class Callback(StrictModel):
-    task_id: UUID = Field(alias="taskId")
+    task_id: TaskId = Field(alias="taskId")
     attempt: StrictInt = Field(ge=1)
-    callback_id: UUID = Field(alias="callbackId")
+    callback_id: CallbackId = Field(alias="callbackId")
     callback_token: str = Field(alias="callbackToken", min_length=32, max_length=1024)
     payload_hash: str = Field(alias="payloadHash", pattern=r"^[a-f0-9]{64}$")
     outcome: Literal["SUCCEEDED", "FAILED", "TIMED_OUT"]
@@ -152,7 +172,7 @@ class Callback(StrictModel):
 
 
 class ExtractedEvidence(StrictModel):
-    evidence_id: UUID | None = Field(default=None, alias="evidenceId")
+    evidence_id: EvidenceId | None = Field(default=None, alias="evidenceId")
     source_location: str = Field(alias="sourceLocation")
     source_start: StrictInt = Field(alias="sourceStart", ge=0)
     source_end: StrictInt = Field(alias="sourceEnd", ge=0)

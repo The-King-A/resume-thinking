@@ -46,10 +46,10 @@ class FailingClient(CapturingClient):
 
 def _job(text: str, start: int, end: int, location: str = "txt:0"):
     return {
-        "taskId": str(uuid4()), "attempt": 1, "resumeVersion": 0, "sourceType": "TXT",
+        "taskId": "task001", "callbackId": "callback001", "attempt": 1, "resumeVersion": 0, "sourceType": "TXT",
         "jobFamily": "JAVA_BACKEND",
         "document": {"contentBase64": base64.b64encode(text.encode()).decode(), "originalFilename": "resume.txt"},
-        "allowedEvidence": [{"evidenceId": str(uuid4()), "sourceLocation": location, "sourceStart": start, "sourceEnd": end}],
+        "allowedEvidence": [{"evidenceId": "evidence001", "sourceLocation": location, "sourceStart": start, "sourceEnd": end}],
         "jobDescriptionText": "Build reliable software with clear communication.", "redactionRequired": True,
         "callbackUrl": "http://127.0.0.1:8080/callback", "callbackToken": "x" * 32,
         "provider": {"baseUrl": "http://127.0.0.1:8080", "model": "model", "apiKey": "secret"}, "correlationId": str(uuid4()),
@@ -59,10 +59,10 @@ def _job(text: str, start: int, end: int, location: str = "txt:0"):
 @pytest.mark.asyncio
 async def test_malformed_provider_or_document_returns_failure():
     job = {
-        "taskId": str(uuid4()), "attempt": 1, "resumeVersion": 0, "sourceType": "TXT",
+        "taskId": "task001", "callbackId": "callback001", "attempt": 1, "resumeVersion": 0, "sourceType": "TXT",
         "jobFamily": "JAVA_BACKEND",
         "document": {"contentBase64": base64.b64encode(b"resume text").decode(), "originalFilename": "resume.txt"},
-        "allowedEvidence": [{"evidenceId": str(uuid4()), "sourceLocation": "txt:0", "sourceStart": 0, "sourceEnd": 11}],
+        "allowedEvidence": [{"evidenceId": "evidence001", "sourceLocation": "txt:0", "sourceStart": 0, "sourceEnd": 11}],
         "jobDescriptionText": "Build reliable software with clear communication.", "redactionRequired": True,
         "callbackUrl": "http://127.0.0.1:8080/callback", "callbackToken": "x" * 32,
         "provider": {"baseUrl": "https://api.example.test/v1", "model": "model", "apiKey": "secret"}, "correlationId": str(uuid4()),
@@ -109,7 +109,7 @@ async def test_failed_callback_does_not_echo_labeled_names(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_success_callback_redacts_provider_output_before_boundary(monkeypatch):
-    requirement_id = uuid4()
+    requirement_id = "requirement001"
 
     class LeakyClient(CapturingClient):
         async def complete_structured(self, request):
@@ -129,7 +129,7 @@ async def test_success_callback_redacts_provider_output_before_boundary(monkeypa
                     "suggestionState": "RISKY_OR_UNSUPPORTED",
                 }],
                 "suggestions": [{
-                    "suggestionId": str(uuid4()),
+                    "suggestionId": "suggestion001",
                     "requirementId": str(requirement_id),
                     "state": "NEEDS_USER_CONFIRMATION",
                     "proposedText": "\u59d3\u540d\uff1a\u5f20\u4e09",
@@ -184,7 +184,7 @@ async def test_callback_hash_covers_exact_schema_payload(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_success_callback_keeps_required_nested_null_and_passes_ajv(monkeypatch):
-    requirement_id = uuid4()
+    requirement_id = "requirement001"
 
     class RequirementClient(CapturingClient):
         async def complete_structured(self, request):
@@ -202,7 +202,7 @@ async def test_success_callback_keeps_required_nested_null_and_passes_ajv(monkey
     assert callback["result"]["requirements"][0]["gap"] is None
     assert callback["payloadHash"] == _hash_payload(callback)
 
-    schema_path = Path(__file__).resolve().parents[3] / "contracts/internal/v1/analysis-callback.schema.json"
+    schema_path = Path(__file__).resolve().parents[3] / "contracts/internal/v2/analysis-callback.schema.json"
     script = """
 const fs = require('fs');
 const Ajv = require('ajv/dist/2020');
@@ -227,7 +227,7 @@ async def test_model_evidence_must_have_non_empty_range_and_rebuilt_excerpt(monk
             return AnalysisResult.model_validate({
                 "score": {"skills": 0, "projectExperience": 0, "workContent": 0, "educationExperience": 0, "softSkills": 0, "composite": 0},
                 "requirements": [{
-                    "requirementId": str(uuid4()), "jobRequirementText": "x", "requirementType": "MANDATORY",
+                    "requirementId": "requirement001", "jobRequirementText": "x", "requirementType": "MANDATORY",
                     "matchStatus": "SATISFIED", "matchType": "EXACT", "component": "SKILLS", "componentScore": 0,
                     "evidence": [{"evidenceId": request.evidence[0].evidence_id, "sourceStart": 0, "sourceEnd": 0, "excerpt": "forged", "confidence": 1}],
                     "evidenceStrength": "HIGH", "gap": None, "suggestionState": "NEEDS_USER_CONFIRMATION",

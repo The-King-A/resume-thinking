@@ -30,4 +30,17 @@ public interface ReadableIdGenerator {
             throw new IllegalArgumentException("invalid " + type.prefix + " business id");
         }
     }
+
+    static void validate(String value, BusinessIdType type) {
+        validate(type, value);
+    }
+
+    static boolean isValid(BusinessIdType type, String value) {
+        try {
+            validate(type, value);
+            return true;
+        } catch (RuntimeException invalid) {
+            return false;
+        }
+    }
 }

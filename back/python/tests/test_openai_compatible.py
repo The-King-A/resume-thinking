@@ -89,7 +89,7 @@ async def test_provider_request_redacts_all_text_fields():
     await client.complete_structured({
         "resumeText": "alice@example.com 13800138000",
         "jobDescriptionText": "Build reliable software with clear communication. CALLBACK_TOKEN",
-        "evidence": [{"evidenceId": "00000000-0000-0000-0000-000000000001", "sourceLocation": "txt:0", "sourceStart": 0, "sourceEnd": 5, "excerpt": "110101199001011234"}],
+        "evidence": [{"evidenceId": "evidence001", "sourceLocation": "txt:0", "sourceStart": 0, "sourceEnd": 5, "excerpt": "110101199001011234"}],
     })
     assert "alice@example.com" not in seen["body"]
     assert "13800138000" not in seen["body"]
@@ -156,7 +156,7 @@ async def test_provider_result_redacts_pii_before_returning_to_java():
                                     },
                                     "requirements": [
                                         {
-                                            "requirementId": "00000000-0000-0000-0000-000000000001",
+                                            "requirementId": "requirement001",
                                             "jobRequirementText": "\u59d3\u540d\uff1a\u5f20\u4e09\uff0c\u90ae\u7bb1 alice@example.com",
                                             "requirementType": "MANDATORY",
                                             "matchStatus": "UNMET",
@@ -171,8 +171,8 @@ async def test_provider_result_redacts_pii_before_returning_to_java():
                                     ],
                                     "suggestions": [
                                         {
-                                            "suggestionId": "00000000-0000-0000-0000-000000000002",
-                                            "requirementId": "00000000-0000-0000-0000-000000000001",
+                                            "suggestionId": "suggestion001",
+                                            "requirementId": "requirement001",
                                             "state": "NEEDS_USER_CONFIRMATION",
                                             "proposedText": "Name: Alice Zhang",
                                             "evidenceIds": [],

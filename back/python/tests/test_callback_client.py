@@ -1,3 +1,4 @@
+import json
 import httpx
 import pytest
 
@@ -21,6 +22,21 @@ async def test_callback_retries_5xx_then_succeeds():
 
     ok = await CallbackClient(transport=httpx.MockTransport(handler), attempts=2).post("http://127.0.0.1/callback", {"callbackId": "same"})
     assert ok and calls == 2
+
+
+@pytest.mark.asyncio
+async def test_callback_retries_keep_java_callback_id_and_payload_hash_unchanged():
+    payload = {"callbackId": "callback001", "payloadHash": "a" * 64}
+    bodies: list[dict] = []
+
+    async def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(500 if len(bodies) == 1 else 200)
+
+    assert await CallbackClient(
+        transport=httpx.MockTransport(handler), attempts=2, backoff_seconds=0
+    ).post("http://127.0.0.1/callback", payload)
+    assert bodies == [payload, payload]
 
 
 @pytest.mark.asyncio

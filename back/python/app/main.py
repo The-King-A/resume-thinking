@@ -102,7 +102,7 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/internal/v1/analysis-jobs", status_code=202)
+@app.post("/internal/v2/analysis-jobs", status_code=202)
 async def submit_analysis_job(
     job: AnalysisJob,
     background_tasks: BackgroundTasks,
