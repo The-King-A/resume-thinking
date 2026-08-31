@@ -50,12 +50,12 @@ public class PythonAnalysisClient {
             throw new IllegalStateException("MODEL_UNAVAILABLE", e);
         }
     }
-    public record InternalAnalysisJob(UUID taskId, int attempt, long resumeVersion, String sourceType, JobFamily jobFamily,
+    public record InternalAnalysisJob(String taskId, int attempt, long resumeVersion, String sourceType, JobFamily jobFamily,
                                       Document document, Set<AllowedEvidence> allowedEvidence, String jobDescriptionText,
                                       boolean redactionRequired, URI callbackUrl, String callbackToken,
                                       Provider provider, UUID correlationId) {
         /** Compatibility constructor for callers created before job families were explicit. */
-        public InternalAnalysisJob(UUID taskId, int attempt, long resumeVersion, String sourceType,
+        public InternalAnalysisJob(String taskId, int attempt, long resumeVersion, String sourceType,
                                    Document document, Set<AllowedEvidence> allowedEvidence, String jobDescriptionText,
                                    boolean redactionRequired, URI callbackUrl, String callbackToken,
                                    Provider provider, UUID correlationId) {
@@ -65,7 +65,7 @@ public class PythonAnalysisClient {
         }
     }
     public record Document(String contentBase64, String originalFilename) {}
-    public record AllowedEvidence(UUID evidenceId, String sourceLocation, int sourceStart, int sourceEnd) {}
+    public record AllowedEvidence(String evidenceId, String sourceLocation, int sourceStart, int sourceEnd) {}
     public record Provider(URI baseUrl, String model, String apiKey) {}
     private static String configuredInternalToken() {
         String token = System.getProperty("app.python-internal-service-token");

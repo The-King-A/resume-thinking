@@ -2,11 +2,10 @@ package com.resumethinking.platform.auth;
 
 import jakarta.persistence.*;
 import java.time.Instant;
-import java.util.UUID;
 
 @Entity @Table(name = "users")
 public class User {
-    @Id @Column(columnDefinition = "BINARY(16)") private UUID id;
+    @Id @Column(nullable = false, length = 64, columnDefinition = "VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin") private String id;
     @Column(nullable = false, unique = true, length = 64) private String username;
     @Column(nullable = false, unique = true, length = 254) private String email;
     @Column(name = "password_hash", nullable = false, length = 100) private String passwordHash;
@@ -14,11 +13,15 @@ public class User {
     @Column(name = "created_at", nullable = false) private Instant createdAt;
 
     protected User() {}
+    /** Test/legacy convenience constructor; production registration supplies an allocated ID. */
     public User(String username, String email, String passwordHash, UserRole role) {
-        this.id = UUID.randomUUID(); this.username = username; this.email = email;
+        this("user001", username, email, passwordHash, role);
+    }
+    public User(String id, String username, String email, String passwordHash, UserRole role) {
+        this.id = id; this.username = username; this.email = email;
         this.passwordHash = passwordHash; this.role = role; this.createdAt = Instant.now();
     }
-    public UUID getId() { return id; }
+    public String getId() { return id; }
     public String getUsername() { return username; }
     public String getEmail() { return email; }
     public String getPasswordHash() { return passwordHash; }

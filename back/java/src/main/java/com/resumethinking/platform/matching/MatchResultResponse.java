@@ -1,14 +1,14 @@
 package com.resumethinking.platform.matching;
 import java.time.Instant; import java.util.*;
-public record MatchResultResponse(UUID taskId, UUID resumeId, long resumeVersion, String jobDescriptionText, Score score, List<Requirement> requirements, List<Suggestion> suggestions, Instant completedAt) {
+public record MatchResultResponse(String taskId, String resumeId, long resumeVersion, String jobDescriptionText, Score score, List<Requirement> requirements, List<Suggestion> suggestions, Instant completedAt) {
  private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER=new com.fasterxml.jackson.databind.ObjectMapper();
  public record Score(double skills,double projectExperience,double workContent,double educationExperience,double softSkills,double composite){}
- public record Requirement(UUID requirementId,String requirementText,String requirementType,String matchStatus,String matchType,String component,double componentScore,List<Evidence> evidence,String gap,String suggestionState){}
- public record Evidence(UUID id,String sourceType,String sourceLocation,int sourceStart,int sourceEnd,String excerpt,double confidence,String strength){}
- public record Suggestion(UUID id,UUID requirementId,String state,String proposedText,List<UUID> evidenceIds,boolean requiresUserConfirmation){}
+ public record Requirement(String requirementId,String requirementText,String requirementType,String matchStatus,String matchType,String component,double componentScore,List<Evidence> evidence,String gap,String suggestionState){}
+ public record Evidence(String id,String sourceType,String sourceLocation,int sourceStart,int sourceEnd,String excerpt,double confidence,String strength){}
+ public record Suggestion(String id,String requirementId,String state,String proposedText,List<String> evidenceIds,boolean requiresUserConfirmation){}
  static MatchResultResponse from(AnalysisResult r){ return from(r, List.of()); }
  static MatchResultResponse from(AnalysisResult r, List<AnalysisEvidence> evidenceMetadata){
-   Map<UUID, AnalysisEvidence> metadata = new HashMap<>();
+   Map<String, AnalysisEvidence> metadata = new HashMap<>();
    for (AnalysisEvidence evidence : evidenceMetadata) metadata.put(evidence.getId(), evidence);
    var s=r.score() instanceof AnalysisCallbackRequest.ScoreBreakdown x?x:MAPPER.convertValue(r.score(),AnalysisCallbackRequest.ScoreBreakdown.class); var score=s==null?new Score(0,0,0,0,0,0):new Score(s.skills(),s.projectExperience(),s.workContent(),s.educationExperience(),s.softSkills(),s.composite());
    var req=r.requirements().stream().map(x->{var q=x instanceof AnalysisCallbackRequest.RequirementMatch y?y:MAPPER.convertValue(x,AnalysisCallbackRequest.RequirementMatch.class); var ev=q.evidence().stream().map(e->{var meta=metadata.get(e.evidenceId()); return new Evidence(e.evidenceId(),meta==null?"UNKNOWN":meta.getSourceType(),meta==null?"unknown":meta.getSourceLocation(),e.sourceStart(),e.sourceEnd(),e.excerpt(),e.confidence(),q.evidenceStrength());}).toList(); return new Requirement(q.requirementId(),q.jobRequirementText(),q.requirementType(),q.matchStatus(),q.matchType(),q.component(),q.componentScore(),ev,q.gap(),q.suggestionState());}).toList();

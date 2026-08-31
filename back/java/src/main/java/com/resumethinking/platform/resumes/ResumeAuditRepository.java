@@ -4,16 +4,16 @@ import java.time.Instant; import java.util.*;
 
 public interface ResumeAuditRepository {
     void save(ResumeLifecycleAudit audit);
-    void backfillNullActorForLifecycleAudit(UUID resumeId, UUID actorId, String action,
+    void backfillNullActorForLifecycleAudit(String resumeId, String actorId, String action,
                                             VisibilityState priorVisibilityState,
                                             VisibilityState newVisibilityState);
-    record ResumeLifecycleAudit(UUID resumeId, UUID actorId, String action,
+    record ResumeLifecycleAudit(String resumeId, String actorId, String action,
                                 VisibilityState priorVisibilityState, VisibilityState newVisibilityState,
                                 Instant occurredAt, UUID correlationId) {}
     class InMemory implements ResumeAuditRepository {
         private final List<ResumeLifecycleAudit> values=new ArrayList<>();
         public void save(ResumeLifecycleAudit a){values.add(a);}
-        public void backfillNullActorForLifecycleAudit(UUID resumeId, UUID actorId, String action,
+        public void backfillNullActorForLifecycleAudit(String resumeId, String actorId, String action,
                                                        VisibilityState priorVisibilityState,
                                                        VisibilityState newVisibilityState){
             for(int i=0;i<values.size();i++){

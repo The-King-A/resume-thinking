@@ -8,25 +8,29 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.data.domain.*;
+import com.resumethinking.platform.ids.*;
 import java.time.*;
 import java.util.*;
 
 @Service
 public class ResumeLifecycleService {
     public static final String CONFIRMATION = "确认删除简历";
-    private final ResumeRepository repository; private final ResumeCache cache; private final ResumeAuditRepository audit; private final Clock clock;
+    private final ResumeRepository repository; private final ResumeCache cache; private final ResumeAuditRepository audit; private final Clock clock; private final ReadableIdGenerator ids;
     private final ResumeTaskBlocker taskBlocker;
     @Autowired
     public ResumeLifecycleService(ResumeRepository repository, ResumeCache cache, ResumeAuditRepository audit, Clock clock,
-                                  ResumeTaskBlocker taskBlocker){
+                                  ResumeTaskBlocker taskBlocker, ReadableIdGenerator ids){
         this.repository=repository;this.cache=cache;this.audit=audit;this.clock=clock;
-        this.taskBlocker=taskBlocker == null ? ResumeTaskBlocker.NOOP : taskBlocker;
+        this.taskBlocker=taskBlocker == null ? ResumeTaskBlocker.NOOP : taskBlocker; this.ids=ids;
     }
     public ResumeLifecycleService(ResumeRepository repository, ResumeCache cache, ResumeAuditRepository audit, Clock clock){
-        this(repository,cache,audit,clock,ResumeTaskBlocker.NOOP);
+        this(repository,cache,audit,clock,ResumeTaskBlocker.NOOP,new InMemoryReadableIdGenerator());
+    }
+    public ResumeLifecycleService(ResumeRepository repository, ResumeCache cache, ResumeAuditRepository audit, Clock clock, ResumeTaskBlocker taskBlocker){
+        this(repository,cache,audit,clock,taskBlocker,new InMemoryReadableIdGenerator());
     }
     public ResumeLifecycleService(ResumeRepository repository, ResumeCache cache, ResumeAuditRepository audit){
-        this(repository,cache,audit,Clock.systemUTC(),ResumeTaskBlocker.NOOP);
+        this(repository,cache,audit,Clock.systemUTC(),ResumeTaskBlocker.NOOP,new InMemoryReadableIdGenerator());
     }
 
     @Transactional(noRollbackFor = ResourceNotFoundException.class)
@@ -80,7 +84,7 @@ public class ResumeLifecycleService {
     }
 
     @Transactional
-    public ResumeView recover(UUID resumeId, UUID actorId, UserRole role, long expectedVersion) {
+    public ResumeView recover(String resumeId, String actorId, UserRole role, long expectedVersion) {
         // Recovery competes with soft-delete, archive, and callback updates.
         // Read and authorize the row under the same pessimistic lock used by
         // those writers so a stale state cannot be restored around them.
@@ -130,21 +134,21 @@ public class ResumeLifecycleService {
         } while (due.hasContent());
         return count;
     }
-    public Page<Resume> listActive(UUID actorId, UserRole role, Pageable pageable){
+    public Page<Resume> listActive(String actorId, UserRole role, Pageable pageable){
         Instant at = clock.instant();
         return role==UserRole.ADMIN
                 ? repository.findByVisibilityStateInAndVisibleUntilAfter(List.of(VisibilityState.ACTIVE),at,pageable)
                 : repository.findByOwnerIdAndVisibilityStateAndVisibleUntilAfter(actorId,VisibilityState.ACTIVE,at,pageable);
     }
-    public Resume getActive(UUID id, UUID actorId, UserRole role){
+    public Resume getActive(String id, String actorId, UserRole role){
         Instant at = clock.instant();
         return repository.findById(id).filter(r -> r.getVisibilityState()==VisibilityState.ACTIVE
                 && r.getVisibleUntil()!=null && r.getVisibleUntil().isAfter(at)
                 && (role==UserRole.ADMIN || r.getOwnerId().equals(actorId))).orElseThrow(ResourceNotFoundException::new);
     }
     @Transactional
-    public Resume upload(UUID ownerId, UserRole role, String title, Resume.SourceType sourceType, byte[] ciphertext, byte[] nonce) { if (ciphertext == null || ciphertext.length == 0 || nonce == null || nonce.length != 12) throw new IllegalArgumentException("VALIDATION_ERROR"); Resume r = new Resume(ownerId, title, sourceType, role, ciphertext, nonce, clock.instant(), "v1"); repository.save(r); cacheAfterCommit(() -> cache.put(r)); return r; }
-    public Page<Resume> listRecoverable(UUID actorId, UserRole role, UUID ownerId, Pageable pageable){
+    public Resume upload(String ownerId, UserRole role, String title, Resume.SourceType sourceType, byte[] ciphertext, byte[] nonce) { if (ciphertext == null || ciphertext.length == 0 || nonce == null || nonce.length != 12) throw new IllegalArgumentException("VALIDATION_ERROR"); Resume r = new Resume(ids.next(BusinessIdType.RESUME), ownerId, title, sourceType, role, ciphertext, nonce, clock.instant(), "v1"); repository.save(r); cacheAfterCommit(() -> cache.put(r)); return r; }
+    public Page<Resume> listRecoverable(String actorId, UserRole role, String ownerId, Pageable pageable){
         var states=List.of(VisibilityState.USER_SOFT_DELETED,VisibilityState.ADMIN_SOFT_DELETED,VisibilityState.USER_CACHE_ARCHIVED,VisibilityState.ADMIN_CACHE_ARCHIVED);
         if (role==UserRole.USER) return repository.findByOwnerIdAndVisibilityStateIn(actorId,List.of(VisibilityState.USER_SOFT_DELETED,VisibilityState.USER_CACHE_ARCHIVED),pageable);
         return ownerId==null ? repository.findByVisibilityStateIn(states,pageable) : repository.findByOwnerIdAndVisibilityStateIn(ownerId,states,pageable);
@@ -156,7 +160,7 @@ public class ResumeLifecycleService {
      * delete/archive transaction has scanned pending work.
      */
     @Transactional
-    public ResumeAnalysisReservation reserveForAnalysis(UUID resumeId, UUID actorId, UserRole role){
+    public ResumeAnalysisReservation reserveForAnalysis(String resumeId, String actorId, UserRole role){
         Instant at = clock.instant();
         Resume resume = repository.findByIdForUpdate(resumeId)
                 .filter(r -> (role == UserRole.ADMIN || r.getOwnerId().equals(actorId))
@@ -167,19 +171,19 @@ public class ResumeLifecycleService {
         return new ResumeAnalysisReservation(resume.getId(),resume.getVersion(),resume.getSourceType());
     }
     @Transactional(readOnly=true)
-    public boolean isActiveAtVersion(UUID resumeId,long version){
+    public boolean isActiveAtVersion(String resumeId,long version){
         Instant at = clock.instant();
         return repository.findById(resumeId).map(r -> r.getVisibilityState()==VisibilityState.ACTIVE
                 && r.getVisibleUntil()!=null && r.getVisibleUntil().isAfter(at) && r.getVersion()==version).orElse(false);
     }
     @Transactional
-    public Optional<Resume> lockActiveAtVersion(UUID resumeId,long version){
+    public Optional<Resume> lockActiveAtVersion(String resumeId,long version){
         Instant at = clock.instant();
         return repository.findByIdForUpdate(resumeId).filter(r -> r.getVisibilityState()==VisibilityState.ACTIVE
                 && r.getVisibleUntil()!=null && r.getVisibleUntil().isAfter(at) && r.getVersion()==version);
     }
     @Transactional(readOnly=true)
-    public Optional<Resume> findActiveForAnalysis(UUID resumeId,long version){
+    public Optional<Resume> findActiveForAnalysis(String resumeId,long version){
         Instant at = clock.instant();
         return repository.findById(resumeId).filter(r -> r.getVisibilityState()==VisibilityState.ACTIVE
                 && r.getVisibleUntil()!=null && r.getVisibleUntil().isAfter(at) && r.getVersion()==version);
@@ -204,6 +208,6 @@ public class ResumeLifecycleService {
     private void runCacheMutation(Runnable mutation) {
         try { mutation.run(); } catch (RuntimeException ignored) { /* cache is non-authoritative */ }
     }
-    private ResumeAuditRepository.ResumeLifecycleAudit newAudit(UUID resumeId,UUID actorId,String action,VisibilityState prior,VisibilityState next,Instant at){return new ResumeAuditRepository.ResumeLifecycleAudit(resumeId,actorId,action,prior,next,at,UUID.randomUUID());}
+    private ResumeAuditRepository.ResumeLifecycleAudit newAudit(String resumeId,String actorId,String action,VisibilityState prior,VisibilityState next,Instant at){return new ResumeAuditRepository.ResumeLifecycleAudit(resumeId,actorId,action,prior,next,at,UUID.randomUUID());}
     private void requireVersion(Resume resume,long expected){if(resume.getVersion()!=expected) throw new VersionConflictException();}
 }

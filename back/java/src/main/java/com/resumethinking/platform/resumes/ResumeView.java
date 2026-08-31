@@ -1,9 +1,8 @@
 package com.resumethinking.platform.resumes;
 
 import java.time.Instant;
-import java.util.UUID;
 
-public record ResumeView(UUID id, UUID ownerId, String title, Resume.SourceType sourceType, int status,
+public record ResumeView(String id, String ownerId, String title, Resume.SourceType sourceType, int status,
                          VisibilityState visibilityState, long version, Instant visibleUntil,
                          Instant softDeletedAt, Instant archivedAt, Instant restoredAt,
                          Instant createdAt, Instant updatedAt) {

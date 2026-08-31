@@ -1,6 +1,5 @@
 package com.resumethinking.platform.resumes;
 
-import java.util.UUID;
 
 /**
  * Coordinates the resume lifecycle with in-flight analysis work.
@@ -14,5 +13,5 @@ import java.util.UUID;
 public interface ResumeTaskBlocker {
     ResumeTaskBlocker NOOP = resumeId -> { };
 
-    void blockPendingTasks(UUID resumeId);
+    void blockPendingTasks(String resumeId);
 }

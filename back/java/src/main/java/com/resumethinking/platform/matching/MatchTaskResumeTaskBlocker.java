@@ -4,7 +4,6 @@ import com.resumethinking.platform.resumes.ResumeTaskBlocker;
 import org.springframework.stereotype.Component;
 
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * Blocks work which can no longer publish a result for a hidden resume.
@@ -23,7 +22,7 @@ public final class MatchTaskResumeTaskBlocker implements ResumeTaskBlocker {
     }
 
     @Override
-    public void blockPendingTasks(UUID resumeId) {
+    public void blockPendingTasks(String resumeId) {
         if (resumeId == null) return;
         for (MatchTask task : tasks.findByResumeIdAndStateInForUpdate(resumeId, IN_FLIGHT)) {
             // The locked query filters this already; retain the guard so an

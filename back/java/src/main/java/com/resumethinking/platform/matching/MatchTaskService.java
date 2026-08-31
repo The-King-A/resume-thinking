@@ -4,6 +4,7 @@ import com.resumethinking.platform.auth.UserRole;
 import com.resumethinking.platform.crypto.AesGcmCryptoService;
 import com.resumethinking.platform.profiles.*;
 import com.resumethinking.platform.resumes.*;
+import com.resumethinking.platform.ids.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,6 +43,7 @@ public class MatchTaskService {
     private final AesGcmCryptoService crypto;
     private final DispatchFailureRecorder dispatchFailures;
     private final PlatformTransactionManager transactionManager;
+    private final ReadableIdGenerator ids;
     public MatchTaskService(ResumeLifecycleService lifecycle, LlmProfileService profiles, MatchTaskRepository tasks, PythonAnalysisClient python) {
         this(lifecycle, profiles, tasks, python, new AnalysisResultRepository.InMemory(), new CallbackReceiptRepository.InMemory(), new AnalysisEvidenceRepository.InMemory(), null, null, null);
     }
@@ -60,9 +62,12 @@ public class MatchTaskService {
     public MatchTaskService(ResumeLifecycleService lifecycle, LlmProfileService profiles, MatchTaskRepository tasks, PythonAnalysisClient python, AnalysisResultRepository results, CallbackReceiptRepository receipts, AnalysisEvidenceRepository evidenceRepository, AesGcmCryptoService crypto, DispatchFailureRecorder dispatchFailures) {
         this(lifecycle, profiles, tasks, python, results, receipts, evidenceRepository, crypto, dispatchFailures, null);
     }
-    @Autowired
     public MatchTaskService(ResumeLifecycleService lifecycle, LlmProfileService profiles, MatchTaskRepository tasks, PythonAnalysisClient python, AnalysisResultRepository results, CallbackReceiptRepository receipts, AnalysisEvidenceRepository evidenceRepository, AesGcmCryptoService crypto, DispatchFailureRecorder dispatchFailures, PlatformTransactionManager transactionManager) {
-        this.lifecycle = lifecycle; this.profiles = profiles; this.tasks = tasks; this.python = python; this.results = results; this.receipts = receipts; this.evidenceRepository = evidenceRepository; this.crypto = crypto; this.dispatchFailures = dispatchFailures; this.transactionManager = transactionManager;
+        this(lifecycle, profiles, tasks, python, results, receipts, evidenceRepository, crypto, dispatchFailures, transactionManager, new InMemoryReadableIdGenerator());
+    }
+    @Autowired
+    public MatchTaskService(ResumeLifecycleService lifecycle, LlmProfileService profiles, MatchTaskRepository tasks, PythonAnalysisClient python, AnalysisResultRepository results, CallbackReceiptRepository receipts, AnalysisEvidenceRepository evidenceRepository, AesGcmCryptoService crypto, DispatchFailureRecorder dispatchFailures, PlatformTransactionManager transactionManager, ReadableIdGenerator ids) {
+        this.lifecycle = lifecycle; this.profiles = profiles; this.tasks = tasks; this.python = python; this.results = results; this.receipts = receipts; this.evidenceRepository = evidenceRepository; this.crypto = crypto; this.dispatchFailures = dispatchFailures; this.transactionManager = transactionManager; this.ids = ids;
     }
 
     /**
@@ -103,8 +108,8 @@ public class MatchTaskService {
         }
         documentBytes = normalizeDocumentBytes(reservation.sourceType(), documentBytes);
         List<EvidenceSpec> evidenceSpecs = evidenceSpecs(reservation.sourceType(), documentBytes);
-        Set<UUID> evidenceIds = evidenceSpecs.stream().map(EvidenceSpec::id).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        MatchTask task = new MatchTask(UUID.randomUUID(), reservation.resumeId(), command.llmProfileId(), command.actorId(), reservation.resumeVersion(),
+        Set<String> evidenceIds = evidenceSpecs.stream().map(EvidenceSpec::id).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        MatchTask task = new MatchTask(ids.next(BusinessIdType.TASK), reservation.resumeId(), command.llmProfileId(), command.actorId(), reservation.resumeVersion(),
                 command.jobFamily(), command.jobDescriptionText(), command.idempotencyKey(), callbackToken, evidenceIds, Instant.now());
         tasks.saveAndFlush(task);
         evidenceSpecs.forEach(e -> evidenceRepository.save(new AnalysisEvidence(e.id(), task.getId(), reservation.sourceType().name(), e.location(), e.start(), e.end(), e.excerpt())));
@@ -146,20 +151,20 @@ public class MatchTaskService {
     }
 
     @Transactional(readOnly = true)
-    public MatchTask getTask(UUID taskId, UUID actorId, UserRole role) {
+    public MatchTask getTask(String taskId, String actorId, UserRole role) {
         MatchTask task = tasks.findById(taskId).filter(t -> role == UserRole.ADMIN || t.getCreatorId().equals(actorId)).orElseThrow(ResourceNotFoundException::new);
         if (task.getState() == MatchTask.State.BLOCKED) throw new TaskGoneException();
         if (!lifecycle.isActiveAtVersion(task.getResumeId(), task.getResumeVersion())) throw new TaskGoneException();
         return task;
     }
     @Transactional(readOnly = true)
-    public AnalysisResult getResult(UUID taskId, UUID actorId, UserRole role) {
+    public AnalysisResult getResult(String taskId, String actorId, UserRole role) {
         MatchTask task = getTask(taskId, actorId, role);
         if (!task.isResultAvailable()) throw new TaskNotReadyException();
         AnalysisResult result = results.findByTaskId(taskId).orElseThrow(TaskNotReadyException::new);
         return result;
     }
-    List<AnalysisEvidence> evidenceForTask(UUID taskId) { return evidenceRepository.findByTaskId(taskId); }
+    List<AnalysisEvidence> evidenceForTask(String taskId) { return evidenceRepository.findByTaskId(taskId); }
 
     /**
      * Validate and persist a callback in an isolated transaction.  The receipt
@@ -353,7 +358,7 @@ public class MatchTaskService {
                 .setScale(4, java.math.RoundingMode.HALF_UP);
         double expected = expectedDecimal.doubleValue();
         if (Double.compare(expected, result.score().composite()) != 0) throw new EvidenceReferenceException();
-        Set<UUID> requirementIds = new HashSet<>();
+        Set<String> requirementIds = new HashSet<>();
         for (var requirement : result.requirements()) {
             if (requirement == null || requirement.requirementId() == null || !safeText(requirement.jobRequirementText(), 20_000) || !Set.of("MANDATORY", "PREFERRED").contains(requirement.requirementType()) || !Set.of("SATISFIED", "PARTIALLY_SATISFIED", "RELATED_BUT_EVIDENCE_INSUFFICIENT", "UNMET").contains(requirement.matchStatus()) || !Set.of("EXACT", "SEMANTIC", "RELATED", "NO_MATCH").contains(requirement.matchType()) || !Set.of("SKILLS", "PROJECT_EXPERIENCE", "WORK_CONTENT", "EDUCATION_EXPERIENCE", "SOFT_SKILLS").contains(requirement.component()) || requirement.evidence() == null || !Set.of("NONE", "LOW", "MEDIUM", "HIGH").contains(requirement.evidenceStrength()) || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(requirement.suggestionState()) || !finiteBetween(requirement.componentScore()) || (requirement.gap() != null && (requirement.gap().length() > 5_000 || !ResumeTextRedactor.isRedacted(requirement.gap())))) throw new EvidenceReferenceException();
             if (("SATISFIED".equals(requirement.matchStatus()) || "PARTIALLY_SATISFIED".equals(requirement.matchStatus())) && requirement.evidence().isEmpty()) throw new EvidenceReferenceException();
@@ -403,8 +408,8 @@ public class MatchTaskService {
         ReceiptRaceException(DataIntegrityViolationException cause) { super(cause); }
     }
 
-    private record EvidenceSpec(UUID id, String location, int start, int end, String excerpt) {}
-    private static List<EvidenceSpec> evidenceSpecs(Resume.SourceType type, byte[] bytes) {
+    private record EvidenceSpec(String id, String location, int start, int end, String excerpt) {}
+    private List<EvidenceSpec> evidenceSpecs(Resume.SourceType type, byte[] bytes) {
         String text; List<EvidenceSpec> out = new ArrayList<>();
         if (type == Resume.SourceType.TXT) {
             text = new String(bytes, StandardCharsets.UTF_8).replace("\r\n", "\n").replace('\r', '\n');
@@ -413,14 +418,14 @@ public class MatchTaskService {
                 int end=offset+lines[i].codePointCount(0, lines[i].length());
                 // Python rejects empty ranges; retain offsets across blank
                 // lines but only expose non-empty evidence slices.
-                if (end > offset) out.add(new EvidenceSpec(UUID.randomUUID(),"txt:"+i,offset,end,ResumeTextRedactor.redactedSlice(text, offset, end)));
+                if (end > offset) out.add(new EvidenceSpec(ids.next(BusinessIdType.EVIDENCE),"txt:"+i,offset,end,ResumeTextRedactor.redactedSlice(text, offset, end)));
                 offset=end+1;
             }
         } else {
             List<String> paragraphs = docxParagraphs(bytes); text = String.join("\n", paragraphs); int offset=0;
             for(int i=0;i<paragraphs.size();i++) {
                 int end=offset+paragraphs.get(i).codePointCount(0, paragraphs.get(i).length());
-                if (end > offset) out.add(new EvidenceSpec(UUID.randomUUID(),"paragraph:"+i,offset,end,ResumeTextRedactor.redactedSlice(text, offset, end)));
+                if (end > offset) out.add(new EvidenceSpec(ids.next(BusinessIdType.EVIDENCE),"paragraph:"+i,offset,end,ResumeTextRedactor.redactedSlice(text, offset, end)));
                 offset=end+1;
             }
         }
