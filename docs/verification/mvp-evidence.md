@@ -8,14 +8,17 @@
 
 ## 契约与范围
 
-- `contracts/openapi/v1/openapi.yaml` 以及 `contracts/internal/v1/` 下的 JSON 模式
-  是版本化的接口权威来源。
+- `contracts/openapi/v2/openapi.yaml` 以及 `contracts/internal/v2/` 下的 JSON 模式
+  是当前运行时的接口权威来源；历史契约快照仅用于迁移对照，不参与服务路由。
+- 公共 API 统一使用 `/api/v2`，Java 到 Python 的任务和回调统一使用 `/internal/v2`。
+- 用户、简历、任务、配置、证据、要求、结果和回调等业务主键使用带前缀的可读编号，
+  例如 `user001`、`resume001`、`task001`、`evidence001`；`correlationId` 仅作为链路追踪值。
 - 发布的岗位族目前仅为 Java 后端开发。保留 `role` 字段，以便后续添加更多岗位族。
 - Java/Spring Boot 是唯一的公共业务、授权、持久化和任务状态权威。Python/FastAPI 负责
   提取、脱敏、受控模型调用和回调投递。Vue 是操作客户端。
 - 本地目标运行环境为 JDK 21、Maven/Spring Boot 3、Python 3.11、Vue 3、MySQL 8.4 和
   Redis 7。
-- MVP 边界：Redis 当前只保存派生的 `resume:view:{resumeId}` 页面缓存。任务进度、幂等
+- MVP 边界：Redis 当前只保存派生的 `resume:v2:view:<resumeId>` 页面缓存。任务进度、幂等
   数据、回调凭据和匹配结果均由 MySQL 权威保存；Redis 任务状态只是文档记录的未来优化，
   当前尚未实现。
 
@@ -58,7 +61,7 @@
 
 | 检查 | 结果 | 证据边界 |
 | --- | --- | --- |
-| `pnpm --dir contracts run lint` | 通过 | OpenAPI v1 语法和代码检查规则 |
+| `pnpm --dir contracts run lint` | 通过 | OpenAPI v2 语法和代码检查规则（同时保留历史快照检查） |
 | `pnpm --dir contracts run validate` | 通过 | 13 个有效示例，加上预期无效的匹配示例 |
 | `E:\maven\...\mvn.cmd clean test`（在 `back/java` 中） | 通过，100 项测试 | Java 单元测试和 HTTP 边界测试；未连接真实 DB/Redis |
 | Python 3.11 `pytest back/python/tests tests/integration -q` | 通过，67 项测试 | 脱敏、解析、回调规则、示例和离线流程断言 |
@@ -97,7 +100,7 @@
 | `USER_CACHE_ARCHIVED` | 1，`status=0` |
 | `ADMIN_SOFT_DELETED` | 1，`status=1` |
 | `ADMIN_CACHE_ARCHIVED` | 1，`status=0` |
-| Redis `resume:view:*` 键数 | 2 |
+| Redis `resume:v2:view:*` 键数 | 2 |
 | Java 健康端点 | `UP` |
 | Python 健康端点 | `ok` |
 
@@ -110,12 +113,18 @@
 并仅为一个隐藏演示记录写入短暂的陈旧缓存键，再以 `local` profile 重启 Java 并触发幂等种子。
 校验确认用户、简历和审计计数仍分别为 2、6 和 4；五种既有可见性/状态组合保持不变；两条缓存
 归档审计的 actor 仍为 null，两条软删除审计的 actor 均已设置；Redis 恰有两个
-`resume:view:*` 键，且均属于 `ACTIVE` 记录。该校验未读取或输出任何账号、简历、加密内容或
+`resume:v2:view:*` 键，且均属于 `ACTIVE` 记录。该校验未读取或输出任何账号、简历、加密内容或
 缓存值；外部模型、任务派发和回调行为仍未验证。
 
 该运行证明缓存仅保留两个 `ACTIVE` 页面视图；软删除和缓存归档均保留 MySQL 中的加密记录及
 审计，不构成物理删除。外部模型集成没有被调用或验证，也没有声称真实模型质量、延迟、成本、
 安全性或可用性。
+
+## 数据库字段备注补充（V7）
+
+在本报告创建后，已新增 `V7__column_comments_zh.sql`，为 8 张业务表的全部字段补齐中文
+`COMMENT`；`database/resume_thinking_schema.sql` 也已同步更新。该迁移只修改字段备注，不改
+变现有数据、索引、约束或加密逻辑。`ResumeSchemaTest` 已增加覆盖并通过。
 
 ## 残余风险与后续工作
 

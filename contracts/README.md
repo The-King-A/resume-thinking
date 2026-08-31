@@ -1,6 +1,7 @@
-# 简历匹配契约 v1 / v2
+# 简历匹配契约 v2
 
-`v1` 是保留的历史快照；运行时权威契约为 `v2`。v2 公共路径使用 `/api/v2`，内部任务和回调使用 `/internal/v2`。
+运行时权威契约为 `v2`。公共路径使用 `/api/v2`，内部任务和回调使用 `/internal/v2`。
+旧版本目录和示例仅作为迁移对照，不参与运行时路由或校验。
 
 ## v2 标识与迁移
 
@@ -15,7 +16,7 @@ Java 在派发 v2 `analysis-job` 前生成必填 `callbackId`；Python 必须在
 迁移后签发的 JWT `sub` 使用 `userNNN`。迁移前签发的 UUID JWT 不再解析；客户端收到 401 后
 清理本地会话并要求重新登录。
 
-## v1 历史契约
+## 契约背景
 
 本目录是首个 Java 后端岗位匹配切片的接口依据。产品需求仍记录在
 `ai-resume-job-matching-project.md.docx`；批准的本地设计位于
@@ -27,14 +28,14 @@ Java 在派发 v2 `analysis-job` 前生成必填 `callbackId`；Python 必须在
 
 | 制品 | 作用 |
 | --- | --- |
-| `openapi/v1/openapi.yaml` | 公共 Java API，包括面向用户的请求、响应、错误和授权约定。 |
-| `internal/v1/analysis-job.schema.json` | Java 到 Python 的短时分析派发。 |
-| `internal/v1/analysis-callback.schema.json` | Python 到 Java 的回调，由 Java 校验并持久化。 |
-| `fixtures/v1/` | 任务 2 添加的共享有效、无效、重复、过期、删除和归档示例。 |
+| `openapi/v2/openapi.yaml` | 公共 Java API，包括面向用户的请求、响应、错误和授权约定。 |
+| `internal/v2/analysis-job.schema.json` | Java 到 Python 的短时分析派发。 |
+| `internal/v2/analysis-callback.schema.json` | Python 到 Java 的回调，由 Java 校验并持久化。 |
+| `fixtures/v2/` | 共享有效、无效、重复、过期、删除和归档示例。 |
 
-公共 API 与内部模式独立版本化，但本切片均保持在 `v1`。新增可选字段属于兼容变更。
+公共 API 与内部模式独立版本化，当前发布切片使用 `v2`。新增可选字段属于兼容变更。
 删除字段，或改变字段类型、含义、必填性、枚举值语义或授权行为，都必须创建新的版本化
-制品并补充代表性的兼容示例。`v1` 之前没有旧版使用方，因此暂时不需要旧版示例。
+制品并补充代表性的兼容示例。历史版本制品继续保留，但不得被新代码引用。
 
 ## 所有权与信任边界
 
@@ -101,8 +102,8 @@ Java 向它发送带临时回调令牌的窄范围内部任务。Python 在调�
 | `USER_CACHE_ARCHIVED` | 所有者恢复 | `ACTIVE` | 同一所有者，使用当前 `version`。 |
 | 任意符合条件的软删除/归档状态 | 管理员恢复 | `ACTIVE` | `ADMIN`，使用当前 `version`。 |
 
-调度器使用持久化的 MySQL `visible_until`，迁移符合条件的活动记录，删除相关 Redis
-键，并记录审计事件。它不会物理删除 MySQL 记录。普通活动列表/读取路由不会从
+调度器使用持久化的 MySQL `visible_until`，迁移符合条件的活动记录，删除对应的
+`resume:v2:view:<resumeId>` Redis 键，并记录审计事件。它不会物理删除 MySQL 记录。普通活动列表/读取路由不会从
 MySQL 重新加载已归档数据。恢复是显式的、带索引的、按所有者或管理员范围查询。物理
 数据库删除没有公共 API，只能由数据库管理员通过 MySQL 直接操作流程执行。
 
@@ -198,7 +199,7 @@ Python 只对传输失败和 Java 5xx 响应重试，并保留原始 `callbackId
 | `MODEL_UNAVAILABLE` | 模型服务/网络超时或不可用。 | 是 |
 | `MODEL_OUTPUT_INVALID` | 模型服务返回了无效或无法解析的结构化输出。 | 否 |
 | `MODEL_ENDPOINT_REJECTED` | 配置的接口地址违反接口安全策略。 | 否 |
-| `UNSUPPORTED_FILE` | 文件不是 TXT 或 DOCX；PDF 在 v1 中明确不支持。 | 否 |
+| `UNSUPPORTED_FILE` | 文件不是 TXT 或 DOCX；PDF 在当前 v2 切片中明确不支持。 | 否 |
 | `PAYLOAD_TOO_LARGE` | 上传内容超过配置策略。 | 否 |
 | `TASK_NOT_READY` | 任务尚未产生结果。 | 延迟轮询后可以 |
 

@@ -231,7 +231,7 @@ try {
             # process; production profiles retain the secure default.
             [Environment]::SetEnvironmentVariable('APP_ALLOW_LOCAL_MODEL_ENDPOINTS', 'true', 'Process')
             [Environment]::SetEnvironmentVariable('PYTHON_ANALYSIS_BASE_URL', $pythonBase, 'Process')
-            [Environment]::SetEnvironmentVariable('MATCHING_CALLBACK_URL', "$javaBase/internal/v1/analysis-results", 'Process')
+            [Environment]::SetEnvironmentVariable('MATCHING_CALLBACK_URL', "$javaBase/internal/v2/analysis-results", 'Process')
             $mvnw = Join-Path $javaRoot 'mvnw.cmd'
             if (-not (Test-Path -LiteralPath $mvnw -PathType Leaf)) { throw 'Maven Wrapper is missing' }
             $javaProcess = Start-Process -FilePath $mvnw -ArgumentList @('spring-boot:run', '-Dspring-boot.run.profiles=local') -WorkingDirectory $javaRoot -WindowStyle Hidden -PassThru
@@ -274,7 +274,7 @@ try {
         $output = & $pythonExe $assertionScript '--live' '--api-base' $javaBase '--python-base' $pythonBase 2>&1
         $flowExit = $LASTEXITCODE
         foreach ($line in $output) {
-            if ($line -is [string] -and $line -match '^\[flow\] (?:[A-Za-z0-9 _-]+)(?: id=[0-9a-fA-F-]{36})?(?: state=[A-Z_]+)?(?: status=[0-9]+)?(?: code=[A-Z_]+)?$') {
+            if ($line -is [string] -and $line -match '^\[flow\] (?:[A-Za-z0-9 _-]+)(?: id=(?:user|profile|resume|task|callback|requirement|evidence|result|suggestion|audit)[0-9]{3,})?(?: state=[A-Z_]+)?(?: status=[0-9]+)?(?: code=[A-Z_]+)?$') {
                 Write-Output $line
             }
         }

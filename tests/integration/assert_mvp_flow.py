@@ -13,12 +13,12 @@ from datetime import datetime, timedelta, timezone
 import json
 import math
 import os
+import re
 import secrets
 import socket
 import sys
 import threading
 import time
-import uuid
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -35,6 +35,18 @@ DOCX_PATH = FIXTURES / "student-resume.docx"
 PDF_PATH = FIXTURES / "invalid-resume.pdf"
 CONFIRMATION = "确认删除简历"
 TERMINAL_TASK_STATES = {"SUCCEEDED", "FAILED", "TIMED_OUT", "BLOCKED"}
+BUSINESS_ID_PREFIXES = {
+    "user",
+    "profile",
+    "resume",
+    "task",
+    "callback",
+    "requirement",
+    "evidence",
+    "result",
+    "suggestion",
+    "audit",
+}
 
 
 class FlowError(RuntimeError):
@@ -47,6 +59,15 @@ class FlowError(RuntimeError):
         detail = f" status={status}" if status else ""
         suffix = f" code={code}" if code else ""
         super().__init__(f"{operation}{detail}{suffix}")
+
+
+def _require_business_id(value: Any, prefix: str, field: str) -> str:
+    """Validate a v2 readable business identifier, separate from trace IDs."""
+    if prefix not in BUSINESS_ID_PREFIXES or not isinstance(value, str):
+        raise AssertionError(f"{field} is not a v2 business ID")
+    if re.fullmatch(rf"{re.escape(prefix)}[0-9]{{3,}}", value) is None:
+        raise AssertionError(f"{field} is not a v2 business ID")
+    return value
 
 
 def _require_httpx() -> Any:
@@ -132,7 +153,7 @@ class ApiClient:
     def register(self, username: str, email: str, password: str, role: str) -> dict[str, Any]:
         payload = self._request(
             "POST",
-            "/api/v1/auth/register",
+            "/api/v2/auth/register",
             {201},
             body={"username": username, "email": email, "password": password, "role": role},
         )
@@ -144,7 +165,7 @@ class ApiClient:
     def create_profile(self, endpoint: str, api_key: str) -> dict[str, Any]:
         payload = self._request(
             "POST",
-            "/api/v1/llm-profiles",
+            "/api/v2/llm-profiles",
             {201},
             body={
                 "displayName": "MVP loopback provider",
@@ -166,7 +187,7 @@ class ApiClient:
             media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         payload = self._request(
             "POST",
-            "/api/v1/resumes",
+            "/api/v2/resumes",
             {201},
             upload=(path.name, path.read_bytes(), media_type),
             title=title,
@@ -176,10 +197,10 @@ class ApiClient:
         return payload
 
     def list_resumes(self) -> dict[str, Any]:
-        return self._request("GET", "/api/v1/resumes", {200})
+        return self._request("GET", "/api/v2/resumes", {200})
 
     def delete_resume(self, resume_id: str, version: int, *, admin: bool = False) -> dict[str, Any]:
-        path = f"/api/v1/admin/recovery/resumes/{resume_id}" if admin else f"/api/v1/resumes/{resume_id}"
+        path = f"/api/v2/admin/recovery/resumes/{resume_id}" if admin else f"/api/v2/resumes/{resume_id}"
         payload = self._request(
             "DELETE",
             path,
@@ -191,14 +212,14 @@ class ApiClient:
         return payload
 
     def recovery(self, *, admin: bool = False) -> dict[str, Any]:
-        path = "/api/v1/admin/recovery/resumes" if admin else "/api/v1/recovery/resumes"
+        path = "/api/v2/admin/recovery/resumes" if admin else "/api/v2/recovery/resumes"
         return self._request("GET", path, {200})
 
     def restore(self, resume_id: str, version: int, *, admin: bool = False) -> dict[str, Any]:
         path = (
-            f"/api/v1/admin/recovery/resumes/{resume_id}/restore"
+            f"/api/v2/admin/recovery/resumes/{resume_id}/restore"
             if admin
-            else f"/api/v1/recovery/resumes/{resume_id}/restore"
+            else f"/api/v2/recovery/resumes/{resume_id}/restore"
         )
         payload = self._request("POST", path, {200}, body={"expectedVersion": version})
         if not isinstance(payload, dict):
@@ -208,14 +229,14 @@ class ApiClient:
     def create_task(self, resume_id: str, profile_id: str, job_text: str) -> dict[str, Any]:
         payload = self._request(
             "POST",
-            "/api/v1/match-tasks",
+            "/api/v2/match-tasks",
             {202},
             body={
                 "resumeId": resume_id,
                 "llmProfileId": profile_id,
                 "jobFamily": "JAVA_BACKEND",
                 "jobDescriptionText": job_text,
-                "idempotencyKey": f"mvp-{uuid.uuid4().hex}",
+                "idempotencyKey": f"mvp-{secrets.token_hex(16)}",
             },
         )
         if not isinstance(payload, dict) or not payload.get("id"):
@@ -223,13 +244,13 @@ class ApiClient:
         return payload
 
     def task(self, task_id: str) -> dict[str, Any]:
-        payload = self._request("GET", f"/api/v1/match-tasks/{task_id}", {200})
+        payload = self._request("GET", f"/api/v2/match-tasks/{task_id}", {200})
         if not isinstance(payload, dict):
             raise FlowError("get task", code="INVALID_RESPONSE")
         return payload
 
     def result(self, task_id: str) -> dict[str, Any]:
-        payload = self._request("GET", f"/api/v1/match-tasks/{task_id}/result", {200})
+        payload = self._request("GET", f"/api/v2/match-tasks/{task_id}/result", {200})
         if not isinstance(payload, dict):
             raise FlowError("get result", code="INVALID_RESPONSE")
         return payload
@@ -250,11 +271,8 @@ def _emit(event: str, *, identifier: str | None = None, state: str | None = None
 
 
 def _assert_result_evidence(result: dict[str, Any], *, source_text: str | None = None) -> None:
-    for field in ("taskId", "resumeId"):
-        try:
-            uuid.UUID(str(result[field]))
-        except (KeyError, TypeError, ValueError) as exc:
-            raise AssertionError(f"result {field} is not a UUID") from exc
+    _require_business_id(result.get("taskId"), "task", "result.taskId")
+    _require_business_id(result.get("resumeId"), "resume", "result.resumeId")
 
     def unit_number(value: Any, field: str) -> float:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
@@ -300,10 +318,7 @@ def _assert_result_evidence(result: dict[str, Any], *, source_text: str | None =
     for requirement in requirements:
         if not isinstance(requirement, dict) or not requirement.get("requirementText"):
             raise AssertionError("requirement text missing")
-        try:
-            requirement_id = str(uuid.UUID(str(requirement["requirementId"])))
-        except (KeyError, TypeError, ValueError) as exc:
-            raise AssertionError("requirement ID is not a UUID") from exc
+        requirement_id = _require_business_id(requirement.get("requirementId"), "requirement", "requirementId")
         if requirement_id in requirement_ids:
             raise AssertionError("duplicate requirement ID")
         requirement_ids.add(requirement_id)
@@ -318,15 +333,12 @@ def _assert_result_evidence(result: dict[str, Any], *, source_text: str | None =
             raise AssertionError("satisfied requirement has no evidence")
         for item in evidence:
             if not isinstance(item, dict) or set(item) - allowed_evidence_fields:
-                raise AssertionError("evidence fields are not v1")
+                raise AssertionError("evidence fields are not v2")
             if any(field not in item for field in required_evidence_fields):
                 raise AssertionError("evidence fields are incomplete")
             if not item.get("excerpt") or not item.get("sourceLocation"):
                 raise AssertionError("evidence excerpt missing")
-            try:
-                evidence_id = str(uuid.UUID(str(item["id"])))
-            except (KeyError, TypeError, ValueError) as exc:
-                raise AssertionError("evidence ID is not a UUID") from exc
+            evidence_id = _require_business_id(item.get("id"), "evidence", "evidence.id")
             evidence_ids.add(evidence_id)
             if item.get("sourceType") not in source_types or item.get("strength") not in strengths:
                 raise AssertionError("evidence enum is invalid")
@@ -358,21 +370,17 @@ def _assert_result_evidence(result: dict[str, Any], *, source_text: str | None =
     for suggestion in suggestions:
         if not isinstance(suggestion, dict) or suggestion.get("state") not in suggestion_states:
             raise AssertionError("suggestion state is invalid")
-        try:
-            uuid.UUID(str(suggestion["id"]))
-            suggestion_requirement = str(uuid.UUID(str(suggestion["requirementId"])))
-        except (KeyError, TypeError, ValueError) as exc:
-            raise AssertionError("suggestion IDs are invalid") from exc
+        _require_business_id(suggestion.get("id"), "suggestion", "suggestion.id")
+        suggestion_requirement = _require_business_id(
+            suggestion.get("requirementId"), "requirement", "suggestion.requirementId"
+        )
         if suggestion_requirement not in requirement_ids or not suggestion.get("proposedText"):
             raise AssertionError("suggestion references are invalid")
         refs = suggestion.get("evidenceIds")
         if not isinstance(refs, list):
             raise AssertionError("suggestion evidence references missing")
         for reference in refs:
-            try:
-                reference_id = str(uuid.UUID(str(reference)))
-            except (TypeError, ValueError) as exc:
-                raise AssertionError("suggestion evidence ID is invalid") from exc
+            reference_id = _require_business_id(reference, "evidence", "suggestion.evidenceIds")
             if reference_id not in evidence_ids:
                 raise AssertionError("suggestion references unknown evidence")
         if suggestion["state"] in {"SUPPORTED_FACT", "WORDING_ONLY_REWRITE"} and not refs:
@@ -386,6 +394,15 @@ def _assert_callback_race_fixtures(
     deleted: dict[str, Any],
     context: dict[str, Any],
 ) -> None:
+    _require_business_id(valid.get("taskId"), "task", "valid.taskId")
+    _require_business_id(valid.get("callbackId"), "callback", "valid.callbackId")
+    _require_business_id(stale.get("taskId"), "task", "stale.taskId")
+    _require_business_id(stale.get("callbackId"), "callback", "stale.callbackId")
+    _require_business_id(deleted.get("taskId"), "task", "deleted.taskId")
+    _require_business_id(deleted.get("callbackId"), "callback", "deleted.callbackId")
+    _require_business_id(context.get("task", {}).get("id"), "task", "context.task.id")
+    _require_business_id(context.get("resume", {}).get("id"), "resume", "context.resume.id")
+    _require_business_id(context.get("resume", {}).get("ownerId"), "user", "context.resume.ownerId")
     if duplicate != valid:
         raise AssertionError("duplicate callback fixture must replay the exact payload")
     if stale.get("taskId") != valid.get("taskId") or stale.get("attempt", 0) >= valid.get("attempt", 0):
@@ -480,19 +497,19 @@ def test_pdf_fixture_is_explicitly_unsupported() -> None:
 
 def test_match_result_binds_requirements_to_existing_evidence() -> None:
     synthetic = {
-        "taskId": str(uuid.uuid4()),
-        "resumeId": str(uuid.uuid4()),
+        "taskId": "task001",
+        "resumeId": "resume001",
         "score": {"skills": 0.8, "projectExperience": 0.7, "workContent": 0.6, "educationExperience": 0.5, "softSkills": 0.4, "composite": 0.675},
         "requirements": [
             {
-                "requirementId": str(uuid.uuid4()),
+                "requirementId": "requirement001",
                 "requirementText": "Java",
                 "requirementType": "MANDATORY",
                 "matchStatus": "SATISFIED",
                 "matchType": "EXACT",
                 "component": "SKILLS",
                 "componentScore": 0.8,
-                "evidence": [{"id": str(uuid.uuid4()), "sourceType": "TXT", "sourceLocation": "SUMMARY", "sourceStart": 0, "sourceEnd": 14, "excerpt": "Java developer", "confidence": 0.95, "strength": "HIGH"}],
+                "evidence": [{"id": "evidence001", "sourceType": "TXT", "sourceLocation": "SUMMARY", "sourceStart": 0, "sourceEnd": 14, "excerpt": "Java developer", "confidence": 0.95, "strength": "HIGH"}],
                 "gap": None,
                 "suggestionState": "NEEDS_USER_CONFIRMATION",
             }
@@ -506,19 +523,19 @@ def test_fixture_evidence_assertion_requires_exact_source_bounds() -> None:
     source = RESUME_PATH.read_text(encoding="utf-8")
     start = source.index("Java developer")
     synthetic = {
-        "taskId": str(uuid.uuid4()),
-        "resumeId": str(uuid.uuid4()),
+        "taskId": "task001",
+        "resumeId": "resume001",
         "score": {"skills": 0.8, "projectExperience": 0.7, "workContent": 0.6, "educationExperience": 0.5, "softSkills": 0.4, "composite": 0.675},
         "requirements": [
             {
-                "requirementId": str(uuid.uuid4()),
+                "requirementId": "requirement001",
                 "requirementText": "Java",
                 "requirementType": "MANDATORY",
                 "matchStatus": "SATISFIED",
                 "matchType": "EXACT",
                 "component": "SKILLS",
                 "componentScore": 0.8,
-                "evidence": [{"id": str(uuid.uuid4()), "sourceType": "TXT", "sourceLocation": "SUMMARY", "sourceStart": start, "sourceEnd": start + len("Java developer"), "excerpt": "Java developer", "confidence": 0.95, "strength": "HIGH"}],
+                "evidence": [{"id": "evidence001", "sourceType": "TXT", "sourceLocation": "SUMMARY", "sourceStart": start, "sourceEnd": start + len("Java developer"), "excerpt": "Java developer", "confidence": 0.95, "strength": "HIGH"}],
                 "gap": None,
                 "suggestionState": "NEEDS_USER_CONFIRMATION",
             }
@@ -529,11 +546,12 @@ def test_fixture_evidence_assertion_requires_exact_source_bounds() -> None:
 
 
 def test_callback_fixture_races_preserve_duplicate_and_stale_semantics() -> None:
-    valid = json.loads((Path(__file__).resolve().parents[2] / "contracts/fixtures/v1/callback-valid.json").read_text(encoding="utf-8"))
-    duplicate = json.loads((Path(__file__).resolve().parents[2] / "contracts/fixtures/v1/callback-duplicate.json").read_text(encoding="utf-8"))
-    stale = json.loads((Path(__file__).resolve().parents[2] / "contracts/fixtures/v1/callback-stale.json").read_text(encoding="utf-8"))
-    deleted = json.loads((Path(__file__).resolve().parents[2] / "contracts/fixtures/v1/callback-after-soft-delete.json").read_text(encoding="utf-8"))
-    context = json.loads((Path(__file__).resolve().parents[2] / "contracts/fixtures/v1/callback-after-soft-delete-context.json").read_text(encoding="utf-8"))
+    fixture_root = Path(__file__).resolve().parents[2] / "contracts/fixtures/v2"
+    valid = json.loads((fixture_root / "callback-valid.json").read_text(encoding="utf-8"))
+    duplicate = json.loads((fixture_root / "callback-duplicate.json").read_text(encoding="utf-8"))
+    stale = json.loads((fixture_root / "callback-stale.json").read_text(encoding="utf-8"))
+    deleted = json.loads((fixture_root / "callback-after-soft-delete.json").read_text(encoding="utf-8"))
+    context = json.loads((fixture_root / "callback-after-soft-delete-context.json").read_text(encoding="utf-8"))
     _assert_callback_race_fixtures(valid, duplicate, stale, deleted, context)
 
 
@@ -542,10 +560,10 @@ def test_retention_policy_is_explicit_for_user_and_admin() -> None:
     _assert_retention_window({"createdAt": "2026-08-27T00:00:00Z", "visibleUntil": "2026-09-26T00:00:00Z"}, 30)
 
 
-def test_evidence_rejects_legacy_source_offset_and_missing_v1_fields() -> None:
+def test_evidence_rejects_legacy_source_offset_and_incomplete_v2_fields() -> None:
     result = {
-        "taskId": str(uuid.uuid4()),
-        "resumeId": str(uuid.uuid4()),
+        "taskId": "task001",
+        "resumeId": "resume001",
         "score": {"skills": 0.8, "projectExperience": 0.7, "workContent": 0.6, "educationExperience": 0.5, "softSkills": 0.4, "composite": 0.675},
         "requirements": [{"requirementText": "Java", "evidence": [{"sourceOffset": 0, "excerpt": "Java developer"}]}],
     }
@@ -555,8 +573,8 @@ def test_evidence_rejects_legacy_source_offset_and_missing_v1_fields() -> None:
 
 def test_score_rejects_missing_or_non_finite_components() -> None:
     result = {
-        "taskId": str(uuid.uuid4()),
-        "resumeId": str(uuid.uuid4()),
+        "taskId": "task001",
+        "resumeId": "resume001",
         "score": {"skills": 0.8, "composite": 0.32},
         "requirements": [{"requirementText": "Java", "evidence": [{"sourceOffset": 0, "excerpt": "Java developer"}]}],
     }
@@ -564,14 +582,14 @@ def test_score_rejects_missing_or_non_finite_components() -> None:
         _assert_result_evidence(result)
 
 
-def test_v1_evidence_offsets_are_optional_when_both_are_absent() -> None:
-    evidence_id = str(uuid.uuid4())
+def test_v2_evidence_offsets_are_optional_when_both_are_absent() -> None:
+    evidence_id = "evidence001"
     result = {
-        "taskId": str(uuid.uuid4()),
-        "resumeId": str(uuid.uuid4()),
+        "taskId": "task001",
+        "resumeId": "resume001",
         "score": {"skills": 0.8, "projectExperience": 0.7, "workContent": 0.6, "educationExperience": 0.5, "softSkills": 0.4, "composite": 0.675},
         "requirements": [{
-            "requirementId": str(uuid.uuid4()), "requirementText": "Java", "requirementType": "MANDATORY",
+            "requirementId": "requirement001", "requirementText": "Java", "requirementType": "MANDATORY",
             "matchStatus": "SATISFIED", "matchType": "EXACT", "component": "SKILLS", "componentScore": 0.8,
             "evidence": [{"id": evidence_id, "sourceType": "TXT", "sourceLocation": "SUMMARY", "excerpt": "Java developer", "confidence": 0.95, "strength": "HIGH"}],
             "gap": None, "suggestionState": "NEEDS_USER_CONFIRMATION",
@@ -581,17 +599,17 @@ def test_v1_evidence_offsets_are_optional_when_both_are_absent() -> None:
     _assert_result_evidence(result)
 
 
-def test_v1_evidence_id_can_be_reused_across_requirements() -> None:
-    evidence_id = str(uuid.uuid4())
+def test_v2_evidence_id_can_be_reused_across_requirements() -> None:
+    evidence_id = "evidence001"
     def requirement(text: str) -> dict[str, Any]:
         return {
-            "requirementId": str(uuid.uuid4()), "requirementText": text, "requirementType": "MANDATORY",
+            "requirementId": "requirement001" if text == "Java" else "requirement002", "requirementText": text, "requirementType": "MANDATORY",
             "matchStatus": "SATISFIED", "matchType": "EXACT", "component": "SKILLS", "componentScore": 0.8,
             "evidence": [{"id": evidence_id, "sourceType": "TXT", "sourceLocation": "SUMMARY", "excerpt": "Java developer", "confidence": 0.95, "strength": "HIGH"}],
             "gap": None, "suggestionState": "NEEDS_USER_CONFIRMATION",
         }
     result = {
-        "taskId": str(uuid.uuid4()), "resumeId": str(uuid.uuid4()),
+        "taskId": "task001", "resumeId": "resume001",
         "score": {"skills": 0.8, "projectExperience": 0.7, "workContent": 0.6, "educationExperience": 0.5, "softSkills": 0.4, "composite": 0.675},
         "requirements": [requirement("Java"), requirement("Spring Boot")], "suggestions": [],
     }
@@ -627,7 +645,7 @@ class FakeOpenAIProvider:
                 self.wfile.write(body)
 
             def do_GET(self) -> None:  # noqa: N802
-                if self.path in {"/health", "/v1/models"}:
+                if self.path == "/health":
                     self._send(200, {"status": "ok", "data": []})
                 else:
                     self._send(404, {"status": "not-found"})
@@ -666,7 +684,7 @@ class FakeOpenAIProvider:
                     first = evidence[0]
                     requirements.append(
                         {
-                            "requirementId": str(uuid.uuid5(uuid.NAMESPACE_URL, "mvp-java-backend-requirement")),
+                            "requirementId": "requirement001",
                             "jobRequirementText": "Java backend development",
                             "requirementType": "MANDATORY",
                             "matchStatus": "SATISFIED",
@@ -860,7 +878,7 @@ def run_live_flow(api_base: str, python_base: str | None = None, timeout: float 
                 raise AssertionError("late result did not return TASK_GONE") from exc
         else:
             raise AssertionError("late result unexpectedly available")
-        _assert_redis_key_absent(f"resume:view:{late_id}")
+        _assert_redis_key_absent(f"resume:v2:view:{late_id}")
         _emit("late resume recovery", identifier=late_id, state=str(late_deleted.get("visibilityState", "UNKNOWN")))
 
         # Administrative deletion hides the record from the owner, including recovery.

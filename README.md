@@ -4,6 +4,11 @@
 分析服务和 Vue 网页应用。版本化 API 与内部消息契约位于
 [`contracts/`](contracts/README.md)，它们是各服务共同遵循的接口依据。
 
+当前运行时契约为 v2：公共 API 使用 `/api/v2`，Java 与 Python 的内部任务/回调使用
+`/internal/v2`。业务主键采用可读编号（例如 `user001`、`resume001`、`task001`）；Redis
+页面缓存使用 `resume:v2:view:<resumeId>` 命名空间。链路追踪值单独使用 `correlationId`，
+不会替代业务主键。
+
 各目录和关键文件的职责说明见 [`docs/项目文件说明.md`](docs/项目文件说明.md)。
 
 ## 本地配置
@@ -34,8 +39,8 @@ finally { Pop-Location }
 对于空数据库，选择以下其中一条路径，绝不要同时执行两条路径。
 
 1. **已有 V1-V7 数据库：** 备份并停止所有写入后，由 Flyway 执行
-   `V8__string_business_ids.sql`，将 UUID/数字业务 ID 确定性迁移为 v2 字符串 ID。
-   迁移包含隐式提交，失败时必须从备份恢复；迁移后旧 UUID JWT 预期失效，要求重新登录。
+   `V8__string_business_ids.sql`，将旧版 UUID/数字业务 ID 确定性迁移为 v2 可读字符串 ID。
+   迁移包含隐式提交，失败时必须从备份恢复；迁移后旧格式 JWT 预期失效，要求重新登录。
 2. **新库：** 仅对空数据库执行
    [`database/resume_thinking_schema.sql`](database/resume_thinking_schema.sql)，它直接创建 v2
    字符串列和 `id_sequences`。随后在 Java 服务首次启动前设置
