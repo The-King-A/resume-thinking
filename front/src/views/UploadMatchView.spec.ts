@@ -5,7 +5,7 @@ import UploadMatchView from './UploadMatchView.vue'
 
 const { lifecycleApi, profiles } = vi.hoisted(() => ({
   lifecycleApi: { uploadResume: vi.fn(), createMatchTask: vi.fn(), getMatchTask: vi.fn() },
-  profiles: { profiles: [{ id: 'profile-1', displayName: 'Default model', selected: true }, { id: 'profile-2', displayName: 'Alternate model', selected: false }], list: vi.fn().mockResolvedValue(undefined) },
+  profiles: { profiles: [{ id: 'profile001', displayName: 'Default model', selected: true }, { id: 'profile002', displayName: 'Alternate model', selected: false }], list: vi.fn().mockResolvedValue(undefined) },
 }))
 vi.mock('../api/lifecycle', () => ({ lifecycleApi }))
 vi.mock('../stores/llmProfiles', () => ({ useLlmProfileStore: () => profiles }))
@@ -31,8 +31,8 @@ describe('UploadMatchView', () => {
   })
 
   it('sends the uploaded resume, selected profile, Java job text, and an idempotency key', async () => {
-    lifecycleApi.uploadResume.mockResolvedValue({ id: 'resume-1' })
-    lifecycleApi.createMatchTask.mockResolvedValue({ id: 'task-1', state: 'QUEUED' })
+    lifecycleApi.uploadResume.mockResolvedValue({ id: 'resume001' })
+    lifecycleApi.createMatchTask.mockResolvedValue({ id: 'task001', state: 'QUEUED' })
     const wrapper = mount(UploadMatchView, { global: { stubs: { RouterLink: true } } })
     mountedWrappers.push(wrapper)
     await flushPromises()
@@ -46,7 +46,7 @@ describe('UploadMatchView', () => {
 
     expect(lifecycleApi.uploadResume).toHaveBeenCalledWith(file, undefined)
     expect(lifecycleApi.createMatchTask).toHaveBeenCalledWith(expect.objectContaining({
-      resumeId: 'resume-1', llmProfileId: 'profile-1', jobFamily: 'JAVA_BACKEND', jobDescriptionText: 'Java backend engineer with Spring Boot experience.',
+      resumeId: 'resume001', llmProfileId: 'profile001', jobFamily: 'JAVA_BACKEND', jobDescriptionText: 'Java backend engineer with Spring Boot experience.',
       idempotencyKey: expect.stringMatching(/^match-/),
     }))
     expect(wrapper.text()).toContain('排队中')
@@ -56,17 +56,17 @@ describe('UploadMatchView', () => {
     const wrapper = mount(UploadMatchView, { global: { stubs: { RouterLink: true } } })
     mountedWrappers.push(wrapper)
     await flushPromises()
-    expect(wrapper.get('select').element.value).toBe('profile-1')
+    expect(wrapper.get('select').element.value).toBe('profile001')
     expect(wrapper.text()).toContain('Alternate model')
-    await wrapper.get('select').setValue('profile-2')
-    expect((wrapper.get('select').element as HTMLSelectElement).value).toBe('profile-2')
+    await wrapper.get('select').setValue('profile002')
+    expect((wrapper.get('select').element as HTMLSelectElement).value).toBe('profile002')
   })
 
   it('shows a safe Chinese failure message without exposing the internal code', async () => {
     vi.useFakeTimers()
-    lifecycleApi.uploadResume.mockResolvedValue({ id: 'resume-1' })
-    lifecycleApi.createMatchTask.mockResolvedValue({ id: 'task-1', state: 'QUEUED' })
-    lifecycleApi.getMatchTask.mockResolvedValue({ id: 'task-1', state: 'FAILED', failureCode: 'MODEL_OUTPUT_INVALID' })
+    lifecycleApi.uploadResume.mockResolvedValue({ id: 'resume001' })
+    lifecycleApi.createMatchTask.mockResolvedValue({ id: 'task001', state: 'QUEUED' })
+    lifecycleApi.getMatchTask.mockResolvedValue({ id: 'task001', state: 'FAILED', failureCode: 'MODEL_OUTPUT_INVALID' })
     const wrapper = mount(UploadMatchView, { global: { stubs: { RouterLink: true } } })
     mountedWrappers.push(wrapper)
     await flushPromises()

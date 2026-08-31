@@ -8,7 +8,7 @@ describe('ModelProfileForm', () => {
     const wrapper = mount(ModelProfileForm, {
       props: {
         profile: {
-          id: '1', displayName: 'Saved', endpointUrl: 'https://api.example.com', modelName: 'gpt',
+          id: 'profile001', displayName: 'Saved', endpointUrl: 'https://api.example.com', modelName: 'gpt',
           hasApiKey: true, selected: false, createdAt: '', updatedAt: '',
         },
       },
@@ -17,7 +17,7 @@ describe('ModelProfileForm', () => {
   })
 
   it('omits an empty key when updating a saved profile', async () => {
-    const wrapper = mount(ModelProfileForm, { props: { profile: { id: '1', displayName: 'Saved', endpointUrl: 'https://api.example.com', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' } } })
+    const wrapper = mount(ModelProfileForm, { props: { profile: { id: 'profile001', displayName: 'Saved', endpointUrl: 'https://api.example.com', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' } } })
     await wrapper.get('button[type="submit"]').trigger('click')
     await flushPromises()
     expect(wrapper.emitted('save')).toHaveLength(1)

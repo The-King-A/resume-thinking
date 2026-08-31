@@ -13,8 +13,8 @@ vi.mock('../api/http', async (importOriginal) => {
 
 const page = {
   items: [
-    { id: 'mine', ownerId: 'owner-1', title: 'my-resume', sourceType: 'TXT', status: 1, visibilityState: 'USER_SOFT_DELETED', version: 2, visibleUntil: null, softDeletedAt: '2026-08-27T08:00:00Z', archivedAt: null, restoredAt: null, createdAt: '2026-08-26T08:00:00Z', updatedAt: '2026-08-27T08:00:00Z' },
-    { id: 'foreign', ownerId: 'owner-2', title: 'other-owner-resume', sourceType: 'DOCX', status: 1, visibilityState: 'USER_SOFT_DELETED', version: 3, visibleUntil: null, softDeletedAt: '2026-08-27T08:00:00Z', archivedAt: null, restoredAt: null, createdAt: '2026-08-26T08:00:00Z', updatedAt: '2026-08-27T08:00:00Z' },
+    { id: 'resume001', ownerId: 'user001', title: 'my-resume', sourceType: 'TXT', status: 1, visibilityState: 'USER_SOFT_DELETED', version: 2, visibleUntil: null, softDeletedAt: '2026-08-27T08:00:00Z', archivedAt: null, restoredAt: null, createdAt: '2026-08-26T08:00:00Z', updatedAt: '2026-08-27T08:00:00Z' },
+    { id: 'resume002', ownerId: 'user002', title: 'other-owner-resume', sourceType: 'DOCX', status: 1, visibilityState: 'USER_SOFT_DELETED', version: 3, visibleUntil: null, softDeletedAt: '2026-08-27T08:00:00Z', archivedAt: null, restoredAt: null, createdAt: '2026-08-26T08:00:00Z', updatedAt: '2026-08-27T08:00:00Z' },
   ],
   page: 1,
   pageSize: 20,
@@ -29,7 +29,7 @@ describe('RecoveryView owner isolation', () => {
     pinia = createPinia()
     setActivePinia(pinia)
     const auth = useAuthStore()
-    auth.user = { id: 'owner-1', username: 'user', email: 'user@example.com', role: 'USER', createdAt: '' }
+    auth.user = { id: 'user001', username: 'user', email: 'user@example.com', role: 'USER', createdAt: '' }
     request.mockReset().mockResolvedValue(page)
   })
 
@@ -39,7 +39,7 @@ describe('RecoveryView owner isolation', () => {
 
     expect(wrapper.text()).toContain('my-resume')
     expect(wrapper.text()).not.toContain('other-owner-resume')
-    expect(request).toHaveBeenCalledWith(expect.objectContaining({ url: '/api/v1/recovery/resumes' }))
-    expect(request).not.toHaveBeenCalledWith(expect.objectContaining({ url: expect.stringContaining('/api/v1/admin/') }))
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({ url: '/api/v2/recovery/resumes' }))
+    expect(request).not.toHaveBeenCalledWith(expect.objectContaining({ url: expect.stringContaining('/api/v2/admin/') }))
   })
 })

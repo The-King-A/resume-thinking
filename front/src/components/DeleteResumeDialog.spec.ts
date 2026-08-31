@@ -6,7 +6,7 @@ import DeleteResumeDialog from './DeleteResumeDialog.vue'
 describe('DeleteResumeDialog', () => {
   it('renders the deletion confirmation copy in Chinese', () => {
     const wrapper = mount(DeleteResumeDialog, {
-      props: { open: true, resumeId: 'r-1', version: 2 },
+      props: { open: true, resumeId: 'resume001', version: 2 },
     })
 
     expect(wrapper.text()).toContain('谨慎删除')
@@ -18,7 +18,7 @@ describe('DeleteResumeDialog', () => {
 
   it('keeps delete disabled until the exact confirmation phrase is entered', async () => {
     const wrapper = mount(DeleteResumeDialog, {
-      props: { open: true, resumeId: 'r-1', version: 2 },
+      props: { open: true, resumeId: 'resume001', version: 2 },
     })
 
     await wrapper.get('input').setValue('确认删除')
@@ -30,7 +30,7 @@ describe('DeleteResumeDialog', () => {
 
   it('submits only the required confirmation and optimistic-lock version', async () => {
     const wrapper = mount(DeleteResumeDialog, {
-      props: { open: true, resumeId: 'r-1', version: 2 },
+      props: { open: true, resumeId: 'resume001', version: 2 },
     })
 
     await wrapper.get('input').setValue('确认删除简历')

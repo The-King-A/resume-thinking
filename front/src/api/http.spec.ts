@@ -10,8 +10,8 @@ describe('http auth failure handling', () => {
     setActivePinia(createPinia())
     const auth = useAuthStore()
     localStorage.setItem('resume-matching.token', 'token')
-    localStorage.setItem('resume-matching.identity', '{"id":"u"}')
-    auth.user = { id: 'u', username: 'user', email: 'user@example.com', role: 'USER', createdAt: '' }
+    localStorage.setItem('resume-matching.identity', '{"id":"user001"}')
+    auth.user = { id: 'user001', username: 'user', email: 'user@example.com', role: 'USER', createdAt: '' }
     auth.bindHttpSession()
     const expired = vi.fn()
     registerAuthSessionExpiredHandler(expired)
@@ -20,8 +20,8 @@ describe('http auth failure handling', () => {
     if (!interceptor) throw new Error('response interceptor missing')
     await expect(interceptor({ response })).rejects.toBeInstanceOf(ApiError)
     expect(tokenStorage.get()).toBe('token')
-    expect(localStorage.getItem('resume-matching.identity')).toBe('{"id":"u"}')
-    const authResponse = { ...response, config: { url: '/api/v1/auth/login' }, data: { ...response.data, code: 'AUTHENTICATION_REQUIRED' } }
+    expect(localStorage.getItem('resume-matching.identity')).toBe('{"id":"user001"}')
+    const authResponse = { ...response, config: { url: '/api/v2/auth/login' }, data: { ...response.data, code: 'AUTHENTICATION_REQUIRED' } }
     await expect(interceptor({ response: authResponse })).rejects.toBeInstanceOf(ApiError)
     expect(tokenStorage.get()).toBeNull()
     expect(localStorage.getItem('resume-matching.identity')).toBeNull()

@@ -5,10 +5,10 @@ import ModelProfilesView from './ModelProfilesView.vue'
 
 const { store } = vi.hoisted(() => ({
   store: {
-    profiles: [{ id: '1', displayName: 'Saved', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' }],
+    profiles: [{ id: 'profile001', displayName: 'Saved', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' }],
     list: vi.fn(),
-    create: vi.fn().mockResolvedValue({ id: '2', displayName: 'New', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' }),
-    update: vi.fn().mockResolvedValue({ id: '1', displayName: 'Saved', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' }),
+    create: vi.fn().mockResolvedValue({ id: 'profile002', displayName: 'New', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' }),
+    update: vi.fn().mockResolvedValue({ id: 'profile001', displayName: 'Saved', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' }),
     testConnection: vi.fn().mockResolvedValue({ available: true, testedAt: '', models: ['gpt'] }),
   },
 }))
@@ -23,13 +23,13 @@ const ModelProfileFormStub = {
 
 describe('ModelProfilesView connection testing', () => {
   beforeEach(() => {
-    store.profiles = [{ id: '1', displayName: 'Saved', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' }]
+    store.profiles = [{ id: 'profile001', displayName: 'Saved', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' }]
     store.testConnection.mockClear()
     store.list.mockClear()
     store.create.mockReset()
     store.update.mockReset()
-    store.create.mockResolvedValue({ id: '2', displayName: 'New', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' })
-    store.update.mockResolvedValue({ id: '1', displayName: 'Saved', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' })
+    store.create.mockResolvedValue({ id: 'profile002', displayName: 'New', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' })
+    store.update.mockResolvedValue({ id: 'profile001', displayName: 'Saved', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' })
   })
 
   it('tests the saved profile only when the edit form has no unsaved changes', async () => {
@@ -41,7 +41,7 @@ describe('ModelProfilesView connection testing', () => {
 
     await wrapper.get('.test-saved').trigger('click')
     await flushPromises()
-    expect(store.testConnection).toHaveBeenCalledWith('1')
+    expect(store.testConnection).toHaveBeenCalledWith('profile001')
   })
 
   it('does not test an unsaved profile', async () => {
@@ -91,7 +91,7 @@ describe('ModelProfilesView connection testing', () => {
 
   it('clears the password only after a successful parent save', async () => {
     store.profiles = []
-    store.create.mockResolvedValueOnce({ id: '2', displayName: 'New', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' })
+    store.create.mockResolvedValueOnce({ id: 'profile002', displayName: 'New', endpointUrl: 'https://api.example.com/v1', modelName: 'gpt', hasApiKey: true, selected: false, createdAt: '', updatedAt: '' })
     const wrapper = mount(ModelProfilesView, { global: { stubs: { RouterLink: true } } })
     await wrapper.get('input').setValue('New')
     await wrapper.get('input[placeholder="例如 gpt-4o-mini"]').setValue('gpt')
