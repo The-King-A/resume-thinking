@@ -23,12 +23,15 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 @Service
 public class DemoDataSeedService {
-    private static final UUID USER_ACTIVE = UUID.fromString("10000000-0000-0000-0000-000000000001");
-    private static final UUID USER_SOFT_DELETED = UUID.fromString("10000000-0000-0000-0000-000000000002");
-    private static final UUID USER_ARCHIVED = UUID.fromString("10000000-0000-0000-0000-000000000003");
-    private static final UUID USER_ADMIN_DELETED = UUID.fromString("10000000-0000-0000-0000-000000000004");
-    private static final UUID ADMIN_ACTIVE = UUID.fromString("20000000-0000-0000-0000-000000000001");
-    private static final UUID ADMIN_ARCHIVED = UUID.fromString("20000000-0000-0000-0000-000000000002");
+    // Stable v2 identifiers keep the local seed idempotent and readable in MySQL.
+    private static final String USER_ID = "user001";
+    private static final String ADMIN_ID = "user002";
+    private static final String RESUME_ACTIVE = "resume001";
+    private static final String RESUME_SOFT_DELETED = "resume002";
+    private static final String RESUME_USER_ARCHIVED = "resume003";
+    private static final String RESUME_ADMIN_DELETED = "resume004";
+    private static final String RESUME_ADMIN_ACTIVE = "resume005";
+    private static final String RESUME_ADMIN_ARCHIVED = "resume006";
 
     private final UserRepository users;
     private final PasswordEncoder passwords;
@@ -51,15 +54,15 @@ public class DemoDataSeedService {
 
     @Transactional
     public SeedResult seed(DemoCredentials credentials) {
-        User user = verifyAccount("demo_user", "demo_user@local.invalid", UserRole.USER, credentials.userPassword());
-        User admin = verifyAccount("demo_admin", "demo_admin@local.invalid", UserRole.ADMIN, credentials.adminPassword());
+        User user = verifyAccount(USER_ID, "demo_user", "demo_user@local.invalid", UserRole.USER, credentials.userPassword());
+        User admin = verifyAccount(ADMIN_ID, "demo_admin", "demo_admin@local.invalid", UserRole.ADMIN, credentials.adminPassword());
         List<ResumeSpec> specs = List.of(
-                new ResumeSpec(USER_ACTIVE, user, "Anonymous local demo resume 1", UserRole.USER, Lifecycle.ACTIVE, null),
-                new ResumeSpec(USER_SOFT_DELETED, user, "Anonymous local demo resume 2", UserRole.USER, Lifecycle.USER_SOFT_DELETED, user.getId()),
-                new ResumeSpec(USER_ARCHIVED, user, "Anonymous local demo resume 3", UserRole.USER, Lifecycle.USER_CACHE_ARCHIVED, null),
-                new ResumeSpec(USER_ADMIN_DELETED, user, "Anonymous local demo resume 4", UserRole.USER, Lifecycle.ADMIN_SOFT_DELETED, admin.getId()),
-                new ResumeSpec(ADMIN_ACTIVE, admin, "Anonymous local demo resume 5", UserRole.ADMIN, Lifecycle.ACTIVE, null),
-                new ResumeSpec(ADMIN_ARCHIVED, admin, "Anonymous local demo resume 6", UserRole.ADMIN, Lifecycle.ADMIN_CACHE_ARCHIVED, null));
+                new ResumeSpec(RESUME_ACTIVE, user, "Anonymous local demo resume 1", UserRole.USER, Lifecycle.ACTIVE, null),
+                new ResumeSpec(RESUME_SOFT_DELETED, user, "Anonymous local demo resume 2", UserRole.USER, Lifecycle.USER_SOFT_DELETED, user.getId()),
+                new ResumeSpec(RESUME_USER_ARCHIVED, user, "Anonymous local demo resume 3", UserRole.USER, Lifecycle.USER_CACHE_ARCHIVED, null),
+                new ResumeSpec(RESUME_ADMIN_DELETED, user, "Anonymous local demo resume 4", UserRole.USER, Lifecycle.ADMIN_SOFT_DELETED, admin.getId()),
+                new ResumeSpec(RESUME_ADMIN_ACTIVE, admin, "Anonymous local demo resume 5", UserRole.ADMIN, Lifecycle.ACTIVE, null),
+                new ResumeSpec(RESUME_ADMIN_ARCHIVED, admin, "Anonymous local demo resume 6", UserRole.ADMIN, Lifecycle.ADMIN_CACHE_ARCHIVED, null));
         for (ResumeSpec spec : specs) verifyExistingResume(spec);
 
         if (users.findByUsername("demo_user").isEmpty()) users.save(user);
@@ -99,14 +102,14 @@ public class DemoDataSeedService {
         }
     }
 
-    private User verifyAccount(String username, String email, UserRole role, String password) {
+    private User verifyAccount(String id, String username, String email, UserRole role, String password) {
         Optional<User> byUsername = users.findByUsername(username);
         Optional<User> byEmail = users.findByEmail(email);
         if (byUsername.isPresent() != byEmail.isPresent()
                 || byUsername.isPresent() && !byUsername.get().getId().equals(byEmail.get().getId())) {
             throw new IllegalStateException("Conflicting local demo account");
         }
-        if (byUsername.isEmpty()) return new User(username, email, passwords.encode(password), role);
+        if (byUsername.isEmpty()) return new User(id, username, email, passwords.encode(password), role);
         User account = byUsername.get();
         if (!account.getEmail().equals(email) || account.getRole() != role || !passwords.matches(password, account.getPasswordHash())) {
             throw new IllegalStateException("Conflicting local demo account");
@@ -162,8 +165,8 @@ public class DemoDataSeedService {
     public record DemoCredentials(String userPassword, String adminPassword) {}
     public record SeedResult(int createdResumeCount, int reusedResumeCount) {}
 
-    private record ResumeSpec(UUID id, User owner, String title, UserRole creatorRole, Lifecycle lifecycle,
-                              UUID lifecycleActorId) {}
+    private record ResumeSpec(String id, User owner, String title, UserRole creatorRole, Lifecycle lifecycle,
+                              String lifecycleActorId) {}
 
     private enum Lifecycle {
         ACTIVE(0, VisibilityState.ACTIVE, ""),
