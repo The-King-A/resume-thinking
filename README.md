@@ -33,11 +33,16 @@ finally { Pop-Location }
 
 对于空数据库，选择以下其中一条路径，绝不要同时执行两条路径。
 
-1. 让 Java 服务首次启动时由 Flyway 自动执行 V1 至 V6 迁移。
-2. 需要由数据库管理员手工创建表时，只对空数据库执行
-   [`database/resume_thinking_schema.sql`](database/resume_thinking_schema.sql)。随后在 Java
-   服务首次启动前设置 `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true` 和
-   `SPRING_FLYWAY_BASELINE_VERSION=6`，由 Flyway 写入自己的基线记录。
+1. **已有 V1-V7 数据库：** 备份并停止所有写入后，由 Flyway 执行
+   `V8__string_business_ids.sql`，将 UUID/数字业务 ID 确定性迁移为 v2 字符串 ID。
+   迁移包含隐式提交，失败时必须从备份恢复；迁移后旧 UUID JWT 预期失效，要求重新登录。
+2. **新库：** 仅对空数据库执行
+   [`database/resume_thinking_schema.sql`](database/resume_thinking_schema.sql)，它直接创建 v2
+   字符串列和 `id_sequences`。随后在 Java 服务首次启动前设置
+   `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true` 和 `SPRING_FLYWAY_BASELINE_VERSION=7`，由 Flyway
+   写入自己的基线记录。
+
+不要把新库快照与 V1-V7 迁移混用，也不要在未备份、未停写时执行 V8。
 
 绝不要手工创建或写入 `flyway_schema_history`。
 
