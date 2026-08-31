@@ -90,6 +90,7 @@ console.log('valid: v2 callback idempotency and callbackId passthrough');
 const v2Mismatch = await readJson(resolveContractPath('fixtures/v2/callback-id-mismatch.json'));
 const validateV2CallbackForJob = (callback, job) => versions.v2.validateCallback(callback) && callback.callbackId === job.callbackId;
 if (!validateV2CallbackForJob(v2Callback, v2Job)) throw new Error('v2 callbackId must match its analysis job');
+if (!versions.v2.validateCallback(v2Mismatch)) throw new Error('v2 callbackId mismatch fixture must remain schema-valid');
 if (validateV2CallbackForJob(v2Mismatch, v2Job)) throw new Error('v2 callbackId mismatch must be rejected');
 console.log('expected invalid: v2/callback-id-mismatch.json (callbackId is not the Java-issued job callbackId)');
 
