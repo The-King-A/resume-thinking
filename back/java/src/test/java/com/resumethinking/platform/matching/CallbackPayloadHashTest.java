@@ -8,11 +8,11 @@ class CallbackPayloadHashTest {
     @Test
     void matchesPythonRfc8785CanonicalJsonForEnvelope() {
         var request = new AnalysisCallbackRequest(
-                UUID.fromString("00000000-0000-0000-0000-000000000001"), 1,
-                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                "task001", 1,
+                "callback001",
                 "token-token-token-token-token-token", "", "FAILED", null,
                 "MODEL_UNAVAILABLE", UUID.fromString("00000000-0000-0000-0000-000000000003"));
         assertThat(CallbackPayloadHash.compute(request))
-                .isEqualTo("a5a05b22baa0002c7cc014f882587233a25772a4108d9917444638c1f9f4322f");
+                .isEqualTo("883b9569f1af8ab6d1c61e31307ae8fcd5a811740128486cb17329c695a1cb8a");
     }
 }

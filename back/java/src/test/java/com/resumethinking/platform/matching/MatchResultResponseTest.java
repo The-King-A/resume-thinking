@@ -8,8 +8,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MatchResultResponseTest {
     @Test
     void exposesPersistedEvidenceMetadataInsteadOfHardcodedLocation() {
-        UUID task = UUID.randomUUID(), resume = UUID.randomUUID(), evidenceId = UUID.randomUUID();
-        UUID req = UUID.randomUUID();
+        String task = "task001", resume = "resume001", evidenceId = "evidence001";
+        String req = "requirement001";
         var callback = new AnalysisCallbackRequest.AnalysisResultPayload(
                 new AnalysisCallbackRequest.ScoreBreakdown(.8, .7, .6, .5, .4, .7),
                 List.of(new AnalysisCallbackRequest.RequirementMatch(req, "Java", "MANDATORY", "SATISFIED", "EXACT", "SKILLS", .9,

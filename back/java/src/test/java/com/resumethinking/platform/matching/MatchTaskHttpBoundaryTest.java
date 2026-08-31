@@ -4,6 +4,7 @@ import com.resumethinking.platform.auth.AuthService;
 import com.resumethinking.platform.auth.JwtService;
 import com.resumethinking.platform.auth.UserRole;
 import com.resumethinking.platform.config.SecurityConfig;
+import com.resumethinking.platform.TestIds;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -30,37 +31,37 @@ class MatchTaskHttpBoundaryTest {
 
     @Test
     void invalidMatchRequestIsRejectedBeforeTheServiceIsCalled() throws Exception {
-        when(jwt.parse(anyString())).thenReturn(Optional.of(new JwtService.Claims(UUID.randomUUID(), UserRole.USER)));
+        when(jwt.parse(anyString())).thenReturn(Optional.of(new JwtService.Claims(TestIds.user(), UserRole.USER)));
 
         mvc.perform(post("/api/v1/match-tasks")
                         .header("Authorization", "Bearer token")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resumeId\":\"not-a-uuid\",\"llmProfileId\":\"not-a-uuid\",\"jobDescriptionText\":\"\",\"idempotencyKey\":\"\"}"))
+                        .content("{\"resumeId\":\"not-a-resume-id\",\"llmProfileId\":\"not-a-profile-id\",\"jobDescriptionText\":\"\",\"idempotencyKey\":\"\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
     @Test
     void unknownMatchRequestFieldsAreRejectedByThePublicContract() throws Exception {
-        when(jwt.parse(anyString())).thenReturn(Optional.of(new JwtService.Claims(UUID.randomUUID(), UserRole.USER)));
+        when(jwt.parse(anyString())).thenReturn(Optional.of(new JwtService.Claims(TestIds.user(), UserRole.USER)));
 
         mvc.perform(post("/api/v1/match-tasks")
                         .header("Authorization", "Bearer token")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resumeId\":\"00000000-0000-0000-0000-000000000001\",\"llmProfileId\":\"00000000-0000-0000-0000-000000000002\",\"jobDescriptionText\":\"Build reliable software with clear communication.\",\"idempotencyKey\":\"valid-key-0000001\",\"ownerId\":\"leak\"}"))
+                        .content("{\"resumeId\":\"resume001\",\"llmProfileId\":\"profile001\",\"jobDescriptionText\":\"Build reliable software with clear communication.\",\"idempotencyKey\":\"valid-key-0000001\",\"ownerId\":\"leak\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
     @Test
     void acceptsTheReleasedJavaBackendJobFamily() throws Exception {
-        when(jwt.parse(anyString())).thenReturn(Optional.of(new JwtService.Claims(UUID.randomUUID(), UserRole.USER)));
+        when(jwt.parse(anyString())).thenReturn(Optional.of(new JwtService.Claims(TestIds.user(), UserRole.USER)));
         when(service.createTask(org.mockito.ArgumentMatchers.any())).thenReturn(org.mockito.Mockito.mock(MatchTask.class));
 
         mvc.perform(post("/api/v1/match-tasks")
                         .header("Authorization", "Bearer token")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resumeId\":\"00000000-0000-0000-0000-000000000001\",\"llmProfileId\":\"00000000-0000-0000-0000-000000000002\",\"jobFamily\":\"JAVA_BACKEND\",\"jobDescriptionText\":\"Build reliable software with clear communication.\",\"idempotencyKey\":\"valid-key-0000001\"}"))
+                        .content("{\"resumeId\":\"resume001\",\"llmProfileId\":\"profile001\",\"jobFamily\":\"JAVA_BACKEND\",\"jobDescriptionText\":\"Build reliable software with clear communication.\",\"idempotencyKey\":\"valid-key-0000001\"}"))
                 .andExpect(status().isAccepted());
     }
 }

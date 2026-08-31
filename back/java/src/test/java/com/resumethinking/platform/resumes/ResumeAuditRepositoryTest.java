@@ -10,8 +10,8 @@ import org.mockito.ArgumentCaptor;
 class ResumeAuditRepositoryTest {
  @Test void jpaAdapterWritesAllAuditFields(){
   var delegate=mock(ResumeAuditJpaRepository.class);
-  var adapter=new JpaResumeAuditRepository(delegate);
-  UUID resumeId=UUID.randomUUID(), actorId=UUID.randomUUID(), correlationId=UUID.randomUUID();
+  var adapter=new JpaResumeAuditRepository(delegate, new com.resumethinking.platform.ids.InMemoryReadableIdGenerator());
+  String resumeId="resume001", actorId="user001"; UUID correlationId=UUID.randomUUID();
   Instant at=Instant.parse("2026-01-01T00:00:00Z");
   adapter.save(new ResumeAuditRepository.ResumeLifecycleAudit(resumeId,actorId,"RESTORED",
       VisibilityState.USER_SOFT_DELETED,VisibilityState.ACTIVE,at,correlationId));

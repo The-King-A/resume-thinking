@@ -3,6 +3,7 @@ package com.resumethinking.platform.matching;
 import com.resumethinking.platform.auth.UserRole;
 import com.resumethinking.platform.profiles.LlmProfileService;
 import com.resumethinking.platform.resumes.*;
+import com.resumethinking.platform.TestIds;
 import org.junit.jupiter.api.Test;
 
 import java.time.*;
@@ -21,9 +22,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MatchTaskServiceTest {
-    private final UUID userId = UUID.randomUUID();
-    private final UUID resumeId = UUID.randomUUID();
-    private final UUID profileId = UUID.randomUUID();
+    private final String userId = TestIds.user();
+    private final String resumeId = TestIds.resume();
+    private final String profileId = TestIds.profile();
 
     @Test
     void duplicateSubmissionReturnsOriginalTaskForSameOwnerAndIdempotencyKey() {
@@ -85,7 +86,7 @@ class MatchTaskServiceTest {
     void blockedTaskIsGoneFromTaskAndResultReads() {
         var resumes = new ResumeRepository.InMemory();
         var resume = Resume.active(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER, Instant.now(), 0L); resumes.save(resume);
-        var task = new MatchTask(UUID.randomUUID(), resumeId, profileId, userId, 0L, "Build reliable software with clear communication and practical testing.", "blocked-key-00001", "token-token-token-token-token-token", Set.of(UUID.randomUUID()), Instant.now()); task.markBlocked();
+        var task = new MatchTask(TestIds.task(), resumeId, profileId, userId, 0L, "Build reliable software with clear communication and practical testing.", "blocked-key-00001", "token-token-token-token-token-token", Set.of(TestIds.evidence()), Instant.now()); task.markBlocked();
         var repo = new MatchTaskRepository.InMemory(); repo.save(task);
         var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()), null, repo, new PythonAnalysisClient.Noop());
         assertThatThrownBy(() -> service.getTask(task.id(), userId, UserRole.USER)).isInstanceOf(TaskGoneException.class);
@@ -115,7 +116,7 @@ class MatchTaskServiceTest {
                 ResumeLifecycleService.CONFIRMATION, resume.getVersion()));
         assertThatThrownBy(() -> service.getTask(task.id(), userId, UserRole.USER)).isInstanceOf(TaskGoneException.class);
         assertThatThrownBy(() -> service.getResult(task.id(), userId, UserRole.USER)).isInstanceOf(TaskGoneException.class);
-        assertThatThrownBy(() -> service.getTask(task.id(), UUID.randomUUID(), UserRole.ADMIN)).isInstanceOf(TaskGoneException.class);
+        assertThatThrownBy(() -> service.getTask(task.id(), TestIds.user(), UserRole.ADMIN)).isInstanceOf(TaskGoneException.class);
 
         lifecycle.recover(resumeId, userId, UserRole.USER, resume.getVersion());
         assertThatThrownBy(() -> service.getResult(task.id(), userId, UserRole.USER)).isInstanceOf(TaskGoneException.class);
@@ -240,10 +241,10 @@ class MatchTaskServiceTest {
         var task = service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
                 "Build reliable software with clear communication and practical testing.", "evidence-key-00001"));
         var evidenceId = service.evidenceForTask(task.id()).getFirst().getId();
-        var requirement = new AnalysisCallbackRequest.RequirementMatch(UUID.randomUUID(), "Java", "MANDATORY", "SATISFIED", "EXACT", "SKILLS", .8,
+        var requirement = new AnalysisCallbackRequest.RequirementMatch(TestIds.requirement(), "Java", "MANDATORY", "SATISFIED", "EXACT", "SKILLS", .8,
                 java.util.List.of(new AnalysisCallbackRequest.EvidenceReference(evidenceId, 0, 4, "Forged", .9)), "HIGH", null, "SUPPORTED_FACT");
         var result = new AnalysisCallbackRequest.AnalysisResultPayload(new AnalysisCallbackRequest.ScoreBreakdown(.8,.8,.8,.8,.8,.8), java.util.List.of(requirement), java.util.List.of());
-        var callback = new AnalysisCallbackRequest(task.id(), 1, UUID.randomUUID(), task.callbackTokenForTests(), "", "SUCCEEDED", result, null, UUID.randomUUID()).withComputedPayloadHash();
+        var callback = new AnalysisCallbackRequest(task.id(), 1, task.callbackId(), task.callbackTokenForTests(), "", "SUCCEEDED", result, null, UUID.randomUUID()).withComputedPayloadHash();
         assertThat(service.acceptCallback(callback).code()).isEqualTo("MODEL_OUTPUT_INVALID");
     }
 
@@ -257,7 +258,7 @@ class MatchTaskServiceTest {
                 "Build reliable software with clear communication and practical testing.", "score-key-000001"));
         var score = new AnalysisCallbackRequest.ScoreBreakdown(.1111,.2222,.3333,.4444,.5555,.9999);
         var result = new AnalysisCallbackRequest.AnalysisResultPayload(score, java.util.List.of(), java.util.List.of());
-        var callback = new AnalysisCallbackRequest(task.id(), 1, UUID.randomUUID(), task.callbackTokenForTests(), "", "SUCCEEDED", result, null, UUID.randomUUID()).withComputedPayloadHash();
+        var callback = new AnalysisCallbackRequest(task.id(), 1, task.callbackId(), task.callbackTokenForTests(), "", "SUCCEEDED", result, null, UUID.randomUUID()).withComputedPayloadHash();
         assertThat(service.acceptCallback(callback).code()).isEqualTo("MODEL_OUTPUT_INVALID");
     }
 
@@ -277,10 +278,10 @@ class MatchTaskServiceTest {
         assertThat(evidenceRepository.findByTaskId(task.id()).getFirst().getSourceExcerpt())
                 .isEqualTo("[REDACTED_EMAIL]")
                 .doesNotContain("alice@example.com");
-        var requirement = new AnalysisCallbackRequest.RequirementMatch(UUID.randomUUID(), "Email", "PREFERRED", "SATISFIED", "EXACT", "SOFT_SKILLS", .8,
+        var requirement = new AnalysisCallbackRequest.RequirementMatch(TestIds.requirement(), "Email", "PREFERRED", "SATISFIED", "EXACT", "SOFT_SKILLS", .8,
                 java.util.List.of(new AnalysisCallbackRequest.EvidenceReference(evidenceId, 0, 17, "[REDACTED_EMAIL]", .9)), "HIGH", null, "SUPPORTED_FACT");
         var result = new AnalysisCallbackRequest.AnalysisResultPayload(new AnalysisCallbackRequest.ScoreBreakdown(.8,.8,.8,.8,.8,.8), java.util.List.of(requirement), java.util.List.of());
-        var callback = new AnalysisCallbackRequest(task.id(), 1, UUID.randomUUID(), task.callbackTokenForTests(), "", "SUCCEEDED", result, null, UUID.randomUUID()).withComputedPayloadHash();
+        var callback = new AnalysisCallbackRequest(task.id(), 1, task.callbackId(), task.callbackTokenForTests(), "", "SUCCEEDED", result, null, UUID.randomUUID()).withComputedPayloadHash();
         assertThat(service.acceptCallback(callback).code()).isEqualTo("ACCEPTED");
     }
 
@@ -394,16 +395,16 @@ class MatchTaskServiceTest {
         var task = service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
                 "Build reliable software with clear communication and practical testing.", "suggestion-owner-01"));
 
-        UUID returnedRequirementId = UUID.randomUUID();
+        String returnedRequirementId = TestIds.requirement();
         var requirement = new AnalysisCallbackRequest.RequirementMatch(returnedRequirementId, "Java", "MANDATORY",
                 "UNMET", "NO_MATCH", "SKILLS", 0.0,
                 java.util.List.<AnalysisCallbackRequest.EvidenceReference>of(), "NONE", "gap", "NEEDS_USER_CONFIRMATION");
-        var suggestion = new AnalysisCallbackRequest.Suggestion(UUID.randomUUID(), UUID.randomUUID(),
+        var suggestion = new AnalysisCallbackRequest.Suggestion(TestIds.suggestion(), TestIds.requirement(),
                 "NEEDS_USER_CONFIRMATION", "Consider adding Java experience", java.util.List.of());
         var result = new AnalysisCallbackRequest.AnalysisResultPayload(
                 new AnalysisCallbackRequest.ScoreBreakdown(0, 0, 0, 0, 0, 0),
                 java.util.List.of(requirement), java.util.List.of(suggestion));
-        var callback = new AnalysisCallbackRequest(task.id(), 1, UUID.randomUUID(), task.callbackTokenForTests(),
+        var callback = new AnalysisCallbackRequest(task.id(), 1, task.callbackId(), task.callbackTokenForTests(),
                 "", "SUCCEEDED", result, null, UUID.randomUUID()).withComputedPayloadHash();
 
         assertThat(service.acceptCallback(callback).code()).isEqualTo("MODEL_OUTPUT_INVALID");
@@ -420,14 +421,14 @@ class MatchTaskServiceTest {
         var task = service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
                 "Build reliable software with clear communication and practical testing.", "callback-race-hash-1"));
 
-        UUID requirementId = UUID.randomUUID();
+        String requirementId = TestIds.requirement();
         var requirements = new ArrayList<>(java.util.List.of(new AnalysisCallbackRequest.RequirementMatch(requirementId,
                 "Java", "MANDATORY", "UNMET", "NO_MATCH", "SKILLS", 0.0,
                 java.util.List.<AnalysisCallbackRequest.EvidenceReference>of(), "NONE", "gap", "NEEDS_USER_CONFIRMATION")));
         var result = new AnalysisCallbackRequest.AnalysisResultPayload(
                 new AnalysisCallbackRequest.ScoreBreakdown(0, 0, 0, 0, 0, 0), requirements,
                 java.util.List.of());
-        var callback = new AnalysisCallbackRequest(task.id(), 1, UUID.randomUUID(), task.callbackTokenForTests(),
+        var callback = new AnalysisCallbackRequest(task.id(), 1, task.callbackId(), task.callbackTokenForTests(),
                 "", "SUCCEEDED", result, null, UUID.randomUUID()).withComputedPayloadHash();
         receipts.mutation = requirements::clear;
 
@@ -463,7 +464,7 @@ class MatchTaskServiceTest {
         private CallbackReceipt receipt;
         private Runnable mutation;
 
-        @Override public synchronized Optional<CallbackReceipt> findByCallbackId(UUID id) {
+        @Override public synchronized Optional<CallbackReceipt> findByCallbackId(String id) {
             return receipt == null ? Optional.empty() : Optional.of(receipt);
         }
 
@@ -480,10 +481,10 @@ class MatchTaskServiceTest {
     }
 
     private static final class TestProfileService extends LlmProfileService {
-        private final UUID owner;
-        private final UUID id;
-        TestProfileService(UUID owner, UUID id) { super(new com.resumethinking.platform.auth.InMemoryRepositories.LlmProfileRepositoryStub(), new com.resumethinking.platform.crypto.AesGcmCryptoService("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")); this.owner = owner; this.id = id; }
-        @Override public com.resumethinking.platform.profiles.DispatchLlmProfile decryptForDispatch(UUID actorId, UUID profileId) {
+        private final String owner;
+        private final String id;
+        TestProfileService(String owner, String id) { super(new com.resumethinking.platform.auth.InMemoryRepositories.LlmProfileRepositoryStub(), new com.resumethinking.platform.crypto.AesGcmCryptoService("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")); this.owner = owner; this.id = id; }
+        @Override public com.resumethinking.platform.profiles.DispatchLlmProfile decryptForDispatch(String actorId, String profileId) {
             if (!owner.equals(actorId) || !id.equals(profileId)) throw new com.resumethinking.platform.profiles.ResourceNotFoundException();
             return new com.resumethinking.platform.profiles.DispatchLlmProfile(URI.create("https://provider.example"), "model", "key");
         }
