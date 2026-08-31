@@ -1,0 +1,6 @@
+{
+  "username": "fixture_user",
+  "email": "fixture.user@example.test",
+  "password": "fixture-password-123",
+  "role": "USER"
+}

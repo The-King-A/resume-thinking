@@ -1,0 +1,31 @@
+{
+  "taskId": "task001",
+  "callbackId": "callback001",
+  "attempt": 1,
+  "resumeVersion": 2,
+  "sourceType": "TXT",
+  "jobFamily": "JAVA_BACKEND",
+  "document": {
+    "contentBase64": "SGVsbG8gcmVzdW1lLg==",
+    "originalFilename": "resume.txt"
+  },
+  "allowedEvidence": [
+    {
+      "evidenceId": "evidence001",
+      "sourceLocation": "txt:0",
+      "sourceStart": 0,
+      "sourceEnd": 13
+    }
+  ],
+  "jobDescriptionText": "Build reliable software with clear communication.",
+  "redactionRequired": true,
+  "callbackUrl": "http://127.0.0.1:8080/internal/v2/analysis-results",
+  "callbackToken": "fixture-callback-token-not-a-secret-0001",
+  "provider": {
+    "baseUrl": "https://api.example.test/v1",
+    "model": "fixture-model",
+    "apiKey": "not-a-real-credential-fixture"
+  },
+  "correlationId": "00000000-0000-4000-8000-000000000002"
+}
+

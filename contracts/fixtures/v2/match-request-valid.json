@@ -1,0 +1,8 @@
+{
+  "resumeId": "resume001",
+  "llmProfileId": "profile001",
+  "jobFamily": "JAVA_BACKEND",
+  "jobDescriptionText": "Build reliable software with clear communication and practical testing.",
+  "idempotencyKey": "fixture-match-key-0001"
+}
+

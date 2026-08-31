@@ -1,0 +1,12 @@
+{
+  "code": "TASK_GONE",
+  "message": "The task was archived before completion.",
+  "correlationId": "00000000-0000-4000-8000-000000000040",
+  "retryable": false,
+  "details": [
+    {
+      "field": "taskId",
+      "reason": "Task is no longer active."
+    }
+  ]
+}

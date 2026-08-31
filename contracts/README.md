@@ -1,4 +1,21 @@
-# 简历匹配契约 v1
+# 简历匹配契约 v1 / v2
+
+`v1` 是保留的历史快照；运行时权威契约为 `v2`。v2 公共路径使用 `/api/v2`，内部任务和回调使用 `/internal/v2`。
+
+## v2 标识与迁移
+
+业务 ID 必须匹配以下精确前缀：`user[0-9]{3,}`、`profile[0-9]{3,}`、`resume[0-9]{3,}`、
+`task[0-9]{3,}`、`evidence[0-9]{3,}`、`callback[0-9]{3,}`、`requirement[0-9]{3,}`、
+`suggestion[0-9]{3,}`、`result[0-9]{3,}` 和 `audit[0-9]{3,}`。`correlationId` 仍为 UUID；
+`idempotencyKey`、`callbackToken` 和供应商临时值保持原有字符串规则。
+
+Java 在派发 v2 `analysis-job` 前生成必填 `callbackId`；Python 必须在回调中原样回传，
+并在传输重试时保留相同的 `callbackId` 与 `payloadHash`。回调接收、幂等和持久化仍由 Java 负责。
+
+迁移后签发的 JWT `sub` 使用 `userNNN`。迁移前签发的 UUID JWT 不再解析；客户端收到 401 后
+清理本地会话并要求重新登录。
+
+## v1 历史契约
 
 本目录是首个 Java 后端岗位匹配切片的接口依据。产品需求仍记录在
 `ai-resume-job-matching-project.md.docx`；批准的本地设计位于

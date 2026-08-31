@@ -1,0 +1,32 @@
+{
+  "task": {
+    "id": "task006",
+    "resumeId": "resume050",
+    "llmProfileId": "profile051",
+    "jobFamily": "JAVA_BACKEND",
+    "state": "BLOCKED",
+    "attempt": 1,
+    "resumeVersion": 3,
+    "failureCode": null,
+    "resultAvailable": false,
+    "createdAt": "2026-08-27T00:00:00Z",
+    "updatedAt": "2026-08-27T00:00:00Z"
+  },
+  "resume": {
+    "id": "resume050",
+    "ownerId": "user052",
+    "title": "Fixture soft-deleted resume",
+    "sourceType": "TXT",
+    "status": 1,
+    "visibilityState": "USER_SOFT_DELETED",
+    "version": 3,
+    "visibleUntil": "2026-08-27T00:00:00Z",
+    "softDeletedAt": "2026-08-27T00:00:00Z",
+    "archivedAt": null,
+    "restoredAt": null,
+    "createdAt": "2026-08-01T00:00:00Z",
+    "updatedAt": "2026-08-27T00:00:00Z"
+  },
+  "expectedJavaRejection": "TASK_GONE"
+}
+

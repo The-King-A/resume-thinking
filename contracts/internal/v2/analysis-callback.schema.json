@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://resume-thinking.local/contracts/internal/v2/analysis-callback.schema.json",
+  "title": "InternalAnalysisCallback",
+  "description": "Python-to-Java callback. Java validates every value, owns idempotency and persistence, and rejects a deleted, archived, or stale task without recreating results.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["taskId", "attempt", "callbackId", "callbackToken", "payloadHash", "outcome", "correlationId"],
+  "properties": {
+    "taskId": {
+      "type": "string",
+      "pattern": "^task[0-9]{3,}$"
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "callbackId": {
+      "type": "string",
+      "pattern": "^callback[0-9]{3,}$",
+      "description": "Stable across transport retries for the same callback payload."
+    },
+    "callbackToken": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 1024
+    },
+    "payloadHash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Lowercase SHA-256 of the RFC 8785 JSON Canonicalization Scheme UTF-8 bytes for this callback with the payloadHash member omitted."
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["SUCCEEDED", "FAILED", "TIMED_OUT"]
+    },
+    "result": {
+      "$ref": "#/$defs/AnalysisResult"
+    },
+    "errorCode": {
+      "type": "string",
+      "enum": ["MODEL_UNAVAILABLE", "MODEL_OUTPUT_INVALID", "MODEL_ENDPOINT_REJECTED", "UNSUPPORTED_FILE"]
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "outcome": { "const": "SUCCEEDED" } } },
+      "then": {
+        "required": ["result"],
+        "not": { "required": ["errorCode"] }
+      }
+    },
+    {
+      "if": { "properties": { "outcome": { "enum": ["FAILED", "TIMED_OUT"] } } },
+      "then": {
+        "required": ["errorCode"],
+        "not": { "required": ["result"] }
+      }
+    }
+  ],
+  "not": {
+    "anyOf": [
+      { "required": ["ownerId"] },
+      { "required": ["userId"] },
+      { "required": ["databaseCredentials"] },
+      { "required": ["persistenceCommand"] },
+      { "required": ["apiKey"] },
+      { "required": ["rawProviderResponse"] }
+    ]
+  },
+  "$defs": {
+    "AnalysisResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "requirements", "suggestions"],
+      "properties": {
+        "score": { "$ref": "#/$defs/ScoreBreakdown" },
+        "requirements": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RequirementMatch" }
+        },
+        "suggestions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Suggestion" }
+        }
+      }
+    },
+    "ScoreBreakdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skills", "projectExperience", "workContent", "educationExperience", "softSkills", "composite"],
+      "properties": {
+        "skills": { "type": "number", "minimum": 0, "maximum": 1, "description": "Weight 0.40." },
+        "projectExperience": { "type": "number", "minimum": 0, "maximum": 1, "description": "Weight 0.25." },
+        "workContent": { "type": "number", "minimum": 0, "maximum": 1, "description": "Weight 0.15." },
+        "educationExperience": { "type": "number", "minimum": 0, "maximum": 1, "description": "Weight 0.10." },
+        "softSkills": { "type": "number", "minimum": 0, "maximum": 1, "description": "Weight 0.10." },
+        "composite": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "RequirementMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirementId", "jobRequirementText", "requirementType", "matchStatus", "matchType", "component", "componentScore", "evidence", "evidenceStrength", "gap", "suggestionState"],
+      "properties": {
+        "requirementId": { "type": "string", "pattern": "^requirement[0-9]{3,}$" },
+        "jobRequirementText": { "type": "string", "minLength": 1, "maxLength": 20000 },
+        "requirementType": { "type": "string", "enum": ["MANDATORY", "PREFERRED"] },
+        "matchStatus": { "type": "string", "enum": ["SATISFIED", "PARTIALLY_SATISFIED", "RELATED_BUT_EVIDENCE_INSUFFICIENT", "UNMET"] },
+        "matchType": { "type": "string", "enum": ["EXACT", "SEMANTIC", "RELATED", "NO_MATCH"] },
+        "component": { "type": "string", "enum": ["SKILLS", "PROJECT_EXPERIENCE", "WORK_CONTENT", "EDUCATION_EXPERIENCE", "SOFT_SKILLS"] },
+        "componentScore": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EvidenceReference" }
+        },
+        "evidenceStrength": { "type": "string", "enum": ["NONE", "LOW", "MEDIUM", "HIGH"] },
+        "gap": { "type": ["string", "null"], "maxLength": 5000 },
+        "suggestionState": { "type": "string", "enum": ["SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "matchStatus": { "enum": ["SATISFIED", "PARTIALLY_SATISFIED"] } } },
+          "then": { "properties": { "evidence": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "suggestionState": { "enum": ["SUPPORTED_FACT", "WORDING_ONLY_REWRITE"] } } },
+          "then": { "properties": { "evidence": { "minItems": 1 } } }
+        }
+      ]
+    },
+    "EvidenceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidenceId", "sourceStart", "sourceEnd", "excerpt", "confidence"],
+      "properties": {
+        "evidenceId": {
+          "type": "string",
+          "pattern": "^evidence[0-9]{3,}$",
+          "description": "Must equal an evidenceId supplied in the analysis job."
+        },
+        "sourceStart": { "type": "integer", "minimum": 0 },
+        "sourceEnd": { "type": "integer", "minimum": 0 },
+        "excerpt": { "type": "string", "minLength": 1, "maxLength": 5000 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "Suggestion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["suggestionId", "requirementId", "state", "proposedText", "evidenceIds"],
+      "properties": {
+        "suggestionId": { "type": "string", "pattern": "^suggestion[0-9]{3,}$" },
+        "requirementId": { "type": "string", "pattern": "^requirement[0-9]{3,}$" },
+        "state": { "type": "string", "enum": ["SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED"] },
+        "proposedText": { "type": "string", "minLength": 1, "maxLength": 5000 },
+        "evidenceIds": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^evidence[0-9]{3,}$" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "state": { "enum": ["SUPPORTED_FACT", "WORDING_ONLY_REWRITE"] } } },
+          "then": { "properties": { "evidenceIds": { "minItems": 1 } } }
+        }
+      ]
+    }
+  }
+}

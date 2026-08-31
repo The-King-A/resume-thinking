@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://resume-thinking.local/contracts/internal/v2/analysis-job.schema.json",
+  "title": "InternalAnalysisJob",
+  "$comment": "Transport requires the X-Internal-Service-Token HTTP header. callbackUrl is additionally restricted at runtime to loopback or an exact configured Java callback base; these controls are intentionally outside the JSON shape.",
+  "description": "Java-owned, short-lived request to the Python analysis worker. It intentionally excludes user identity, persistence authority, host paths, and infrastructure credentials.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "taskId",
+    "callbackId",
+    "attempt",
+    "resumeVersion",
+    "sourceType",
+    "jobFamily",
+    "document",
+    "allowedEvidence",
+    "jobDescriptionText",
+    "redactionRequired",
+    "callbackUrl",
+    "callbackToken",
+    "provider",
+    "correlationId"
+  ],
+  "properties": {
+    "taskId": {
+      "type": "string",
+      "pattern": "^task[0-9]{3,}$"
+    },
+    "callbackId": {
+      "type": "string",
+      "pattern": "^callback[0-9]{3,}$",
+      "description": "Java-generated stable callback identifier; Python must return it unchanged."
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "resumeVersion": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "sourceType": {
+      "type": "string",
+      "enum": ["TXT", "DOCX"]
+    },
+    "jobFamily": {
+      "type": "string",
+      "enum": ["JAVA_BACKEND"]
+    },
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contentBase64", "originalFilename"],
+      "properties": {
+        "contentBase64": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "minLength": 4,
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+          "description": "Standard padded Base64 controlled document payload, never a shared host filesystem path."
+        },
+        "originalFilename": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        }
+      }
+    },
+    "allowedEvidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["evidenceId", "sourceLocation", "sourceStart", "sourceEnd"],
+        "properties": {
+          "evidenceId": {
+            "type": "string",
+            "pattern": "^evidence[0-9]{3,}$"
+          },
+          "sourceLocation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "sourceStart": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sourceEnd": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "description": "Only these Java-issued evidence IDs may be cited by a callback; Java verifies membership and offsets before persistence."
+    },
+    "jobDescriptionText": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 20000
+    },
+    "redactionRequired": {
+      "const": true,
+      "description": "The worker must redact sensitive data before any external provider call."
+    },
+    "callbackUrl": {
+      "type": "string",
+      "format": "uri",
+      "maxLength": 2048
+    },
+    "callbackToken": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 1024,
+      "description": "Ephemeral Java-issued callback credential; never persist or log it in Python."
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseUrl", "model", "apiKey"],
+      "properties": {
+        "baseUrl": {
+          "description": "HTTPS endpoint, or the explicit local loopback exception for controlled development tests. Java validates resolved network addresses before dispatch and Python revalidates before the provider request.",
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "pattern": "^https://"
+            },
+            {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "pattern": "^http://127\\.0\\.0\\.1(?::[0-9]{1,5})?(?:/.*)?$"
+            }
+          ]
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "apiKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Memory-only credential decrypted by Java solely for this dispatch."
+        }
+      }
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "not": {
+    "anyOf": [
+      { "required": ["ownerId"] },
+      { "required": ["userId"] },
+      { "required": ["databaseCredentials"] },
+      { "required": ["mysqlUrl"] },
+      { "required": ["redisUrl"] },
+      { "required": ["persistenceCommand"] },
+      { "required": ["hostFilesystemPath"] },
+      { "required": ["plaintextPassword"] }
+    ]
+  }
+}

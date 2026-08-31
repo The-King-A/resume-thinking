@@ -1,11 +1,11 @@
 {
   "name": "resume-matching-contracts",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "packageManager": "pnpm@10.15.1",
   "scripts": {
-    "lint": "redocly lint openapi/v1/openapi.yaml",
-    "lint:openapi": "redocly lint openapi/v1/openapi.yaml",
+    "lint": "redocly lint openapi/v1/openapi.yaml && redocly lint openapi/v2/openapi.yaml",
+    "lint:openapi": "redocly lint openapi/v1/openapi.yaml && redocly lint openapi/v2/openapi.yaml",
     "validate": "node scripts/validate-contracts.mjs"
   },
   "devDependencies": {
