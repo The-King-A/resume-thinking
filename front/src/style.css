@@ -56,6 +56,8 @@ label { display: grid; gap: 6px; color: var(--text-h); font-size: .875rem; text-
 input, textarea, select { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 5px; padding: 10px 12px; background: var(--surface); color: var(--ink); }
 input:hover, textarea:hover, select:hover { border-color: #9fb1b5; }
 input:invalid:not(:placeholder-shown), textarea:invalid:not(:placeholder-shown), select:invalid { border-color: var(--danger); background: var(--danger-bg); }
+input:active, textarea:active, select:active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-bg); }
+input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacity: 1; border-color: var(--border); background: #e9eff0; color: var(--muted); }
 .auth-page, .workspace { width: min(1080px, 100%); margin: 0 auto; box-sizing: border-box; padding: 48px 28px; text-align: left; }
 .auth-panel { width: min(440px, 100%); margin: 0 auto; background: white; border: 1px solid var(--border); border-radius: 8px; padding: 32px; box-sizing: border-box; }
 .auth-panel form, .profile-form { display: grid; gap: 16px; margin: 24px 0; }
@@ -521,7 +523,15 @@ h3, h4, h5, strong { color: var(--text-h); }
 .review-plan h3, .review-plan-variant h4, .subsection-heading h3 { color: var(--accent-strong); }
 .review-plan-header p, .review-plan-variant p, .targeted-review-row p { color: var(--text); }
 .targeted-review-evidence { border-left-color: var(--accent-border); background: var(--surface-muted); }
+.profile-notice, .context-summary, .publication-warning { border-left: 1px solid var(--border); }
+.review-plan-variant { border: 0; border-top: 1px solid var(--border); background: transparent; }
+.review-plan-variant + .review-plan-variant { border-left: 1px solid var(--border); }
+.review-plan h3 { font-size: 1.25rem; }
+.score-band > div strong { font-size: 2.75rem; }
+.score-band dd { font-size: 1.25rem; }
+.job-description h2 { font-size: 1.3125rem; }
 
 @media (max-width: 800px) {
   h1 { font-size: 1.875rem; }
+  .review-plan-variant + .review-plan-variant { border-left: 0; }
 }
