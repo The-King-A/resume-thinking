@@ -16,7 +16,7 @@
   --danger-bg: #fff1ef;
   --success: #16734d;
   --success-bg: #eaf7ef;
-  --muted: #687780;
+  --muted: #52616a;
   --focus: #c47b09;
   --shadow-offset: 4px 4px 0 rgba(31, 41, 51, 0.12);
   --shadow: var(--shadow-offset);
@@ -196,6 +196,7 @@ code {
 .app-shell { min-height: 100svh; }
 .global-nav { display: flex; align-items: center; gap: 20px; padding: 10px 28px; border-bottom: 1px solid #111a21; background: var(--ink); text-align: left; }
 .global-brand { flex: 0 0 auto; color: #f4f8f7; font-weight: 700; text-decoration: none; }
+.global-brand:hover { color: #fff; }
 .global-nav-links { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .global-nav-link { display: inline-flex; align-items: center; min-height: 34px; border-radius: 4px; padding: 5px 10px; color: #c9d7d8; font-size: .875rem; text-decoration: none; transition: background-color .15s ease, color .15s ease; }
 .global-nav-link:hover { background: rgb(255 255 255 / 10%); color: #fff; }
@@ -501,14 +502,18 @@ h3, h4, h5, strong { color: var(--text-h); }
 .counter:hover { border-color: var(--accent); }
 .global-nav { border-color: #111a21; background: var(--ink); }
 .global-brand { color: #f4f8f7; }
+.global-brand:hover { color: #fff; }
 .global-identity { color: #b8c9ca; }
 .global-nav-link { color: #c9d7d8; }
 .global-nav-link:hover { color: #fff; }
 .global-nav-link-active { color: #fff; }
+.global-nav-link-context-active { background: var(--accent); color: #fff; }
+.global-nav-link-context-active:hover { background: var(--accent-strong); color: #fff; }
 .muted, .field-help { color: var(--muted); }
 .record-id { border-color: var(--border); color: var(--ink); background: var(--surface-muted); }
 .button-link { background: var(--accent); }
 .button-link:hover { background: var(--accent-strong); }
+.button-link:hover, .button-link:active { color: #fff; }
 .button-secondary { background: var(--surface-muted); color: var(--ink); border-color: var(--border); }
 .button-secondary:hover { background: #e5eded; }
 .button-danger, .button-danger:hover { background: var(--danger); }
