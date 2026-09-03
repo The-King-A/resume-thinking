@@ -690,8 +690,11 @@ h3, h4, h5, strong { color: var(--text-h); }
 .score-band > div span { color: var(--muted); font-size: .75rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .score-band > div strong { color: var(--accent-strong); font-size: 2.625rem; line-height: .98; }
 .score-band dl { align-self: stretch; grid-template-columns: repeat(5, minmax(5.5rem, 1fr)); gap: 0; }
-.score-band dl > div { min-width: 0; padding: .15rem .875rem; border-left: 1px solid var(--border); }
-.score-band dl > div:first-child { padding-left: 0; border-left: 0; }
+.score-band dl > dt, .score-band dl > dd { min-width: 0; padding: .15rem .875rem; }
+.score-band dl > dt { grid-row: 1; }
+.score-band dl > dd { grid-row: 2; }
+.score-band dl > dt:nth-of-type(n + 2), .score-band dl > dd:nth-of-type(n + 2) { border-left: 1px solid var(--border); }
+.score-band dl > dt:first-of-type, .score-band dl > dd:first-of-type { padding-left: 0; }
 .score-band dt { color: var(--muted); font-size: .6875rem; line-height: 1.35; text-transform: uppercase; }
 .score-band dd { margin: .45rem 0 0; color: var(--ink); font-size: 1.125rem; line-height: 1; }
 .evidence-table-wrap { border-block: 1px solid var(--border); background: var(--surface); -webkit-overflow-scrolling: touch; }
@@ -727,13 +730,23 @@ h3, h4, h5, strong { color: var(--text-h); }
 .suggestion-wording_only_rewrite .state-badge { background: var(--surface-muted); color: var(--text); }
 .suggestion-needs_user_confirmation .state-badge { border-color: #e4c98d; background: var(--warning-bg); color: #805d13; }
 .suggestion-risky_or_unsupported .state-badge { border-color: #e5a39e; background: var(--danger-bg); color: var(--danger); }
+.review-plan-high { background: var(--success-bg); }
+.review-plan-high .state-badge { border-color: #9cc9ad; background: var(--surface); color: var(--success); }
+.review-plan-medium { background: var(--warning-bg); }
+.review-plan-medium .state-badge { border-color: #e4c98d; background: var(--surface); color: #805d13; }
+.review-plan-low { background: var(--danger-bg); }
+.review-plan-low .state-badge { border-color: #e5a39e; background: var(--surface); color: var(--danger); }
 
 @media (max-width: 800px) {
   .result-workspace { padding-top: 2rem; }
   .score-band { gap: 1.25rem; }
   .score-band dl { gap: 0; }
-  .score-band dl > div:nth-child(3) { border-left: 0; padding-left: 0; }
-  .score-band dl > div { padding-inline: .75rem; }
+  .score-band dl > dt, .score-band dl > dd { grid-row: auto; padding-inline: .75rem; }
+  .score-band dl > dt:nth-of-type(1), .score-band dl > dd:nth-of-type(1),
+  .score-band dl > dt:nth-of-type(3), .score-band dl > dd:nth-of-type(3),
+  .score-band dl > dt:nth-of-type(5), .score-band dl > dd:nth-of-type(5) { grid-column: 1; border-left: 0; padding-left: 0; }
+  .score-band dl > dt:nth-of-type(2), .score-band dl > dd:nth-of-type(2),
+  .score-band dl > dt:nth-of-type(4), .score-band dl > dd:nth-of-type(4) { grid-column: 2; }
   .review-plan-variant:first-child { padding-left: 0; }
 }
 
@@ -742,8 +755,8 @@ h3, h4, h5, strong { color: var(--text-h); }
   .job-description { padding: 1rem; }
   .score-band { margin-block: 1.5rem 2rem; padding-block: 1rem; }
   .score-band dl { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: .75rem; }
-  .score-band dl > div, .score-band dl > div:nth-child(3) { padding-left: .75rem; border-left: 1px solid var(--border); }
-  .score-band dl > div:nth-child(odd) { padding-left: 0; border-left: 0; }
+  .score-band dl > dt, .score-band dl > dd { padding-left: .75rem; border-left: 1px solid var(--border); }
+  .score-band dl > dt:nth-of-type(odd), .score-band dl > dd:nth-of-type(odd) { padding-left: 0; border-left: 0; }
   .review-plan { padding: 1rem; }
   .review-plan-variant, .review-plan-variant:first-child { padding-inline: 0; }
   .review-plan-variant + .review-plan-variant { border-left: 0; }
@@ -751,6 +764,9 @@ h3, h4, h5, strong { color: var(--text-h); }
 
 @media (max-width: 390px) {
   .score-band dl { grid-template-columns: 1fr; }
-  .score-band dl > div, .score-band dl > div:nth-child(odd), .score-band dl > div:nth-child(3) { padding: .6rem 0 0; border-left: 0; border-top: 1px solid var(--border); }
-  .score-band dl > div:first-child { padding-top: 0; border-top: 0; }
+  .score-band dl > dt, .score-band dl > dd,
+  .score-band dl > dt:nth-of-type(odd), .score-band dl > dd:nth-of-type(odd),
+  .score-band dl > dt:nth-of-type(3), .score-band dl > dd:nth-of-type(3) { padding: .6rem 0 0; border-left: 0; border-top: 1px solid var(--border); }
+  .score-band dl > dt, .score-band dl > dd { grid-column: 1; }
+  .score-band dl > dt:first-of-type, .score-band dl > dd:first-of-type { padding-top: 0; border-top: 0; }
 }

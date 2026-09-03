@@ -28,3 +28,16 @@ Lightweight checks:
 Concern:
 
 - The existing markup does not expose dedicated low/medium/high classes for every review-plan label, so the plan remains differentiated primarily through hierarchy and existing state badges while suggestion state classes receive explicit semantic treatments.
+
+## Fix Round
+
+Resolved review findings:
+
+- Updated score styling to target the actual direct `dt/dd` children emitted by the score-band `dl`; each score label/value pair now remains readable at the 800px, 600px, and 390px breakpoints.
+- Added the computed `reviewPlanLevel` hook from the existing review-plan label and bound `review-plan-high`, `review-plan-medium`, or `review-plan-low` on the existing article. Each level uses a distinct semantic surface and badge treatment without changing data, behavior, routes, or test attributes.
+
+Fix-round checks:
+
+- `git diff --check -- front/src/style.css front/src/views/MatchResultView.vue` passed.
+- Confirmed the score selectors target `dl > dt`/`dl > dd` and the three review-plan level classes are present in the stylesheet and template binding.
+- No full project test suite was run, per the task brief.
