@@ -198,7 +198,7 @@ code {
 .global-brand { color: #123f38; font-weight: 700; text-decoration: none; }
 .global-nav-actions { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .global-identity { color: #687386; font-size: .8125rem; overflow-wrap: anywhere; }
-.record-id { display: inline-block; margin-right: 8px; padding: 2px 6px; border: 1px solid #cfd4dc; border-radius: 4px; color: #334155; font: 12px var(--mono); background: #f8fafc; }
+.record-id { display: inline-block; margin-right: 8px; padding: 2px 6px; border: 1px solid #cfd4dc; border-radius: 4px; color: #334155; font: .75rem var(--mono); background: #f8fafc; }
 @media (max-width: 600px) { .global-nav { align-items: flex-start; flex-direction: column; padding: 12px 16px; } .global-nav-actions { width: 100%; justify-content: space-between; } }
 
 #center {
