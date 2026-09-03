@@ -661,3 +661,14 @@ h3, h4, h5, strong { color: var(--text-h); }
   .dialog-backdrop { padding: .625rem; }
   .dialog-panel { width: min(100%, calc(100vw - 1.25rem)); padding: 1rem; }
 }
+
+/* Review correction: semantic state uses surface/text contrast, not colored rails. */
+.operation-status,
+.retention-note,
+.status-panel { border-left-width: 1px; border-left-color: var(--border); }
+.operation-status:has(.error) { border-left-color: var(--border); }
+.operation-status:has(.button-link):not(:has(.error)) { border-left-color: var(--border); }
+.status-panel:has(.error) { border-color: #e5a39e; background: var(--danger-bg); color: var(--danger); }
+.status-panel:has(.error) .error { color: var(--danger); }
+.empty-state:has(.error) { border-color: #e5a39e; background: var(--danger-bg); color: var(--danger); }
+.empty-state:has(.error) h2 { color: var(--danger); }

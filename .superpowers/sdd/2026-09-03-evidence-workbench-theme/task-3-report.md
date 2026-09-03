@@ -31,3 +31,9 @@ Lightweight checks:
 Concern:
 
 - The existing templates do not expose separate classes or attributes for timeout versus blocked task states, so those states intentionally share the error semantic surface while their existing labels remain distinct.
+
+Review follow-up:
+
+- Added `.status-panel:has(.error)` and `.empty-state:has(.error)` danger surfaces so load failures are distinct from loading/empty states without template changes.
+- Reduced the Task 3-added colored side rails on `.operation-status`, `.retention-note`, and `.status-panel` to 1px neutral separators; semantic color remains in backgrounds and text.
+- Re-ran `git diff --check` and the required-selector presence check; both passed. No full project test suite was run.
