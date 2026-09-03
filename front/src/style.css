@@ -785,3 +785,114 @@ h3, h4, h5, strong { color: var(--text-h); }
   .score-band dl > dt:nth-of-type(4), .score-band dl > dd:nth-of-type(4) { grid-column: 1; }
   .score-band dl > dt:first-of-type, .score-band dl > dd:first-of-type { padding-top: 0; border-top: 0; }
 }
+
+/* Auth, protected dialogs, and transient feedback. */
+.auth-page {
+  width: min(100%, 54rem);
+  min-height: calc(100svh - 4.125rem);
+  display: grid;
+  align-items: center;
+  padding: 3.5rem 2rem;
+}
+.auth-panel {
+  width: min(100%, 28rem);
+  padding: 2rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 1px 0 rgb(31 41 51 / 5%);
+}
+.auth-panel h1 { margin: .5rem 0 .75rem; font-size: 2rem; line-height: 1.15; }
+.auth-panel > .muted { max-width: 42ch; line-height: 1.55; }
+.auth-panel form { margin: 1.5rem 0 1.25rem; gap: 1rem; }
+.auth-panel .el-form-item { margin: 0; }
+.auth-panel .el-form-item__label { color: var(--text-h); font-size: .875rem; line-height: 1.4; }
+.auth-panel .el-form-item__error { color: var(--danger); font-size: .75rem; line-height: 1.4; }
+.auth-panel form > button { width: 100%; min-height: 2.75rem; margin-top: .25rem; }
+.auth-panel fieldset { margin-top: .25rem; padding: .875rem; border-color: var(--border); background: var(--surface-muted); }
+.auth-panel fieldset legend { padding-inline: .25rem; color: var(--text-h); font-size: .8125rem; font-weight: 700; }
+.auth-panel fieldset .notice { margin-top: .25rem; }
+.auth-links { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; justify-items: stretch; }
+.auth-links a, .auth-panel > a { overflow-wrap: anywhere; }
+.auth-links a { min-height: 2.5rem; display: inline-flex; align-items: center; justify-content: center; padding: .5rem .75rem; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-muted); text-align: center; }
+.auth-links a:hover { border-color: var(--accent-border); background: var(--accent-bg); }
+.auth-panel > a { display: inline-block; margin-top: .25rem; }
+
+.notice, .error, .success {
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.notice { border: 1px solid var(--accent-border); border-left: 1px solid var(--accent-border); border-radius: 4px; padding: .75rem .875rem; background: var(--accent-bg); color: var(--accent-strong); }
+.error, .success { margin: 0; padding: .625rem .75rem; border: 1px solid; border-radius: 4px; font-weight: 500; }
+.error { border-color: #e5a39e; background: var(--danger-bg); color: var(--danger); }
+.success { border-color: #9cc9ad; background: var(--success-bg); color: var(--success); }
+
+.dialog-backdrop { padding: 1rem; background: rgb(31 41 51 / 68%); }
+.dialog-panel {
+  width: min(100%, 30rem);
+  max-width: 100%;
+  max-height: calc(100svh - 2rem);
+  overflow: auto;
+  padding: 1.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 16px 40px rgb(31 41 51 / 30%);
+}
+.dialog-panel:focus { outline: 2px solid var(--focus); outline-offset: 3px; }
+.dialog-panel h2 { margin: 0; line-height: 1.25; overflow-wrap: anywhere; }
+.dialog-panel .muted { line-height: 1.6; overflow-wrap: anywhere; }
+.dialog-panel:has(.button-danger) { border-color: #e5a39e; }
+.dialog-panel:has(.button-danger) h2 { color: var(--danger); }
+.dialog-heading { min-width: 0; align-items: flex-start; }
+.dialog-heading h2 { flex: 1; }
+.dialog-close { flex: 0 0 auto; border-color: var(--border); background: var(--surface-muted); color: var(--text-h); }
+.dialog-close:hover { border-color: var(--accent-border); background: var(--accent-bg); color: var(--accent-strong); }
+.dialog-close:active { background: var(--border); }
+.dialog-panel label strong { color: var(--text-h); }
+.dialog-panel input { min-height: 2.75rem; }
+.form-actions { align-items: center; gap: .75rem; }
+.form-actions button { min-height: 2.5rem; }
+.dialog-panel .form-actions { margin-top: 1.5rem; }
+.dialog-panel .form-actions .button-secondary { order: 0; }
+.dialog-panel .form-actions .button-danger,
+.dialog-panel .form-actions > button:not(.button-secondary):last-child { order: 1; }
+.model-profile-dialog { width: min(45rem, 100%); }
+.model-profile-dialog .model-profile-editor { min-width: 0; }
+
+/* Element Plus renders notifications outside the application root. */
+.el-message {
+  min-width: min(22rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgb(31 41 51 / 18%);
+}
+.el-message .el-message__content { overflow-wrap: anywhere; line-height: 1.45; }
+.el-message--success { border-color: #9cc9ad; background: var(--success-bg); color: var(--success); }
+.el-message--error { border-color: #e5a39e; background: var(--danger-bg); color: var(--danger); }
+.el-message--success .el-message__content, .el-message--error .el-message__content { color: inherit; }
+
+@media (max-width: 600px) {
+  .auth-page { min-height: 0; align-items: start; padding: 2rem 1rem 3rem; }
+  .auth-panel { padding: 1.5rem; }
+  .dialog-panel { padding: 1.5rem; }
+}
+@media (max-width: 480px) {
+  .auth-page { padding: 1.5rem .75rem 2.5rem; }
+  .auth-panel { padding: 1.25rem; }
+  .auth-panel h1 { font-size: 1.75rem; }
+  .auth-links { grid-template-columns: 1fr; }
+  .dialog-backdrop { padding: .625rem; }
+  .dialog-panel { width: 100%; max-height: calc(100svh - 1.25rem); padding: 1.25rem; }
+  .dialog-panel .form-actions { display: grid; grid-template-columns: 1fr; }
+  .dialog-panel .form-actions button { width: 100%; }
+}
+@media (max-width: 390px) {
+  .auth-page { padding-inline: .625rem; }
+  .auth-panel { padding: 1rem; }
+  .dialog-panel { padding: 1rem; }
+}
