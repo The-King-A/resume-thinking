@@ -196,7 +196,7 @@ code {
 .app-shell { min-height: 100svh; }
 .global-nav { display: flex; align-items: center; gap: 20px; padding: 10px 28px; border-bottom: 1px solid #111a21; background: var(--ink); text-align: left; }
 .global-brand { flex: 0 0 auto; color: #f4f8f7; font-weight: 700; text-decoration: none; }
-.global-brand:hover { color: #fff; }
+.global-brand:hover, .global-brand:active { color: #fff; }
 .global-nav-links { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .global-nav-link { display: inline-flex; align-items: center; min-height: 34px; border-radius: 4px; padding: 5px 10px; color: #c9d7d8; font-size: .875rem; text-decoration: none; transition: background-color .15s ease, color .15s ease; }
 .global-nav-link:hover { background: rgb(255 255 255 / 10%); color: #fff; }
@@ -426,8 +426,8 @@ a { color: #1d4ed8; }
 .alternative-directions ul { display: grid; gap: 9px; margin: 10px 0 0; padding-left: 18px; color: #27364a; }
 .alternative-directions li { padding-left: 2px; }
 .alternative-directions li strong, .alternative-directions li span { display: block; }
-.alternative-directions li span { margin-top: 2px; color: #687386; line-height: 1.45; }
-.alternative-directions small { display: block; margin-top: 10px; color: #687386; line-height: 1.45; }
+.alternative-directions li span { margin-top: 2px; color: var(--muted); line-height: 1.45; }
+.alternative-directions small { display: block; margin-top: 10px; color: var(--muted); line-height: 1.45; }
 .subsection-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 26px 0 12px; }
 .subsection-heading h3 { margin: 0; color: #123f38; font-size: 1.125rem; }
 .subsection-heading .muted { margin: 0; }
@@ -502,11 +502,12 @@ h3, h4, h5, strong { color: var(--text-h); }
 .counter:hover { border-color: var(--accent); }
 .global-nav { border-color: #111a21; background: var(--ink); }
 .global-brand { color: #f4f8f7; }
-.global-brand:hover { color: #fff; }
+.global-brand:hover, .global-brand:active { color: #fff; }
 .global-identity { color: #b8c9ca; }
 .global-nav-link { color: #c9d7d8; }
 .global-nav-link:hover { color: #fff; }
 .global-nav-link-active { color: #fff; }
+.global-nav-link:active { color: #fff; }
 .global-nav-link-context-active { background: var(--accent); color: #fff; }
 .global-nav-link-context-active:hover { background: var(--accent-strong); color: #fff; }
 .muted, .field-help { color: var(--muted); }

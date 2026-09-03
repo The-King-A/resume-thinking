@@ -10,3 +10,9 @@ Checks:
 - `pnpm build` from `front/` passed.
 - `git diff --check` passed for the changed shell files.
 - Full test suite was intentionally not run.
+
+Additional accessibility polish:
+
+- Replaced the alternative-directions hardcoded muted text color with `var(--muted)` for stronger contrast on review-plan surfaces.
+- Added `.global-brand:active { color: #fff; }` alongside the hover state to prevent the generic warning active color on graphite.
+- Added `.global-nav-link:active { color: #fff; }` so navigation text remains readable against teal during activation.
