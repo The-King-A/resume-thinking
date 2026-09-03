@@ -584,7 +584,7 @@ h3, h4, h5, strong { color: var(--text-h); }
 .operation-panel input[type='file'] { padding: .625rem .75rem; background: var(--surface-muted); }
 .operation-panel textarea { min-height: 10rem; }
 .operation-panel > button { width: 100%; min-height: 2.75rem; margin-top: .25rem; }
-.operation-status { top: 1.5rem; gap: .75rem; border: 1px solid var(--accent-border); border-left-width: 3px; border-radius: 6px; padding: 1.25rem; background: var(--accent-bg); }
+.operation-status { top: 1.5rem; gap: .75rem; border: 1px solid var(--border); border-radius: 6px; padding: 1.25rem; background: var(--accent-bg); }
 .operation-status h2 { margin: 0; overflow-wrap: anywhere; }
 .operation-status p { overflow-wrap: anywhere; }
 .operation-status .record-id { max-width: 100%; white-space: normal; overflow-wrap: anywhere; vertical-align: middle; }
@@ -611,10 +611,10 @@ h3, h4, h5, strong { color: var(--text-h); }
 .profile-grid > section { min-width: 0; padding: 1.5rem; border-color: var(--border); border-radius: 6px; }
 .model-profiles-workspace { gap: 1.5rem; }
 .model-profile-list .section-heading { margin: 0 0 .75rem; }
-.retention-note { margin: 1.25rem 0; border: 1px solid var(--border); border-left: 3px solid var(--muted); border-radius: 4px; padding: .75rem .875rem; overflow-wrap: anywhere; }
+.retention-note { margin: 1.25rem 0; border: 1px solid var(--border); border-left: 1px solid var(--border); border-radius: 4px; padding: .75rem .875rem; overflow-wrap: anywhere; }
 .empty-state,
 .status-panel { margin: 1.5rem 0; border-color: var(--border); border-radius: 6px; padding: 1.5rem; }
-.status-panel { border-left: 3px solid var(--accent); background: var(--accent-bg); color: var(--accent-strong); }
+.status-panel { border-left: 1px solid var(--border); background: var(--accent-bg); color: var(--accent-strong); }
 .empty-state { background: var(--surface-muted); color: var(--text); }
 .empty-state h2 { margin-top: 0; }
 .filter-bar { margin: 1.25rem 0; gap: .75rem; flex-wrap: wrap; }

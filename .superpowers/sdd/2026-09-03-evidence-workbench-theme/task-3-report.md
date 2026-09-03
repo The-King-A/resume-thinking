@@ -41,3 +41,7 @@ Review follow-up:
 Final review correction:
 
 - Removed the danger border recoloring from `.status-panel:has(.error)` so its 1px left separator remains `var(--border)` neutral; danger semantics remain in the background and text.
+
+Detector follow-up:
+
+- Replaced the original 3px declarations at the source rules for `.operation-status`, `.retention-note`, and `.status-panel` with explicit `1px solid var(--border)` separators. Existing semantic backgrounds/text and `:has()` state rules are unchanged.
