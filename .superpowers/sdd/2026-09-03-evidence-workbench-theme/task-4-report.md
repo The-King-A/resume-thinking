@@ -25,6 +25,16 @@ Lightweight checks:
 - Required-selector presence check passed for all 14 Task 4 target selectors.
 - No full project test suite was run, per the task brief.
 
+## Fix Round 2
+
+Corrected the responsive score grid after review. At widths up to 800px, each direct `dt/dd` pair now has an explicit shared column and matching label/value rows; pairs 3-5 continue on subsequent row pairs. At 390px, all five pairs use one column with sequential matching rows. The existing score values and DOM remain unchanged.
+
+Checks:
+
+- `git diff --check -- front/src/style.css` passed.
+- Confirmed explicit pair row/column selectors exist for all five scores at both responsive layouts.
+- No full project test suite was run.
+
 Concern:
 
 - The existing markup does not expose dedicated low/medium/high classes for every review-plan label, so the plan remains differentiated primarily through hierarchy and existing state badges while suggestion state classes receive explicit semantic treatments.

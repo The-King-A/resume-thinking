@@ -741,12 +741,18 @@ h3, h4, h5, strong { color: var(--text-h); }
   .result-workspace { padding-top: 2rem; }
   .score-band { gap: 1.25rem; }
   .score-band dl { gap: 0; }
-  .score-band dl > dt, .score-band dl > dd { grid-row: auto; padding-inline: .75rem; }
-  .score-band dl > dt:nth-of-type(1), .score-band dl > dd:nth-of-type(1),
-  .score-band dl > dt:nth-of-type(3), .score-band dl > dd:nth-of-type(3),
-  .score-band dl > dt:nth-of-type(5), .score-band dl > dd:nth-of-type(5) { grid-column: 1; border-left: 0; padding-left: 0; }
-  .score-band dl > dt:nth-of-type(2), .score-band dl > dd:nth-of-type(2),
-  .score-band dl > dt:nth-of-type(4), .score-band dl > dd:nth-of-type(4) { grid-column: 2; }
+  .score-band dl > dt, .score-band dl > dd { padding-inline: .75rem; }
+  .score-band dl > dt:nth-of-type(1) { grid-column: 1; grid-row: 1; }
+  .score-band dl > dd:nth-of-type(1) { grid-column: 1; grid-row: 2; }
+  .score-band dl > dt:nth-of-type(2) { grid-column: 2; grid-row: 1; }
+  .score-band dl > dd:nth-of-type(2) { grid-column: 2; grid-row: 2; }
+  .score-band dl > dt:nth-of-type(3) { grid-column: 1; grid-row: 3; }
+  .score-band dl > dd:nth-of-type(3) { grid-column: 1; grid-row: 4; }
+  .score-band dl > dt:nth-of-type(4) { grid-column: 2; grid-row: 3; }
+  .score-band dl > dd:nth-of-type(4) { grid-column: 2; grid-row: 4; }
+  .score-band dl > dt:nth-of-type(5) { grid-column: 1; grid-row: 5; }
+  .score-band dl > dd:nth-of-type(5) { grid-column: 1; grid-row: 6; }
+  .score-band dl > dt:nth-of-type(odd), .score-band dl > dd:nth-of-type(odd) { border-left: 0; padding-left: 0; }
   .review-plan-variant:first-child { padding-left: 0; }
 }
 
@@ -764,9 +770,16 @@ h3, h4, h5, strong { color: var(--text-h); }
 
 @media (max-width: 390px) {
   .score-band dl { grid-template-columns: 1fr; }
-  .score-band dl > dt, .score-band dl > dd,
-  .score-band dl > dt:nth-of-type(odd), .score-band dl > dd:nth-of-type(odd),
-  .score-band dl > dt:nth-of-type(3), .score-band dl > dd:nth-of-type(3) { padding: .6rem 0 0; border-left: 0; border-top: 1px solid var(--border); }
-  .score-band dl > dt, .score-band dl > dd { grid-column: 1; }
+  .score-band dl > dt, .score-band dl > dd { grid-column: 1; padding: .6rem 0 0; border-left: 0; border-top: 1px solid var(--border); }
+  .score-band dl > dt:nth-of-type(1) { grid-row: 1; }
+  .score-band dl > dd:nth-of-type(1) { grid-row: 2; }
+  .score-band dl > dt:nth-of-type(2) { grid-row: 3; }
+  .score-band dl > dd:nth-of-type(2) { grid-row: 4; }
+  .score-band dl > dt:nth-of-type(3) { grid-row: 5; }
+  .score-band dl > dd:nth-of-type(3) { grid-row: 6; }
+  .score-band dl > dt:nth-of-type(4) { grid-row: 7; }
+  .score-band dl > dd:nth-of-type(4) { grid-row: 8; }
+  .score-band dl > dt:nth-of-type(5) { grid-row: 9; }
+  .score-band dl > dd:nth-of-type(5) { grid-row: 10; }
   .score-band dl > dt:first-of-type, .score-band dl > dd:first-of-type { padding-top: 0; border-top: 0; }
 }
