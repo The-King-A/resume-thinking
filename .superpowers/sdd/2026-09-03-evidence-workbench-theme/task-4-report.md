@@ -35,6 +35,11 @@ Checks:
 - Confirmed explicit pair row/column selectors exist for all five scores at both responsive layouts.
 - No full project test suite was run.
 
+## Final Fix
+
+- Added equal-specificity 390px overrides for score pairs 2 and 4 so all five `dt/dd` pairs remain in column 1 with their existing sequential rows; no implicit second grid column can be created.
+- `git diff --check -- front/src/style.css` and the focused 390px grid-column check passed.
+
 Concern:
 
 - The existing markup does not expose dedicated low/medium/high classes for every review-plan label, so the plan remains differentiated primarily through hierarchy and existing state badges while suggestion state classes receive explicit semantic treatments.

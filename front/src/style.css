@@ -781,5 +781,7 @@ h3, h4, h5, strong { color: var(--text-h); }
   .score-band dl > dd:nth-of-type(4) { grid-row: 8; }
   .score-band dl > dt:nth-of-type(5) { grid-row: 9; }
   .score-band dl > dd:nth-of-type(5) { grid-row: 10; }
+  .score-band dl > dt:nth-of-type(2), .score-band dl > dd:nth-of-type(2),
+  .score-band dl > dt:nth-of-type(4), .score-band dl > dd:nth-of-type(4) { grid-column: 1; }
   .score-band dl > dt:first-of-type, .score-band dl > dd:first-of-type { padding-top: 0; border-top: 0; }
 }
