@@ -1,5 +1,9 @@
+server:
+  address: 127.0.0.1
+
 spring:
   config:
+    import: optional:file:.env[.properties],optional:file:../../.env[.properties]
     activate:
       on-profile: local
   datasource:
@@ -11,6 +15,7 @@ spring:
       host: ${REDIS_HOST}
       port: ${REDIS_PORT}
 app:
+  local-password-reset-enabled: ${APP_LOCAL_PASSWORD_RESET_ENABLED:false}
   jwt-signing-key-base64: ${JWT_SIGNING_KEY_BASE64}
   encryption-key-base64: ${APP_ENCRYPTION_KEY_BASE64}
   python-analysis-base-url: ${PYTHON_ANALYSIS_BASE_URL}

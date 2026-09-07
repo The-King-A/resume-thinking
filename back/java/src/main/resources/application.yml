@@ -1,6 +1,8 @@
 spring:
   application:
     name: resume-platform-api
+  profiles:
+    default: local
   servlet:
     multipart:
       max-file-size: 5MB
