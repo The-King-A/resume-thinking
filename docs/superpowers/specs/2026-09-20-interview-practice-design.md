@@ -94,9 +94,17 @@ Java 负责所有写入和授权；Python 不直接访问 MySQL、Redis 或用�
 
 响应返回会话元数据和 `QUESTION_GENERATING` 状态，不返回原始简历内容、模型密钥或内部回调凭据。
 
+`GET /api/v4/interview-sessions/{sessionId}`
+
+返回会话状态、版本、题目数量和当前回答/反馈阶段，用于前端轮询；它不返回回答正文、回调凭据或未授权的关联资源。
+
 `GET /api/v4/interview-sessions/{sessionId}/questions`
 
 仅在题目生成完成后返回题目元数据和题目文本；每题必须包含题型、难度、关联岗位要求、允许引用的证据 ID 和生成原因。生成中返回 `INTERVIEW_QUESTION_NOT_READY`，失败返回可识别且不泄露模型原文的错误。
+
+`POST /api/v4/interview-sessions/{sessionId}/questions/regenerate`
+
+仅允许会话处于 `QUESTION_GENERATING` 失败后的可恢复状态或尚未提交回答时调用；请求带当前会话版本和新的幂等键。Java 清理旧题目、递增会话版本并重新派发题目任务，不能在已有回答后覆盖历史题目。
 
 ### 4.2 提交回答和读取反馈
 
