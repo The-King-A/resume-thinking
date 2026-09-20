@@ -40,7 +40,7 @@
 - 共享样例：`contracts/fixtures/v4/interview/`。
 - 契约说明：在 `contracts/README.md` 增加 v4 面试契约、版本兼容和状态机说明。
 
-v4 不复用 v2/v3 的字段语义。它只允许新增面试资源，不提供 Python 公共入口。`callbackToken` 通过已有的内部请求头/短期凭据机制带外传输，不进入 JSON、数据库日志或前端响应。所有 v4 错误仍使用现有安全错误信封语义，并使用面试专用稳定错误码：
+v4 不复用 v2/v3 的字段语义。它只允许新增面试资源，不提供 Python 公共入口。服务间认证仍通过 `X-Internal-Service-Token` 请求头；每次面试任务的 Java 签发 `callbackToken` 仅存在于 Java 到 Python 的受控内部 JSON，供 Python 向 Java 回调时使用，且不进入数据库日志、fixtures、公共 API 或前端响应。所有 v4 错误仍使用现有安全错误信封语义，并使用面试专用稳定错误码：
 
 | 错误码 | 语义 | 是否可重试 |
 | --- | --- | --- |
@@ -90,7 +90,7 @@ Java 负责所有写入和授权；Python 不直接访问 MySQL、Redis 或用�
 
 `POST /api/v4/interview-sessions`
 
-请求必须包含 `resumeId`、`revisionId`、`matchTaskId`、`matchResultId`、`llmProfileId`、`jobFamily=JAVA_BACKEND` 和幂等键。Java 必须验证：匹配任务成功、结果存在有效证据、修订版本仍为当前有效版本、模型配置归属于用户、简历未删除/归档，以及请求没有跨用户引用。
+请求必须包含 `resumeId`、`revisionId`、`matchTaskId`、`llmProfileId`、`jobFamily=JAVA_BACKEND` 和幂等键。v2/v3 不对外暴露独立的 `matchResultId`，因此 Java 以 `matchTaskId` 在权威存储中解析匹配结果，并验证任务成功、结果存在有效证据、修订版本仍为当前有效版本、模型配置归属于用户、简历未删除/归档，以及请求没有跨用户引用。
 
 响应返回会话元数据和 `QUESTION_GENERATING` 状态，不返回原始简历内容、模型密钥或内部回调凭据。
 
