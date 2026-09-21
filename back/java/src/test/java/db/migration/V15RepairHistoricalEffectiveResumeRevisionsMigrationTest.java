@@ -173,6 +173,10 @@ class V15RepairHistoricalEffectiveResumeRevisionsMigrationTest {
         Context context = mock(Context.class);
         Connection connection = mock(Connection.class);
         Statement statement = mock(Statement.class);
+        PreparedStatement clear = mock(PreparedStatement.class);
+        PreparedStatement promote = mock(PreparedStatement.class);
+        PreparedStatement publish = mock(PreparedStatement.class);
+        PreparedStatement restore = mock(PreparedStatement.class);
         ResultSet targets = mock(ResultSet.class);
         ResultSet active = mock(ResultSet.class);
         ResultSet candidates = mock(ResultSet.class);
@@ -183,6 +187,13 @@ class V15RepairHistoricalEffectiveResumeRevisionsMigrationTest {
             if (query.contains("analysis_tasks")) return candidates;
             if (query.contains("effective_revision_id IS NOT NULL")) return active;
             return targets;
+        });
+        when(connection.prepareStatement(anyString())).thenAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            if (sql.contains("effective_title_key = NULL")) return clear;
+            if (sql.startsWith("UPDATE resume_revisions")) return promote;
+            if (sql.startsWith("UPDATE analysis_tasks")) return publish;
+            return restore;
         });
         when(targets.next()).thenReturn(true, false);
         when(targets.getString("id")).thenReturn("resume001");

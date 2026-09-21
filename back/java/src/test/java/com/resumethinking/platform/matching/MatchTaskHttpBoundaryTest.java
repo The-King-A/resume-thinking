@@ -68,7 +68,7 @@ class MatchTaskHttpBoundaryTest {
     }
 
     @Test
-    void duplicateTitlePollingUsesStableConflictWithoutV3OnlyFields() throws Exception {
+    void duplicateTitlePollingUsesTheDocumentedV2ConflictDetail() throws Exception {
         String actorId = TestIds.user();
         when(jwt.parse(anyString())).thenReturn(Optional.of(new JwtService.Claims(actorId, UserRole.USER)));
         when(service.getTask("task901", actorId, UserRole.USER))
@@ -77,6 +77,7 @@ class MatchTaskHttpBoundaryTest {
         mvc.perform(get("/api/v2/match-tasks/task901").header("Authorization", "Bearer token"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("DUPLICATE_RESOURCE"))
-                .andExpect(jsonPath("$.detailCode").doesNotExist());
+                .andExpect(jsonPath("$.detailCode").value("DUPLICATE_RESUME_TITLE"))
+                .andExpect(jsonPath("$.details[0].field").value("title"));
     }
 }

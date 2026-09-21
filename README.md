@@ -1,8 +1,11 @@
-# 简历匹配平台
+# ai-resume-thinking：简历驱动岗位匹配与模拟面试平台
 
 本仓库包含简历匹配平台的首个混合运行环境：Spring Boot 公共 API、FastAPI
 分析服务和 Vue 网页应用。版本化 API 与内部消息契约位于
 [`contracts/`](contracts/README.md)，它们是各服务共同遵循的接口依据。
+
+从 GitHub 下载 v2.0.0 的用户请先阅读 [`DEPLOYMENT.md`](DEPLOYMENT.md)，其中包含依赖安装、
+数据库初始化、服务启动顺序和本地验证步骤。
 
 当前运行时契约为 v2：公共 API 使用 `/api/v2`，Java 与 Python 的内部任务/回调使用
 `/internal/v2`。业务主键采用可读编号（例如 `user001`、`resume001`、`task001`）；Redis
@@ -108,7 +111,7 @@ FastAPI 在未显式设置进程环境变量时，会从仓库根目录 `.env` �
 `finish_reason=length` 的不完整响应，不会把截断 JSON 当成成功结果。
 
 ```powershell
-C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m uvicorn app.main:app --app-dir back\python --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir back\python --host 127.0.0.1 --port 8000
 ```
 
 启动完成后访问 `http://127.0.0.1:8000/health`，返回 `{"status":"ok"}` 即表示分析服务
@@ -124,8 +127,8 @@ docker compose -f docker-compose.redis.yml up -d
 
 ```powershell
 back\java\mvnw.cmd -q -DskipTests compile
-C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pip install -e "back/python[test]"
-C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest back/python/tests -q
+.\.venv\Scripts\python.exe -m pip install -e "back/python[test]"
+.\.venv\Scripts\python.exe -m pytest back/python/tests -q
 pnpm --dir front install
 pnpm --dir front run build
 ```
@@ -142,7 +145,7 @@ pnpm --dir front run build
 数据库或模型服务即可运行，并会验证仓库中已提交的 TXT/DOCX/PDF 输入：
 
 ```powershell
-C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest tests/integration/assert_mvp_flow.py -q
+.\.venv\Scripts\python.exe -m pytest tests/integration/assert_mvp_flow.py -q
 ```
 
 要验证 Java 到 Python 的交接，先将 `.env.example` 复制为 `.env`，把所有占位值

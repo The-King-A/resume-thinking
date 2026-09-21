@@ -82,7 +82,7 @@ describe('AdminRecoveryView role boundary', () => {
     await flushPromises()
 
     expect(router.push).toHaveBeenCalledWith('/resumes')
-    expect(notify).toHaveBeenCalledWith('简历已恢复，正在打开有效简历列表。', 'success')
+    expect(notify).toHaveBeenCalledWith('已恢复“admin-visible-resume”简历。', 'success')
   })
 
   it('shows a specific duplicate-title error and keeps the administrator row', async () => {

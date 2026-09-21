@@ -60,7 +60,7 @@ describe('RecoveryView owner isolation', () => {
     await flushPromises()
 
     expect(router.push).toHaveBeenCalledWith('/resumes')
-    expect(notify).toHaveBeenCalledWith('简历已恢复，正在打开有效简历列表。', 'success')
+    expect(notify).toHaveBeenCalledWith('已恢复“my-resume”简历。', 'success')
   })
 
   it('keeps a recovery row and shows a specific duplicate-title error', async () => {
