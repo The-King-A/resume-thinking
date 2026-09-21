@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+from decimal import Decimal, ROUND_HALF_UP
+
 from .models import ScoreBreakdown
 
 
 def composite_score(*, skills: float, projects: float, work_content: float, education_experience: float, soft_skills: float) -> float:
-    return round(0.40 * skills + 0.25 * projects + 0.15 * work_content + 0.10 * education_experience + 0.10 * soft_skills, 4)
+    weighted = (
+        Decimal(str(skills)) * Decimal("0.40")
+        + Decimal(str(projects)) * Decimal("0.25")
+        + Decimal(str(work_content)) * Decimal("0.15")
+        + Decimal(str(education_experience)) * Decimal("0.10")
+        + Decimal(str(soft_skills)) * Decimal("0.10")
+    )
+    return float(weighted.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
 
 
 def score_breakdown(*, skills: float, projects: float, work_content: float, education_experience: float, soft_skills: float) -> ScoreBreakdown:

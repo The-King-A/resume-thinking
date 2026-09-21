@@ -1,5 +1,9 @@
 .worktrees/
 .superpowers/
+.idea/
+back/.idea/
+.pytest_cache/
+database/backups/
 .env
 .env.*
 !.env.example

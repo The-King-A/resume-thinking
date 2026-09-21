@@ -1,0 +1,31 @@
+{
+  "contractVersion": "4.0",
+  "workType": "ANSWER_ANALYSIS",
+  "sessionId": "session001",
+  "revisionId": "revision001",
+  "matchTaskId": "task001",
+  "sessionVersion": 2,
+  "attempt": 1,
+  "callbackId": "callback002",
+  "callbackToken": "placeholder-callback-token-000000000000",
+  "payloadHash": "8c4e4ee13bee42dd82567a3dd879228c219ababe921535b9e9bf638d873850fd",
+  "outcome": "SUCCEEDED",
+  "correlationId": "00000000-0000-4000-8000-000000000002",
+  "feedback": {
+    "feedbackId": "feedback001",
+    "answerId": "answer001",
+    "state": "FEEDBACK_READY",
+    "relevance": "HIGH",
+    "completeness": "MEDIUM",
+    "technicalAccuracy": "MEDIUM",
+    "factualConsistency": "HIGH",
+    "clarity": "MEDIUM",
+    "evidenceIds": ["evidence001"],
+    "riskFlags": [],
+    "claims": [{ "id": "claim001", "claimText": "可补充接口职责", "state": "NEEDS_USER_CONFIRMATION", "evidenceIds": [], "applied": false }],
+    "improvementSuggestion": "补充一个可核验的技术细节。",
+    "suggestedAnswer": "我会说明接口职责、技术取舍和可核验结果。",
+    "answerComparison": "当前回答覆盖了职责，但还缺少技术取舍和结果证据。",
+    "version": 1
+  }
+}

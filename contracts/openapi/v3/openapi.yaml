@@ -1,0 +1,396 @@
+openapi: 3.1.0
+info:
+  title: Resume Matching Platform Java API
+  version: 3.0.0
+  license:
+    name: UNLICENSED
+    identifier: LicenseRef-UNLICENSED
+  description: |
+    Java owns the public v3 lifecycle boundary. Responses and errors contain metadata
+    only; resume contents, provider diagnostics, credentials, and callback tokens are excluded.
+servers:
+  - url: http://127.0.0.1:8080
+    description: Local development server
+tags:
+  - name: Resumes
+    description: Effective resume lifecycle metadata and deliberate soft deletion.
+  - name: Match Submissions
+    description: Java-owned asynchronous submissions for Java backend matching.
+security:
+  - bearerAuth: []
+paths:
+  /api/v3/match-submissions:
+    post:
+      tags: [Match Submissions]
+      summary: Create an initial resume match submission
+      operationId: createInitialMatchSubmission
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/InitialMatchSubmissionRequest'
+      responses:
+        '202':
+          description: The submission was accepted for asynchronous processing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchTask'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedFile' }
+  /api/v3/resumes:
+    get:
+      tags: [Resumes]
+      summary: List resumes visible to the authenticated actor
+      operationId: listResumesV3
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Resume lifecycle metadata without resume contents.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EffectiveResumePage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v3/resumes/{resumeId}/match-submissions:
+    parameters:
+      - $ref: '#/components/parameters/ResumeId'
+    post:
+      tags: [Match Submissions]
+      summary: Re-match a resume from its expected effective revision
+      operationId: createRematchSubmission
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RematchSubmissionRequest'
+      responses:
+        '202':
+          description: The re-match was accepted for asynchronous processing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchTask'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ResourceNotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedFile' }
+  /api/v3/resumes/{resumeId}/match-context:
+    parameters:
+      - $ref: '#/components/parameters/ResumeId'
+    get:
+      tags: [Resumes]
+      summary: Get effective or pending resume matching prefill context
+      operationId: getResumeMatchContext
+      description: |
+        Returns owner-scoped prefill metadata for an effective or pending candidate. Existing
+        administrator lifecycle authority applies; hidden or non-owned resumes use the same 404
+        response as an unknown ID. The response never includes source document contents,
+        ciphertext, API keys, callback tokens, or provider diagnostics.
+      responses:
+        '200':
+          description: Safe prefill metadata selected from the pending candidate when present, otherwise the latest successful candidate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchContext'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ResourceNotFound' }
+  /api/v3/resumes/{resumeId}:
+    parameters:
+      - $ref: '#/components/parameters/ResumeId'
+    delete:
+      tags: [Resumes]
+      summary: Soft-delete a resume and stop its pending lifecycle work
+      operationId: softDeleteResumeV3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteResumeRequest'
+      responses:
+        '204':
+          description: The resume was soft-deleted.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ResourceNotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ResumeId:
+      name: resumeId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^resume[0-9]{3,}$'
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+  responses:
+    BadRequest:
+      description: The request is invalid.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+    Unauthorized:
+      description: Authentication is required or invalid.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+    InvalidCredentials:
+      description: The supplied username/email or password did not authenticate. This response is identical for an unknown account and an incorrect password.
+      content: { application/json: { schema: { $ref: '#/components/schemas/InvalidCredentialsError' } } }
+    Conflict:
+      description: The request conflicts with the current lifecycle state.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+    ResourceNotFound:
+      description: The resource does not exist or is not visible to this actor.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ResourceNotFoundError' } } }
+    PayloadTooLarge:
+      description: The uploaded file exceeds the configured limit.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+    UnsupportedFile:
+      description: The uploaded file type is unsupported.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+  schemas:
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable, detailCode]
+      properties:
+        code:
+          type: string
+          enum: [VALIDATION_ERROR, AUTHENTICATION_REQUIRED, INVALID_CREDENTIALS, FORBIDDEN, DUPLICATE_RESOURCE, INVALID_CONFIRMATION, VERSION_CONFLICT, RESOURCE_NOT_FOUND, RESUME_ARCHIVED, RESUME_NOT_EFFECTIVE, RESUME_SOFT_DELETED, TASK_GONE, STALE_ATTEMPT, IDEMPOTENCY_CONFLICT, MODEL_UNAVAILABLE, PYTHON_SERVICE_UNAVAILABLE, PYTHON_SERVICE_AUTHENTICATION_FAILED, MODEL_OUTPUT_INVALID, MODEL_ENDPOINT_REJECTED, CALLBACK_DELIVERY_FAILED, UNSUPPORTED_FILE, PAYLOAD_TOO_LARGE, TASK_NOT_READY]
+        message:
+          type: string
+          minLength: 1
+        correlationId:
+          type: string
+          format: uuid
+        retryable:
+          type: boolean
+        detailCode:
+          type: [string, 'null']
+          enum: [DUPLICATE_RESUME_TITLE, null]
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationDetail'
+      allOf:
+        - if:
+            properties:
+              detailCode: { const: DUPLICATE_RESUME_TITLE }
+          then:
+            properties:
+              code: { const: DUPLICATE_RESOURCE }
+    ValidationDetail:
+      type: object
+      additionalProperties: false
+      required: [field, reason]
+      properties:
+        field: { type: string, minLength: 1 }
+        reason: { type: string, minLength: 1 }
+    ResourceNotFoundError:
+      allOf:
+        - $ref: '#/components/schemas/ApiError'
+        - type: object
+          properties:
+            code: { const: RESOURCE_NOT_FOUND }
+    InvalidCredentialsError:
+      allOf:
+        - $ref: '#/components/schemas/ApiError'
+        - type: object
+          required: [code]
+          properties:
+            code: { const: INVALID_CREDENTIALS }
+    UserRole:
+      type: string
+      enum: [USER, ADMIN]
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [username, email, password, role]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 64, pattern: '^[A-Za-z0-9._-]+$' }
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, format: password, minLength: 12, maxLength: 128, writeOnly: true }
+        role: { $ref: '#/components/schemas/UserRole' }
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [identifier, password]
+      properties:
+        identifier: { type: string, minLength: 1, maxLength: 254 }
+        password: { type: string, format: password, minLength: 1, maxLength: 128, writeOnly: true }
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, username, email, role, createdAt]
+      properties:
+        id: { type: string, pattern: '^user[0-9]{3,}$' }
+        username: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/UserRole' }
+        createdAt: { type: string, format: date-time }
+    AuthResponse:
+      type: object
+      additionalProperties: false
+      required: [accessToken, tokenType, expiresIn, user]
+      properties:
+        accessToken: { type: string, minLength: 1, writeOnly: true }
+        tokenType: { type: string, const: Bearer }
+        expiresIn: { type: integer, minimum: 1 }
+        user: { $ref: '#/components/schemas/User' }
+    JobFamily:
+      type: string
+      const: JAVA_BACKEND
+    SourceType:
+      type: string
+      enum: [TXT, DOCX]
+    TaskState:
+      type: string
+      enum: [QUEUED, PROCESSING, SUCCEEDED, FAILED, TIMED_OUT, BLOCKED]
+    PublicationState:
+      type: string
+      enum: [NOT_REQUESTED, PENDING, PUBLISHED, REJECTED_DUPLICATE_TITLE]
+    InitialMatchSubmissionRequest:
+      type: object
+      additionalProperties: false
+      required: [file, llmProfileId, jobFamily, jobDescriptionText, idempotencyKey]
+      properties:
+        file: { type: string, format: binary }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        llmProfileId: { type: string, pattern: '^profile[0-9]{3,}$' }
+        jobFamily: { $ref: '#/components/schemas/JobFamily' }
+        jobDescriptionText: { type: string, minLength: 20, maxLength: 20000 }
+        idempotencyKey: { type: string, minLength: 16, maxLength: 128 }
+    RematchSubmissionRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedEffectiveRevisionId, llmProfileId, jobFamily, jobDescriptionText, idempotencyKey]
+      properties:
+        expectedEffectiveRevisionId: { type: string, pattern: '^revision[0-9]{3,}$' }
+        file: { type: string, format: binary }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        llmProfileId: { type: string, pattern: '^profile[0-9]{3,}$' }
+        jobFamily: { $ref: '#/components/schemas/JobFamily' }
+        jobDescriptionText: { type: string, minLength: 20, maxLength: 20000 }
+        idempotencyKey: { type: string, minLength: 16, maxLength: 128 }
+    Resume:
+      type: object
+      additionalProperties: false
+      required: [id, ownerId, title, sourceType, status, version, effectiveRevisionId, pendingRevisionId, latestSuccessfulTaskId, createdAt, updatedAt]
+      properties:
+        id: { type: string, pattern: '^resume[0-9]{3,}$' }
+        ownerId: { type: string, pattern: '^user[0-9]{3,}$' }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        sourceType: { $ref: '#/components/schemas/SourceType' }
+        status: { type: integer, enum: [0, 1] }
+        version: { type: integer, minimum: 0 }
+        effectiveRevisionId: { type: [string, 'null'], pattern: '^revision[0-9]{3,}$' }
+        pendingRevisionId: { type: [string, 'null'], pattern: '^revision[0-9]{3,}$' }
+        latestSuccessfulTaskId: { type: [string, 'null'], pattern: '^task[0-9]{3,}$' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    EffectiveResumeListItem:
+      allOf:
+        - $ref: '#/components/schemas/Resume'
+        - type: object
+          properties:
+            status: { const: 0 }
+            effectiveRevisionId: { type: string, pattern: '^revision[0-9]{3,}$' }
+            latestSuccessfulTaskId: { type: string, pattern: '^task[0-9]{3,}$' }
+    EffectiveResumePage:
+      type: object
+      additionalProperties: false
+      required: [items, page, pageSize, totalItems, totalPages]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/EffectiveResumeListItem' } }
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, minimum: 1 }
+        totalItems: { type: integer, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+    MatchTask:
+      type: object
+      additionalProperties: false
+      required: [id, resumeId, revisionId, llmProfileId, jobFamily, state, publicationState, attempt, resumeVersion, createdAt, updatedAt]
+      properties:
+        id: { type: string, pattern: '^task[0-9]{3,}$' }
+        resumeId: { type: string, pattern: '^resume[0-9]{3,}$' }
+        revisionId: { type: string, pattern: '^revision[0-9]{3,}$' }
+        llmProfileId: { type: string, pattern: '^profile[0-9]{3,}$' }
+        jobFamily: { $ref: '#/components/schemas/JobFamily' }
+        state: { $ref: '#/components/schemas/TaskState' }
+        publicationState: { $ref: '#/components/schemas/PublicationState' }
+        attempt: { type: integer, minimum: 1 }
+        resumeVersion: { type: integer, minimum: 0 }
+        failureCode: { type: [string, 'null'], enum: [MODEL_UNAVAILABLE, PYTHON_SERVICE_UNAVAILABLE, PYTHON_SERVICE_AUTHENTICATION_FAILED, MODEL_OUTPUT_INVALID, MODEL_ENDPOINT_REJECTED, CALLBACK_DELIVERY_FAILED, UNSUPPORTED_FILE, TASK_GONE, STALE_ATTEMPT, null] }
+        resultAvailable: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      allOf:
+        - if:
+            properties:
+              publicationState:
+                enum: [PUBLISHED, REJECTED_DUPLICATE_TITLE]
+            required: [publicationState]
+          then:
+            properties:
+              state: { const: SUCCEEDED }
+              resultAvailable: { const: true }
+    MatchContext:
+      type: object
+      additionalProperties: false
+      required: [title, effectiveRevisionId, pendingRevisionId, latestSuccessfulTaskId, llmProfileId, jobDescriptionText]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        effectiveRevisionId: { type: [string, 'null'], pattern: '^revision[0-9]{3,}$' }
+        pendingRevisionId: { type: [string, 'null'], pattern: '^revision[0-9]{3,}$' }
+        latestSuccessfulTaskId: { type: [string, 'null'], pattern: '^task[0-9]{3,}$' }
+        llmProfileId:
+          type: string
+          pattern: '^profile[0-9]{3,}$'
+          description: Profile selected from the latest task bound to pendingRevisionId when present; otherwise from latestSuccessfulTaskId.
+        jobDescriptionText:
+          type: string
+          minLength: 20
+          maxLength: 20000
+          description: Submitted job description from the same pending-or-effective candidate selected for llmProfileId.
+      not:
+        properties:
+          effectiveRevisionId: { type: 'null' }
+          pendingRevisionId: { type: 'null' }
+        required: [effectiveRevisionId, pendingRevisionId]
+    DeleteResumeRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmationText, expectedVersion]
+      properties:
+        confirmationText: { type: string, const: '确认删除简历' }
+        expectedVersion: { type: integer, minimum: 0 }

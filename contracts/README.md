@@ -18,11 +18,8 @@ Java 在派发 v2 `analysis-job` 前生成必填 `callbackId`；Python 必须在
 
 ## 契约背景
 
-本目录是首个 Java 后端岗位匹配切片的接口依据。产品需求仍记录在
-`ai-resume-job-matching-project.md.docx`；批准的本地设计位于
-`docs/superpowers/specs/2026-08-27-resume-matching-platform-design.md`。
-这里定义的字段、路径、枚举或传输行为，Java、Python 和 Vue 都必须直接采用，
-不得再各自解释产品文档。
+本目录是 Java、Python 和 Vue 共同使用的接口依据。这里定义的字段、路径、枚举或
+传输行为必须直接采用，不得由各服务自行解释或变更。
 
 ## 权威制品
 
@@ -192,6 +189,7 @@ Python 只对传输失败和 Java 5xx 响应重试，并保留原始 `callbackId
 | `VERSION_CONFLICT` | 乐观锁版本已过期。 | 否；请先刷新 |
 | `RESOURCE_NOT_FOUND` | 资源未知或对当前操作者不可见。 | 否 |
 | `RESUME_ARCHIVED` | 执行仅限活动状态的操作前必须先恢复简历。 | 否 |
+| `RESUME_NOT_EFFECTIVE` | 简历尚未完成带证据的有效匹配，不能恢复到有效简历列表。 | 否 |
 | `RESUME_SOFT_DELETED` | 简历已软删除，不能接受请求的操作。 | 否 |
 | `TASK_GONE` | 任务已删除、归档或以其他方式被阻止。 | 否 |
 | `STALE_ATTEMPT` | 回调与任务的当前 `attempt`（尝试次数）不匹配。 | 否 |
@@ -204,6 +202,62 @@ Python 只对传输失败和 Java 5xx 响应重试，并保留原始 `callbackId
 | `TASK_NOT_READY` | 任务尚未产生结果。 | 延迟轮询后可以 |
 
 ## 校验与测试样例
+
+## v4 Interview Practice
+
+面试推演使用独立的 v4 公共契约和内部契约，不改变 v2/v3 的匹配接口。
+公共路径为 `/api/v4/interview-sessions`，Python 内部入口为
+`/internal/v4/interview-jobs`，回调入口为 `/internal/v4/interview-results`。
+
+创建会话只接收 `matchTaskId` 和幂等键。Java 根据当前操作者解析成功的匹配任务、
+有效简历修订、岗位族、模型配置和证据范围；浏览器不能提交伪造的
+`resumeId`、`revisionId` 或 `llmProfileId` 作为权威上下文。
+
+v4 支持四类问题：`BASIC_CONFIRMATION`、`PROJECT_DEEP_DIVE`、`JOB_SCENARIO` 和
+`SYNTHESIS_FOLLOW_UP`。当前切片只支持一次回答和一次反馈，不实现连续多轮追问或将反馈
+写回简历/长期画像。回答在 Java 中加密保存，发送给外部模型前由 Python 脱敏；模型返回的
+新增事实必须标记 `NEEDS_USER_CONFIRMATION`，且 `applied` 永远为 `false`。
+
+权威制品如下：
+
+| 制品 | 作用 |
+| --- | --- |
+| `openapi/v4/openapi.yaml` | 面试会话、问题、回答、反馈、确认和清理接口。 |
+| `internal/v4/interview-job.schema.json` | Java 到 Python 的最小化面试任务。 |
+| `internal/v4/interview-callback.schema.json` | Python 到 Java 的严格结构化回调。 |
+| `fixtures/v4/interview/` | 成功、无效、超时、重复、过期和删除后回调样例。 |
+
+v4 回调的 `payloadHash` 覆盖除 `payloadHash` 外的完整规范化 JSON；相同回调 ID 和哈希
+只能幂等重放，删除会话、过期尝试或哈希冲突必须停止 Python 重试。服务令牌只在
+`X-Internal-Service-Token` 请求头中传输，`callbackToken` 不得出现在公共响应、日志或可提交
+fixture 中。
+
+运行契约检查：
+
+```powershell
+node contracts/node_modules/@redocly/cli/bin/cli.js lint contracts/openapi/v1/openapi.yaml contracts/openapi/v2/openapi.yaml contracts/openapi/v3/openapi.yaml contracts/openapi/v4/openapi.yaml
+node contracts/scripts/validate-contracts.mjs
+```
+
+## v3 Effective Resume Lifecycle
+
+`v3` is additive: Java remains the public API boundary while Python receives only
+the internal analysis message. Initial and re-match submissions use multipart
+requests and are restricted to `JAVA_BACKEND`. A resume exposes its effective
+revision and latest successful task as metadata; the match-context endpoint does
+not return resume contents. Internal v3 jobs and callbacks require the same
+`revisionId`, and callbacks remain strict, token-bearing transport messages that
+are never exposed through public API responses. Publication states distinguish
+unrequested, pending, published, and duplicate-title rejection outcomes.
+
+For v3 callbacks, `payloadHash` covers the complete RFC 8785 canonical callback
+after omitting only `payloadHash`; the required `revisionId` remains in the
+canonical body and is therefore hash-bound. The v2 hash representation remains
+unchanged for compatibility.
+
+The v3 fixtures use only synthetic metadata and redacted transport placeholders.
+They do not contain resume contents, provider keys, encrypted values, provider
+diagnostics, or usable callback credentials.
 
 运行当前契约检查：
 

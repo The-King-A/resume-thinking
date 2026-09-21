@@ -1,0 +1,7 @@
+{
+  "questionId": "question001",
+  "answerText": "",
+  "expectedSessionVersion": 1,
+  "idempotencyKey": "interview-answer-key-0001",
+  "unexpected": true
+}

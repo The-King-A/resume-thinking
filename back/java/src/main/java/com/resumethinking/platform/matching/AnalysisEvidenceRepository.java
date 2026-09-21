@@ -1,6 +1,8 @@
 package com.resumethinking.platform.matching;
 import org.springframework.data.repository.Repository;
+import org.springframework.data.repository.RepositoryDefinition;
 import java.util.*;
+@RepositoryDefinition(domainClass = AnalysisEvidence.class, idClass = String.class)
 public interface AnalysisEvidenceRepository extends Repository<AnalysisEvidence,String> {
  AnalysisEvidence save(AnalysisEvidence e); List<AnalysisEvidence> findByTaskId(String taskId);
  final class InMemory implements AnalysisEvidenceRepository { private final Map<String,List<AnalysisEvidence>> values=new HashMap<>(); public synchronized AnalysisEvidence save(AnalysisEvidence e){values.computeIfAbsent(e.getTaskId(),k->new ArrayList<>()).add(e);return e;} public synchronized List<AnalysisEvidence> findByTaskId(String id){return List.copyOf(values.getOrDefault(id,List.of()));} }

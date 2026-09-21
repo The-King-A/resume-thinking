@@ -1,0 +1,11 @@
+{
+  "taskId": "task004",
+  "revisionId": "revision004",
+  "attempt": 1,
+  "callbackId": "callback004",
+  "callbackToken": "REDACTED_CALLBACK_TOKEN_NOT_A_VALUE",
+  "payloadHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "outcome": "TIMED_OUT",
+  "errorCode": "MODEL_UNAVAILABLE",
+  "correlationId": "00000000-0000-4000-8000-000000000104"
+}

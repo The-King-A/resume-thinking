@@ -1,0 +1,15 @@
+{
+  "contractVersion": "4.0",
+  "workType": "ANSWER_ANALYSIS",
+  "sessionId": "session001",
+  "revisionId": "revision001",
+  "matchTaskId": "task001",
+  "sessionVersion": 2,
+  "attempt": 1,
+  "callbackId": "callback002",
+  "callbackToken": "placeholder-callback-token-000000000000",
+  "payloadHash": "f35db59a3a9a240677bb4191f9eb021ad777e6d56d3cc5f3d1325a6d21c313c1",
+  "outcome": "FAILED",
+  "correlationId": "00000000-0000-4000-8000-000000000002",
+  "errorCode": "INTERVIEW_SESSION_GONE"
+}

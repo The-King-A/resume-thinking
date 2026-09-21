@@ -7,7 +7,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Keeps Java callback validation aligned with the Python redaction boundary. */
-final class ResumeTextRedactor {
+public final class ResumeTextRedactor {
     private static final Pattern NAME_PATTERN = Pattern.compile(
             "(?im)(?:(?<=^)|(?<=[\\r\\n]))[ \\t]*(?:[-*•][ \\t]*)?"
                     + "(?:姓名|名字|真实姓名|full[ \\t]+name|candidate[ \\t]+name|legal[ \\t]+name|name)"
@@ -53,7 +53,7 @@ final class ResumeTextRedactor {
     }
 
     /** Returns the complete text after applying the same redaction rules. */
-    static String redactedText(String text) {
+    public static String redactedText(String text) {
         if (text == null) throw new IllegalArgumentException("text is required");
         return redactedSlice(text, 0, text.codePointCount(0, text.length()));
     }

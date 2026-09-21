@@ -301,6 +301,7 @@ onBeforeUnmount(() => { ++requestGeneration; if (pollTimer) window.clearTimeout(
     <template v-else-if="result">
       <section v-if="rejectedDuplicateTitle" class="publication-warning" role="status"><h2>简历未生效</h2><p>报告有效，但该候选简历未成为有效简历：同一账号下已存在相同标题的有效简历。</p></section>
       <section class="job-description"><p class="eyebrow">Java 后端岗位 · 任务 {{ result.taskId }} · 简历 {{ result.resumeId }}</p><h2>岗位描述</h2><p>{{ result.jobDescriptionText }}</p></section>
+      <RouterLink v-if="task?.state === 'SUCCEEDED'" class="button-link workspace-command workspace-command-primary" :to="{ path: '/interviews/new', query: { matchTaskId: task.id } }">开始面试推演</RouterLink>
       <section class="score-band"><div><span>综合匹配度</span><strong>{{ Math.round(result.score.composite * 100) }}%</strong></div><dl><template v-for="item in scoreItems" :key="item[0]"><dt>{{ item[0] }}</dt><dd>{{ Math.round(item[1] * 100) }}%</dd></template></dl></section>
       <section class="result-section"><div class="section-heading"><div><p class="eyebrow">岗位要求证据</p><h2>简历能够支持的内容</h2></div><p class="muted">相关但证据不足及未满足的要求不会被视为正向匹配。</p></div><MatchEvidenceTable :requirements="result.requirements" /></section>
       <section class="result-section suggestions-section"><div class="section-heading"><div><p class="eyebrow">建议</p><h2>单独审核</h2></div><p class="muted">此处内容不会自动写入简历。</p></div>

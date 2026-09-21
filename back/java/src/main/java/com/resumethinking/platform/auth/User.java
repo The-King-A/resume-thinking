@@ -25,6 +25,7 @@ public class User {
     public String getUsername() { return username; }
     public String getEmail() { return email; }
     public String getPasswordHash() { return passwordHash; }
+    void replacePasswordHash(String passwordHash) { this.passwordHash = java.util.Objects.requireNonNull(passwordHash); }
     public UserRole getRole() { return role; }
     public Instant getCreatedAt() { return createdAt; }
 }

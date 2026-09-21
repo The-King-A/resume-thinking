@@ -8,6 +8,12 @@ public interface ReadableIdGenerator {
 
     String next(BusinessIdType type);
 
+    /**
+     * Raise the durable next value when a deterministic fixture reserves IDs.
+     * Implementations must never move an existing sequence backwards.
+     */
+    void ensureNextAtLeast(BusinessIdType type, long nextValue);
+
     static String format(BusinessIdType type, long sequence) {
         Objects.requireNonNull(type, "business id type must not be null");
         if (sequence < 1) {

@@ -1,0 +1,6 @@
+{
+  "questionId": "question001",
+  "answerText": "我负责接口设计和异常处理，并根据项目证据说明取舍。",
+  "expectedSessionVersion": 1,
+  "idempotencyKey": "interview-answer-key-0001"
+}

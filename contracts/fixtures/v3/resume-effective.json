@@ -1,0 +1,13 @@
+{
+  "id": "resume001",
+  "ownerId": "user001",
+  "title": "Fixture platform engineer",
+  "sourceType": "TXT",
+  "status": 0,
+  "version": 4,
+  "effectiveRevisionId": "revision001",
+  "pendingRevisionId": null,
+  "latestSuccessfulTaskId": "task001",
+  "createdAt": "2026-09-02T00:00:00Z",
+  "updatedAt": "2026-09-02T00:00:00Z"
+}

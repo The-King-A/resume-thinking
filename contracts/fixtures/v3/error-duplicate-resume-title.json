@@ -1,0 +1,13 @@
+{
+  "code": "DUPLICATE_RESOURCE",
+  "message": "A resume with this title already exists.",
+  "correlationId": "00000000-0000-4000-8000-000000000109",
+  "retryable": false,
+  "detailCode": "DUPLICATE_RESUME_TITLE",
+  "details": [
+    {
+      "field": "title",
+      "reason": "A resume title must be unique for this owner."
+    }
+  ]
+}

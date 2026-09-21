@@ -18,6 +18,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -33,19 +34,20 @@ class MatchTaskHttpBoundaryTest {
     void invalidMatchRequestIsRejectedBeforeTheServiceIsCalled() throws Exception {
         when(jwt.parse(anyString())).thenReturn(Optional.of(new JwtService.Claims(TestIds.user(), UserRole.USER)));
 
-        mvc.perform(post("/api/v1/match-tasks")
+        mvc.perform(post("/api/v2/match-tasks")
                         .header("Authorization", "Bearer token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resumeId\":\"not-a-resume-id\",\"llmProfileId\":\"not-a-profile-id\",\"jobDescriptionText\":\"\",\"idempotencyKey\":\"\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.detailCode").doesNotExist());
     }
 
     @Test
     void unknownMatchRequestFieldsAreRejectedByThePublicContract() throws Exception {
         when(jwt.parse(anyString())).thenReturn(Optional.of(new JwtService.Claims(TestIds.user(), UserRole.USER)));
 
-        mvc.perform(post("/api/v1/match-tasks")
+        mvc.perform(post("/api/v2/match-tasks")
                         .header("Authorization", "Bearer token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resumeId\":\"resume001\",\"llmProfileId\":\"profile001\",\"jobDescriptionText\":\"Build reliable software with clear communication.\",\"idempotencyKey\":\"valid-key-0000001\",\"ownerId\":\"leak\"}"))
@@ -58,10 +60,23 @@ class MatchTaskHttpBoundaryTest {
         when(jwt.parse(anyString())).thenReturn(Optional.of(new JwtService.Claims(TestIds.user(), UserRole.USER)));
         when(service.createTask(org.mockito.ArgumentMatchers.any())).thenReturn(org.mockito.Mockito.mock(MatchTask.class));
 
-        mvc.perform(post("/api/v1/match-tasks")
+        mvc.perform(post("/api/v2/match-tasks")
                         .header("Authorization", "Bearer token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resumeId\":\"resume001\",\"llmProfileId\":\"profile001\",\"jobFamily\":\"JAVA_BACKEND\",\"jobDescriptionText\":\"Build reliable software with clear communication.\",\"idempotencyKey\":\"valid-key-0000001\"}"))
                 .andExpect(status().isAccepted());
+    }
+
+    @Test
+    void duplicateTitlePollingUsesStableConflictWithoutV3OnlyFields() throws Exception {
+        String actorId = TestIds.user();
+        when(jwt.parse(anyString())).thenReturn(Optional.of(new JwtService.Claims(actorId, UserRole.USER)));
+        when(service.getTask("task901", actorId, UserRole.USER))
+                .thenThrow(new com.resumethinking.platform.resumes.DuplicateResumeTitleException());
+
+        mvc.perform(get("/api/v2/match-tasks/task901").header("Authorization", "Bearer token"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DUPLICATE_RESOURCE"))
+                .andExpect(jsonPath("$.detailCode").doesNotExist());
     }
 }

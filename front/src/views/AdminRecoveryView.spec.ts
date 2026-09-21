@@ -3,12 +3,18 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AdminRecoveryView from './AdminRecoveryView.vue'
+import { ApiError } from '../api/contracts'
 import { useAuthStore } from '../stores/auth'
 
-const { request } = vi.hoisted(() => ({ request: vi.fn() }))
+const { request, notify, router } = vi.hoisted(() => ({ request: vi.fn(), notify: vi.fn(), router: { push: vi.fn() } }))
 vi.mock('../api/http', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/http')>()
   return { ...actual, request }
+})
+vi.mock('../ui/notifications', () => ({ showTopNotification: notify }))
+vi.mock('vue-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('vue-router')>()
+  return { ...actual, useRouter: () => router }
 })
 
 const recoverable = {
@@ -24,6 +30,8 @@ describe('AdminRecoveryView role boundary', () => {
     pinia = createPinia()
     setActivePinia(pinia)
     request.mockReset()
+    notify.mockReset()
+    router.push.mockReset()
   })
 
   it('does not load or expose administrator recovery data to a USER', async () => {
@@ -60,5 +68,64 @@ describe('AdminRecoveryView role boundary', () => {
     auth.user = { id: 'user001', username: 'user', email: 'user@example.com', role: 'USER', createdAt: '' }
     await wrapper.get('form').trigger('submit')
     expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('redirects to the effective list and notifies after an administrator restore', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user002', username: 'admin', email: 'admin@example.com', role: 'ADMIN', createdAt: '' }
+    request.mockResolvedValue({ items: [recoverable], page: 1, pageSize: 20, totalItems: 1, totalPages: 1 })
+    const wrapper = mount(AdminRecoveryView, { global: { plugins: [pinia], stubs: { RouterLink: true } } })
+    await flushPromises()
+
+    await wrapper.get('.record-row button').trigger('click')
+    await wrapper.get('[data-test="confirm-restore"]').trigger('click')
+    await flushPromises()
+
+    expect(router.push).toHaveBeenCalledWith('/resumes')
+    expect(notify).toHaveBeenCalledWith('简历已恢复，正在打开有效简历列表。', 'success')
+  })
+
+  it('shows a specific duplicate-title error and keeps the administrator row', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user002', username: 'admin', email: 'admin@example.com', role: 'ADMIN', createdAt: '' }
+    request.mockReset()
+    request.mockResolvedValueOnce({ items: [recoverable], page: 1, pageSize: 20, totalItems: 1, totalPages: 1 })
+      .mockRejectedValueOnce(new ApiError({
+        code: 'DUPLICATE_RESOURCE', message: 'private backend detail', correlationId: 'c', retryable: false,
+        detailCode: 'DUPLICATE_RESUME_TITLE', details: [{ field: 'title', reason: 'duplicate' }],
+      }, 409))
+    const wrapper = mount(AdminRecoveryView, { global: { plugins: [pinia], stubs: { RouterLink: true } } })
+    await flushPromises()
+
+    await wrapper.get('.record-row button').trigger('click')
+    await wrapper.get('[data-test="confirm-restore"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('简历标题已存在')
+    expect(wrapper.text()).not.toContain('private backend detail')
+    expect(wrapper.find('.record-row').exists()).toBe(true)
+    expect(router.push).not.toHaveBeenCalled()
+  })
+
+  it('keeps the administrator row and dialog when the resume has no effective match', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user002', username: 'admin', email: 'admin@example.com', role: 'ADMIN', createdAt: '' }
+    request.mockReset()
+    request.mockResolvedValueOnce({ items: [recoverable], page: 1, pageSize: 20, totalItems: 1, totalPages: 1 })
+      .mockRejectedValueOnce(new ApiError({
+        code: 'RESUME_NOT_EFFECTIVE', message: 'private backend detail', correlationId: 'c', retryable: false,
+      }, 409))
+    const wrapper = mount(AdminRecoveryView, { global: { plugins: [pinia], stubs: { RouterLink: true } } })
+    await flushPromises()
+
+    await wrapper.get('.record-row button').trigger('click')
+    await wrapper.get('[data-test="confirm-restore"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('尚未完成证据匹配')
+    expect(wrapper.text()).not.toContain('private backend detail')
+    expect(wrapper.find('.record-row').exists()).toBe(true)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+    expect(router.push).not.toHaveBeenCalled()
   })
 })

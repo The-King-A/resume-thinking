@@ -1,0 +1,22 @@
+{
+  "contractVersion": "4.0",
+  "workType": "ANSWER_ANALYSIS",
+  "sessionId": "session001",
+  "revisionId": "revision001",
+  "matchTaskId": "task001",
+  "sessionVersion": 2,
+  "attempt": 1,
+  "callbackId": "callback002",
+  "callbackUrl": "http://127.0.0.1:8080/internal/v4/interview-results",
+  "callbackToken": "placeholder-callback-token-000000000000",
+  "redactionRequired": true,
+  "provider": { "baseUrl": "http://127.0.0.1:9000", "model": "fixture-model", "apiKey": "fixture-api-key" },
+  "correlationId": "00000000-0000-4000-8000-000000000002",
+  "answerAnalysis": {
+    "answerId": "answer001",
+    "answerText": "我负责接口设计和异常处理。",
+    "question": { "questionId": "question001", "questionType": "BASIC_CONFIRMATION", "questionText": "请说明职责。", "requirementId": "requirement001", "requirementText": "Java 服务开发", "evidenceIds": ["evidence001"] },
+    "requirement": { "requirementId": "requirement001", "requirementText": "Java 服务开发", "requirementType": "MANDATORY", "matchStatus": "SATISFIED", "gap": null, "evidence": [{ "evidenceId": "evidence001", "sourceLocation": "project:0", "sourceStart": 0, "sourceEnd": 12, "excerpt": "Java services", "strength": "HIGH" }] },
+    "evidence": [{ "evidenceId": "evidence001", "sourceLocation": "project:0", "sourceStart": 0, "sourceEnd": 12, "excerpt": "Java services", "strength": "HIGH" }]
+  }
+}

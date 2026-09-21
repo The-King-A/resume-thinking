@@ -1,0 +1,15 @@
+{
+  "contractVersion": "4.0",
+  "workType": "QUESTION_GENERATION",
+  "sessionId": "session001",
+  "revisionId": "revision001",
+  "matchTaskId": "task001",
+  "sessionVersion": 1,
+  "attempt": 1,
+  "callbackId": "callback001",
+  "callbackToken": "placeholder-callback-token-000000000000",
+  "payloadHash": "2328aeddf13042be5a3216a2d416048dd9bd760a65cde39497be3f0b39365c15",
+  "outcome": "TIMED_OUT",
+  "correlationId": "00000000-0000-4000-8000-000000000001",
+  "errorCode": "INTERVIEW_MODEL_UNAVAILABLE"
+}

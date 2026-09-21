@@ -30,13 +30,13 @@ $required = @(
 
 function Write-Flow {
     param([string]$Message)
-    Write-Output "[flow] $Message"
+    Write-Host "[flow] $Message"
 }
 
 function Import-DotEnv {
     $envPath = Join-Path $repoRoot '.env'
     if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) { return $false }
-    foreach ($line in Get-Content -LiteralPath $envPath) {
+    foreach ($line in Get-Content -LiteralPath $envPath -Encoding utf8) {
         if ($line -match '^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*$') {
             $name = $Matches[1]
             $value = $Matches[2]
@@ -59,6 +59,12 @@ function Test-ConfiguredValue {
     return -not [string]::IsNullOrWhiteSpace($value) -and $value -notmatch '(?i)replace-with|change[-_ ]?me|placeholder'
 }
 
+function Test-LoopbackHttpUrl {
+    param([string]$Value)
+    try { $uri = [Uri]$Value } catch { return $false }
+    return $uri.IsAbsoluteUri -and $uri.Scheme -eq 'http' -and $uri.Host -eq '127.0.0.1' -and $uri.Port -ge 1 -and $uri.Port -le 65535 -and $uri.AbsolutePath -in @('', '/') -and -not $uri.Query -and -not $uri.Fragment -and -not $uri.UserInfo
+}
+
 function Test-Health {
     param([string]$Url)
     try {
@@ -70,11 +76,11 @@ function Test-Health {
 }
 
 function Test-TcpPort {
-    param([string]$Host, [int]$Port)
-    if ([string]::IsNullOrWhiteSpace($Host) -or $Port -lt 1 -or $Port -gt 65535) { return $false }
+    param([string]$TargetHost, [int]$Port)
+    if ([string]::IsNullOrWhiteSpace($TargetHost) -or $Port -lt 1 -or $Port -gt 65535) { return $false }
     $client = [System.Net.Sockets.TcpClient]::new()
     try {
-        $pending = $client.BeginConnect($Host, $Port, $null, $null)
+        $pending = $client.BeginConnect($TargetHost, $Port, $null, $null)
         if (-not $pending.AsyncWaitHandle.WaitOne(1000)) { return $false }
         $client.EndConnect($pending)
         return $true
@@ -83,11 +89,11 @@ function Test-TcpPort {
 }
 
 function Test-RedisPing {
-    param([string]$Host, [int]$Port)
-    if (-not (Test-TcpPort $Host $Port)) { return $false }
+    param([string]$TargetHost, [int]$Port)
+    if (-not (Test-TcpPort $TargetHost $Port)) { return $false }
     $client = [System.Net.Sockets.TcpClient]::new()
     try {
-        $pending = $client.BeginConnect($Host, $Port, $null, $null)
+        $pending = $client.BeginConnect($TargetHost, $Port, $null, $null)
         if (-not $pending.AsyncWaitHandle.WaitOne(1000)) { return $false }
         $client.EndConnect($pending)
         $stream = $client.GetStream()
@@ -105,10 +111,38 @@ function Test-RedisPing {
 
 function Get-MySqlEndpoint {
     $raw = [Environment]::GetEnvironmentVariable('MYSQL_URL', 'Process')
-    if ($raw -and $raw -match '^jdbc:mysql://(?<host>[^/:]+)(?::(?<port>\d+))?/') {
-        return @{ Host = $Matches.host; Port = if ($Matches.port) { [int]$Matches.port } else { 3306 } }
-    }
-    return $null
+    if ([string]::IsNullOrWhiteSpace($raw) -or -not $raw.StartsWith('jdbc:')) { return $null }
+    try { $uri = [Uri]$raw.Substring('jdbc:'.Length) } catch { return $null }
+    if (-not $uri.IsAbsoluteUri -or $uri.Scheme -ne 'mysql' -or $uri.Host -ne '127.0.0.1' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) { return $null }
+    $port = if ($uri.Port -eq -1) { 3306 } else { $uri.Port }
+    if ($port -lt 1 -or $port -gt 65535) { return $null }
+    return @{ Host = $uri.Host; Port = [int]$port }
+}
+
+function ConvertTo-RedisEndpoint {
+    param([string]$TargetHost, [string]$PortRaw)
+    $port = 0
+    [void][int]::TryParse($PortRaw, [ref]$port)
+    if ($TargetHost -ne '127.0.0.1' -or $port -lt 1 -or $port -gt 65535) { return $null }
+    return @{ Host = $TargetHost; Port = $port }
+}
+
+function Get-CanonicalRedisEndpoint {
+    $configured = ConvertTo-RedisEndpoint ([Environment]::GetEnvironmentVariable('REDIS_HOST', 'Process')) ([Environment]::GetEnvironmentVariable('REDIS_PORT', 'Process'))
+    if (-not $configured) { return $null }
+    $runtimeHost = [Environment]::GetEnvironmentVariable('MVP_REDIS_HOST', 'Process')
+    $runtimePort = [Environment]::GetEnvironmentVariable('MVP_REDIS_PORT', 'Process')
+    if ([string]::IsNullOrWhiteSpace($runtimeHost) -and [string]::IsNullOrWhiteSpace($runtimePort)) { return $configured }
+    $runtime = ConvertTo-RedisEndpoint $runtimeHost $runtimePort
+    if (-not $runtime -or $configured.Host -ne $runtime.Host -or $configured.Port -ne $runtime.Port) { return $null }
+    return $runtime
+}
+
+function Test-LocalTargets {
+    if (-not (Test-LoopbackHttpUrl $javaBase) -or -not (Test-LoopbackHttpUrl $pythonBase)) { return $false }
+    $mysql = Get-MySqlEndpoint
+    if (-not $mysql -or $mysql.Host -ne '127.0.0.1' -or $mysql.Port -lt 1 -or $mysql.Port -gt 65535) { return $false }
+    return $null -ne (Get-CanonicalRedisEndpoint)
 }
 
 function Test-DependencyReadiness {
@@ -118,11 +152,8 @@ function Test-DependencyReadiness {
         return $false
     }
     Write-Flow 'mysql tcp=PASS'
-    $redisHost = [Environment]::GetEnvironmentVariable('REDIS_HOST', 'Process')
-    $redisPortRaw = [Environment]::GetEnvironmentVariable('REDIS_PORT', 'Process')
-    $redisPort = 0
-    [void][int]::TryParse($redisPortRaw, [ref]$redisPort)
-    if (-not (Test-RedisPing $redisHost $redisPort)) {
+    $redis = Get-CanonicalRedisEndpoint
+    if (-not $redis -or -not (Test-RedisPing $redis.Host $redis.Port)) {
         Write-Flow 'redis ping=UNAVAILABLE'
         return $false
     }
@@ -171,6 +202,19 @@ function Resolve-Python {
     return $null
 }
 
+function Stop-StartedProcessTree {
+    param([System.Diagnostics.Process]$Process)
+    if ($null -eq $Process) { return }
+    try {
+        $children = Get-CimInstance Win32_Process -Filter "ParentProcessId = $($Process.Id)" -ErrorAction SilentlyContinue
+        foreach ($child in $children) {
+            $childProcess = Get-Process -Id $child.ProcessId -ErrorAction SilentlyContinue
+            if ($childProcess) { Stop-StartedProcessTree $childProcess }
+        }
+        if (-not $Process.HasExited) { Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue }
+    } catch { }
+}
+
 try {
     $hasDotEnv = Import-DotEnv
     $missing = @($required | Where-Object { -not (Test-ConfiguredValue $_) })
@@ -182,8 +226,43 @@ try {
         return
     }
 
+    if (-not (Test-LocalTargets)) {
+        if ($strict) { throw 'live targets must be explicit loopback endpoints' }
+        Write-Flow 'SKIP targets=UNSAFE_LOCAL_TARGET'
+        $exitCode = 0
+        return
+    }
+    $canonicalRedis = Get-CanonicalRedisEndpoint
+    [Environment]::SetEnvironmentVariable('REDIS_HOST', $canonicalRedis.Host, 'Process')
+    [Environment]::SetEnvironmentVariable('REDIS_PORT', [string]$canonicalRedis.Port, 'Process')
+    [Environment]::SetEnvironmentVariable('MVP_REDIS_HOST', $canonicalRedis.Host, 'Process')
+    [Environment]::SetEnvironmentVariable('MVP_REDIS_PORT', [string]$canonicalRedis.Port, 'Process')
+
     $javaHealthy = Test-Health ("$javaBase/actuator/health")
     $pythonHealthy = Test-Health ("$pythonBase/health")
+
+    # The live flow supplies its own loopback-only provider. A Java process
+    # already running without the matching explicit local-test allowance would
+    # reject the profile after the flow had started writing test data.
+    if ($javaHealthy -and $env:APP_ALLOW_LOCAL_MODEL_ENDPOINTS -ne 'true') {
+        if ($strict) { throw 'existing Java does not declare local test-provider support' }
+        Write-Flow 'SKIP services=EXISTING_JAVA_LOCAL_PROVIDER_UNVERIFIED'
+        $exitCode = 0
+        return
+    }
+
+    # A running Java process has already read PYTHON_ANALYSIS_BASE_URL. Starting
+    # a worker at an explicitly requested different endpoint cannot redirect it.
+    # Fail before any process is created so this command never claims a valid
+    # isolated flow for a Java process it does not own.
+    if ($javaHealthy -and -not $pythonHealthy -and -not [string]::IsNullOrWhiteSpace($env:MVP_PYTHON_BASE_URL)) {
+        Write-Flow 'FAIL configuration=JAVA_ALREADY_RUNNING_FOR_ISOLATED_PYTHON'
+        Write-Flow 'hint=START_JAVA_WITH_TARGET_PYTHON_ANALYSIS_BASE_URL_OR_ALLOW_RUNNER_TO_START_JAVA'
+        if ($strict) { throw 'existing Java cannot be reconfigured for an isolated Python worker' }
+        Write-Flow 'SKIP configuration=JAVA_ALREADY_RUNNING_FOR_ISOLATED_PYTHON'
+        $exitCode = 0
+        return
+    }
 
     if (-not $javaHealthy -or -not $pythonHealthy) {
         if ($NoStart) {
@@ -229,9 +308,12 @@ try {
         if (-not $javaHealthy) {
             # Local loopback providers are allowed only for this explicit test
             # process; production profiles retain the secure default.
+            $javaPort = ([Uri]$javaBase).Port
+            if ($javaPort -lt 1 -or $javaPort -gt 65535) { throw 'java base URL must include a valid port' }
+            [Environment]::SetEnvironmentVariable('SERVER_PORT', [string]$javaPort, 'Process')
             [Environment]::SetEnvironmentVariable('APP_ALLOW_LOCAL_MODEL_ENDPOINTS', 'true', 'Process')
             [Environment]::SetEnvironmentVariable('PYTHON_ANALYSIS_BASE_URL', $pythonBase, 'Process')
-            [Environment]::SetEnvironmentVariable('MATCHING_CALLBACK_URL', "$javaBase/internal/v2/analysis-results", 'Process')
+            [Environment]::SetEnvironmentVariable('MATCHING_CALLBACK_URL', "$javaBase/internal/v3/analysis-results", 'Process')
             $mvnw = Join-Path $javaRoot 'mvnw.cmd'
             if (-not (Test-Path -LiteralPath $mvnw -PathType Leaf)) { throw 'Maven Wrapper is missing' }
             $javaProcess = Start-Process -FilePath $mvnw -ArgumentList @('spring-boot:run', '-Dspring-boot.run.profiles=local') -WorkingDirectory $javaRoot -WindowStyle Hidden -PassThru
@@ -299,9 +381,7 @@ try {
     }
 } finally {
     foreach ($process in $startedProcesses) {
-        try {
-            if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
-        } catch { }
+        Stop-StartedProcessTree $process
     }
 }
 

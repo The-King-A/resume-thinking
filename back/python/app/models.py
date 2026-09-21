@@ -20,6 +20,14 @@ from pydantic import (
 # from UUID tracking values.  Keep the constraints here as the single runtime
 # source of truth for every Python v2 envelope and model result.
 TaskId = Annotated[str, StringConstraints(pattern=r"^task[0-9]{3,}$", max_length=64)]
+RevisionId = Annotated[str, StringConstraints(pattern=r"^revision[0-9]{3,}$", max_length=64)]
+Base64Content = Annotated[
+    str,
+    StringConstraints(
+        min_length=4,
+        pattern=r"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+    ),
+]
 CallbackId = Annotated[str, StringConstraints(pattern=r"^callback[0-9]{3,}$", max_length=64)]
 EvidenceId = Annotated[str, StringConstraints(pattern=r"^evidence[0-9]{3,}$", max_length=64)]
 RequirementId = Annotated[str, StringConstraints(pattern=r"^requirement[0-9]{3,}$", max_length=64)]
@@ -84,6 +92,50 @@ class AnalysisJob(StrictModel):
         if port is not None and not 1 <= port <= 65535:
             raise ValueError("callbackUrl must be a URI")
         return value
+
+
+class V3AnalysisJob(AnalysisJob):
+    model_config = ConfigDict(extra="forbid", validate_by_alias=True, validate_by_name=False)
+
+    document: "V3Document"
+    allowed_evidence: list["V3AllowedEvidence"] = Field(alias="allowedEvidence", min_length=1)
+    provider: "V3Provider"
+    revision_id: RevisionId = Field(alias="revisionId")
+
+
+class V3Document(Document):
+    model_config = ConfigDict(extra="forbid", validate_by_alias=True, validate_by_name=False)
+
+    content_base64: Base64Content = Field(alias="contentBase64")
+
+
+class V3AllowedEvidence(AllowedEvidence):
+    model_config = ConfigDict(extra="forbid", validate_by_alias=True, validate_by_name=False)
+
+
+class V3Provider(Provider):
+    model_config = ConfigDict(extra="forbid", validate_by_alias=True, validate_by_name=False)
+
+    @field_validator("base_url")
+    @classmethod
+    def supported_provider_uri(cls, value: str) -> str:
+        try:
+            parsed = urlsplit(value)
+            hostname = parsed.hostname
+            port = parsed.port
+        except (ValueError, UnicodeError) as exc:
+            raise ValueError("baseUrl must be an HTTPS URI or local loopback HTTP URI") from exc
+        if (
+            not parsed.netloc
+            or not hostname
+            or parsed.username
+            or parsed.password
+            or (port is not None and not 1 <= port <= 65535)
+        ):
+            raise ValueError("baseUrl must be an HTTPS URI or local loopback HTTP URI")
+        if parsed.scheme == "https" or (parsed.scheme == "http" and hostname == "127.0.0.1"):
+            return value
+        raise ValueError("baseUrl must be an HTTPS URI or local loopback HTTP URI")
 
 
 class EvidenceReference(StrictModel):
@@ -169,6 +221,12 @@ class Callback(StrictModel):
         if self.outcome != "SUCCEEDED" and (self.error_code is None or self.result is not None):
             raise ValueError("failed callback requires errorCode only")
         return self
+
+
+class V3Callback(Callback):
+    model_config = ConfigDict(extra="forbid", validate_by_alias=True, validate_by_name=False)
+
+    revision_id: RevisionId = Field(alias="revisionId")
 
 
 class ExtractedEvidence(StrictModel):

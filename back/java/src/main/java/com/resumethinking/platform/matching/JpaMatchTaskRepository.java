@@ -1,6 +1,7 @@
 package com.resumethinking.platform.matching;
 
 import java.util.Optional;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import org.springframework.stereotype.Repository;
@@ -21,7 +22,16 @@ public class JpaMatchTaskRepository implements MatchTaskRepository {
         return delegate.findByCreatorIdAndIdempotencyKey(owner, key);
     }
     @Override public Optional<MatchTask> findByIdForUpdate(String id) { return delegate.findByIdForUpdate(id); }
+    @Override public Optional<MatchTask> findFirstByResumeIdAndRevisionIdOrderByCreatedAtDesc(String resumeId,String revisionId) {
+        return delegate.findFirstByResumeIdAndRevisionIdOrderByCreatedAtDesc(resumeId, revisionId);
+    }
     @Override public List<MatchTask> findByResumeIdAndStateInForUpdate(String resumeId, Collection<MatchTask.State> states) {
         return delegate.findByResumeIdAndStateInForUpdate(resumeId, states);
+    }
+    @Override public List<MatchTask> findByRevisionIdAndStateInForUpdate(String revisionId,Collection<MatchTask.State> states) {
+        return delegate.findByRevisionIdAndStateInForUpdate(revisionId, states);
+    }
+    @Override public List<MatchTask> findProcessingUpdatedBeforeForUpdate(Instant cutoff) {
+        return delegate.findByStateAndUpdatedAtBeforeForUpdate(MatchTask.State.PROCESSING, cutoff);
     }
 }

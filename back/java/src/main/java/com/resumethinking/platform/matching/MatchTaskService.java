@@ -44,6 +44,7 @@ public class MatchTaskService {
     private final DispatchFailureRecorder dispatchFailures;
     private final PlatformTransactionManager transactionManager;
     private final ReadableIdGenerator ids;
+    private final ResumeRevisionRepository revisions;
     public MatchTaskService(ResumeLifecycleService lifecycle, LlmProfileService profiles, MatchTaskRepository tasks, PythonAnalysisClient python) {
         this(lifecycle, profiles, tasks, python, new AnalysisResultRepository.InMemory(), new CallbackReceiptRepository.InMemory(), new AnalysisEvidenceRepository.InMemory(), null, null, null);
     }
@@ -65,9 +66,21 @@ public class MatchTaskService {
     public MatchTaskService(ResumeLifecycleService lifecycle, LlmProfileService profiles, MatchTaskRepository tasks, PythonAnalysisClient python, AnalysisResultRepository results, CallbackReceiptRepository receipts, AnalysisEvidenceRepository evidenceRepository, AesGcmCryptoService crypto, DispatchFailureRecorder dispatchFailures, PlatformTransactionManager transactionManager) {
         this(lifecycle, profiles, tasks, python, results, receipts, evidenceRepository, crypto, dispatchFailures, transactionManager, new InMemoryReadableIdGenerator());
     }
-    @Autowired
     public MatchTaskService(ResumeLifecycleService lifecycle, LlmProfileService profiles, MatchTaskRepository tasks, PythonAnalysisClient python, AnalysisResultRepository results, CallbackReceiptRepository receipts, AnalysisEvidenceRepository evidenceRepository, AesGcmCryptoService crypto, DispatchFailureRecorder dispatchFailures, PlatformTransactionManager transactionManager, ReadableIdGenerator ids) {
-        this.lifecycle = lifecycle; this.profiles = profiles; this.tasks = tasks; this.python = python; this.results = results; this.receipts = receipts; this.evidenceRepository = evidenceRepository; this.crypto = crypto; this.dispatchFailures = dispatchFailures; this.transactionManager = transactionManager; this.ids = ids;
+        this(lifecycle, profiles, tasks, python, results, receipts, evidenceRepository, crypto,
+                dispatchFailures, transactionManager, ids, new ResumeRevisionRepository.InMemory());
+    }
+    @Autowired
+    public MatchTaskService(ResumeLifecycleService lifecycle, LlmProfileService profiles, MatchTaskRepository tasks,
+                            PythonAnalysisClient python, AnalysisResultRepository results,
+                            CallbackReceiptRepository receipts, AnalysisEvidenceRepository evidenceRepository,
+                            AesGcmCryptoService crypto, DispatchFailureRecorder dispatchFailures,
+                            PlatformTransactionManager transactionManager, ReadableIdGenerator ids,
+                            ResumeRevisionRepository revisions) {
+        this.lifecycle = lifecycle; this.profiles = profiles; this.tasks = tasks; this.python = python;
+        this.results = results; this.receipts = receipts; this.evidenceRepository = evidenceRepository;
+        this.crypto = crypto; this.dispatchFailures = dispatchFailures; this.transactionManager = transactionManager;
+        this.ids = ids; this.revisions = revisions;
     }
 
     /**
@@ -109,30 +122,33 @@ public class MatchTaskService {
         documentBytes = normalizeDocumentBytes(reservation.sourceType(), documentBytes);
         List<EvidenceSpec> evidenceSpecs = evidenceSpecs(reservation.sourceType(), documentBytes);
         Set<String> evidenceIds = evidenceSpecs.stream().map(EvidenceSpec::id).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        MatchTask task = new MatchTask(ids.next(BusinessIdType.TASK), reservation.resumeId(), command.llmProfileId(), command.actorId(), reservation.resumeVersion(),
+        MatchTask task = new MatchTask(ids.next(BusinessIdType.TASK), ids.next(BusinessIdType.CALLBACK),
+                reservation.resumeId(), reservation.revisionId(), command.llmProfileId(), command.actorId(), reservation.resumeVersion(),
                 command.jobFamily(), command.jobDescriptionText(), command.idempotencyKey(), callbackToken, evidenceIds, Instant.now());
-        tasks.saveAndFlush(task);
-        evidenceSpecs.forEach(e -> evidenceRepository.save(new AnalysisEvidence(e.id(), task.getId(), reservation.sourceType().name(), e.location(), e.start(), e.end(), e.excerpt())));
+        task = tasks.saveAndFlush(task);
+        final String persistedTaskId = task.getId();
+        evidenceSpecs.forEach(e -> evidenceRepository.save(new AnalysisEvidence(e.id(), persistedTaskId, reservation.sourceType().name(), e.location(), e.start(), e.end(), e.excerpt())));
         task.markProcessing();
-        tasks.saveAndFlush(task);
-        if (profile != null && (documentBytes.length == 0 || evidenceSpecs.isEmpty())) { task.markFailed("MODEL_OUTPUT_INVALID"); tasks.saveAndFlush(task); return task; }
+        task = tasks.saveAndFlush(task);
+        if (profile != null && (documentBytes.length == 0 || evidenceSpecs.isEmpty())) { task.markFailed("MODEL_OUTPUT_INVALID"); task = tasks.saveAndFlush(task); return task; }
+        final MatchTask persistedTask = task;
         if (profile != null) {
             var source = reservation.sourceType().name();
             var allowed = evidenceSpecs.stream().map(e -> new PythonAnalysisClient.AllowedEvidence(e.id(), e.location(), e.start(), e.end())).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-            var job = new PythonAnalysisClient.InternalAnalysisJob(task.getId(), task.getAttempt(), task.getResumeVersion(), source,
+            var job = new PythonAnalysisClient.InternalAnalysisJob(task.getId(), task.getCallbackId(), task.getAttempt(), task.getResumeVersion(), source,
                     command.jobFamily(),
                     new PythonAnalysisClient.Document(Base64.getEncoder().encodeToString(documentBytes), "resume." + source.toLowerCase(Locale.ROOT)),
                     allowed, command.jobDescriptionText(), true, callbackUri(), callbackToken,
                     new PythonAnalysisClient.Provider(profile.baseUrl(), profile.model(), profile.apiKey()), UUID.randomUUID());
             try {
                 if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
-                    org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() { public void afterCommit() { try { python.dispatch(job); } catch (RuntimeException ignored) { if (dispatchFailures != null) dispatchFailures.markFailed(task.getId(), "MODEL_UNAVAILABLE"); else { task.markFailed("MODEL_UNAVAILABLE"); tasks.save(task); } } } });
+                    org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() { public void afterCommit() { try { python.dispatch(job); } catch (RuntimeException failure) { recordPythonDispatchFailure(persistedTask, PythonAnalysisClient.failureCodeFor(failure)); } } });
                 } else python.dispatch(job);
-            } catch (RuntimeException ex) { task.markFailed("MODEL_UNAVAILABLE"); tasks.saveAndFlush(task); }
+            } catch (RuntimeException ex) { task.markFailed(PythonAnalysisClient.failureCodeFor(ex)); tasks.saveAndFlush(task); }
         }
         // Flush evidence and the final task state before the transaction exits;
         // this keeps integrity failures inside the catchable operation boundary.
-        tasks.saveAndFlush(task);
+        task = tasks.saveAndFlush(task);
         return task;
     }
 
@@ -150,21 +166,326 @@ public class MatchTaskService {
         return raced.get();
     }
 
+    public Optional<MatchTask> findIdempotentSubmission(String actorId, String idempotencyKey) {
+        return tasks.findByCreatorIdAndIdempotencyKey(actorId, idempotencyKey);
+    }
+
+    public void blockRevisionTasks(String revisionId) {
+        for (MatchTask task : tasks.findByRevisionIdAndStateInForUpdate(revisionId,
+                Set.of(MatchTask.State.QUEUED, MatchTask.State.PROCESSING))) {
+            task.markBlocked();
+            tasks.saveAndFlush(task);
+        }
+    }
+
+    public Optional<MatchTask> latestTaskForRevision(String resumeId, String revisionId) {
+        return tasks.findFirstByResumeIdAndRevisionIdOrderByCreatedAtDesc(resumeId, revisionId);
+    }
+
+    public Optional<MatchTask> findTask(String taskId) {
+        return tasks.findById(taskId);
+    }
+
+    /** Called inside the v3 submission transaction after its resume is locked and staged. */
+    public MatchTask createRevisionTask(Resume resume, ResumeRevision revision,
+                                        CreateMatchTaskCommand command,
+                                        MatchTask.PublicationState publicationState) {
+        validateCreateCommand(command);
+        Optional<MatchTask> existing = tasks.findByCreatorIdAndIdempotencyKey(
+                command.actorId(), command.idempotencyKey());
+        if (existing.isPresent()) {
+            MatchTask task = existing.get();
+            if (!sameSubmission(task, command) || !Objects.equals(task.getRevisionId(), revision.getId())) {
+                throw new IdempotencyConflictException();
+            }
+            return task;
+        }
+        if (!resume.getId().equals(revision.getResumeId()) || !resume.getId().equals(command.resumeId())) {
+            throw new IllegalArgumentException("VALIDATION_ERROR");
+        }
+        DispatchLlmProfile profile = profiles == null ? null
+                : profiles.decryptForDispatch(command.actorId(), command.llmProfileId());
+        byte[] documentBytes;
+        try {
+            documentBytes = crypto == null ? new byte[0]
+                    : crypto.decryptBytes(revision.getCiphertext(), revision.getNonce());
+        } catch (RuntimeException invalidCiphertext) {
+            documentBytes = new byte[0];
+        }
+        documentBytes = normalizeDocumentBytes(revision.getSourceType(), documentBytes);
+        List<EvidenceSpec> evidenceSpecs = evidenceSpecs(revision.getSourceType(), documentBytes);
+        Set<String> evidenceIds = evidenceSpecs.stream().map(EvidenceSpec::id)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        String callbackToken = randomToken();
+        MatchTask task = new MatchTask(ids.next(BusinessIdType.TASK), ids.next(BusinessIdType.CALLBACK),
+                resume.getId(), revision.getId(), command.llmProfileId(), command.actorId(), resume.getVersion(),
+                command.jobFamily(), command.jobDescriptionText(), command.idempotencyKey(),
+                command.submissionFingerprint(), callbackToken,
+                evidenceIds, publicationState, Instant.now());
+        task = tasks.saveAndFlush(task);
+        String taskId = task.getId();
+        evidenceSpecs.forEach(e -> evidenceRepository.save(new AnalysisEvidence(e.id(), taskId,
+                revision.getSourceType().name(), e.location(), e.start(), e.end(), e.excerpt())));
+        task.markProcessing();
+        task = tasks.saveAndFlush(task);
+        if (documentBytes.length == 0 || evidenceSpecs.isEmpty()) {
+            task.markFailed("MODEL_OUTPUT_INVALID");
+            return tasks.saveAndFlush(task);
+        }
+        if (profile != null) {
+            String source = revision.getSourceType().name();
+            Set<PythonAnalysisClient.AllowedEvidence> allowed = evidenceSpecs.stream()
+                    .map(e -> new PythonAnalysisClient.AllowedEvidence(e.id(), e.location(), e.start(), e.end()))
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+            PythonAnalysisClient.InternalAnalysisJob job = new PythonAnalysisClient.InternalAnalysisJob(
+                    task.getId(), revision.getId(), task.getCallbackId(), task.getAttempt(), task.getResumeVersion(),
+                    source, command.jobFamily(),
+                    new PythonAnalysisClient.Document(Base64.getEncoder().encodeToString(documentBytes),
+                            "resume." + source.toLowerCase(Locale.ROOT)),
+                    allowed, command.jobDescriptionText(), true, callbackUriV3(), callbackToken,
+                    new PythonAnalysisClient.Provider(profile.baseUrl(), profile.model(), profile.apiKey()),
+                    UUID.randomUUID());
+            MatchTask persisted = task;
+            if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+                org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                        new org.springframework.transaction.support.TransactionSynchronization() {
+                            @Override public void afterCommit() {
+                                try { python.dispatch(job); }
+                                catch (RuntimeException failure) {
+                                    recordPythonDispatchFailure(persisted, PythonAnalysisClient.failureCodeFor(failure));
+                                }
+                            }
+                        });
+            } else {
+                try { python.dispatch(job); }
+                catch (RuntimeException failure) {
+                    task.markFailed(PythonAnalysisClient.failureCodeFor(failure));
+                    tasks.saveAndFlush(task);
+                }
+            }
+        }
+        return tasks.saveAndFlush(task);
+    }
+
     @Transactional(readOnly = true)
     public MatchTask getTask(String taskId, String actorId, UserRole role) {
-        MatchTask task = tasks.findById(taskId).filter(t -> role == UserRole.ADMIN || t.getCreatorId().equals(actorId)).orElseThrow(ResourceNotFoundException::new);
-        if (task.getState() == MatchTask.State.BLOCKED) throw new TaskGoneException();
-        if (!lifecycle.isActiveAtVersion(task.getResumeId(), task.getResumeVersion())) throw new TaskGoneException();
+        MatchTask task = requireReadableTask(taskId, actorId, role);
+        if (task.getPublicationState() == MatchTask.PublicationState.REJECTED_DUPLICATE_TITLE) {
+            throw new DuplicateResumeTitleException();
+        }
         return task;
     }
     @Transactional(readOnly = true)
     public AnalysisResult getResult(String taskId, String actorId, UserRole role) {
-        MatchTask task = getTask(taskId, actorId, role);
+        MatchTask task = requireReadableTask(taskId, actorId, role);
         if (!task.isResultAvailable()) throw new TaskNotReadyException();
         AnalysisResult result = results.findByTaskId(taskId).orElseThrow(TaskNotReadyException::new);
         return result;
     }
+    private MatchTask requireReadableTask(String taskId, String actorId, UserRole role) {
+        MatchTask task = tasks.findById(taskId).orElseThrow(ResourceNotFoundException::new);
+        lifecycle.authorizeTaskOwner(task.getResumeId(), actorId, role);
+        if (task.getState() == MatchTask.State.BLOCKED) throw new TaskGoneException();
+        boolean active = task.getRevisionId() == null
+                ? lifecycle.isActiveAtVersion(task.getResumeId(), task.getResumeVersion())
+                : lifecycle.isActiveForRevision(task.getResumeId(), task.getRevisionId());
+        if (!active) throw new TaskGoneException();
+        return task;
+    }
     List<AnalysisEvidence> evidenceForTask(String taskId) { return evidenceRepository.findByTaskId(taskId); }
+
+    public synchronized CallbackResponse acceptV3Callback(V3AnalysisCallbackRequest request) {
+        try {
+            return inWriteTransaction(() -> acceptV3CallbackInTransaction(request));
+        } catch (DuplicateResumeTitleException duplicate) {
+            return inWriteTransaction(() -> persistRejectedDuplicateTitle(request));
+        } catch (RuntimeException failure) {
+            DataIntegrityViolationException integrity = findDataIntegrityViolation(failure);
+            if (integrity == null) throw failure;
+            if (isDuplicateResumeTitleViolation(integrity)) {
+                return inWriteTransaction(() -> persistRejectedDuplicateTitle(request));
+            }
+            return resolveV3CallbackRace(request, integrity);
+        }
+    }
+
+    private CallbackResponse acceptV3CallbackInTransaction(V3AnalysisCallbackRequest request) {
+        if (!validV3CallbackEnvelope(request) || request.payloadHash() == null
+                || !request.payloadHash().matches("[a-f0-9]{64}")) {
+            return CallbackResponse.error("VALIDATION_ERROR");
+        }
+        final String computed;
+        try { computed = V3CallbackPayloadHash.compute(request); }
+        catch (RuntimeException invalid) { return CallbackResponse.error("VALIDATION_ERROR"); }
+        if (!request.payloadHash().equals(computed)) return CallbackResponse.error("VALIDATION_ERROR");
+
+        MatchTask snapshot = tasks.findById(request.taskId()).orElseThrow(TaskGoneException::new);
+        Optional<Resume> lockedResume = lifecycle.lockActiveForRevision(snapshot.getResumeId(), request.revisionId());
+        MatchTask task = tasks.lockById(request.taskId()).orElseThrow(TaskGoneException::new);
+        CallbackResponse identityError = validateV3TaskIdentity(request, task, lockedResume.orElse(null));
+        if (identityError != null) return identityError;
+
+        Optional<CallbackReceipt> old = receipts.findByCallbackId(request.callbackId());
+        if (old.isPresent()) {
+            return request.payloadHash().equals(old.get().payloadHash())
+                    ? CallbackResponse.acceptedReplay() : CallbackResponse.error("IDEMPOTENCY_CONFLICT");
+        }
+        if (task.getState() == MatchTask.State.SUCCEEDED || task.getState() == MatchTask.State.FAILED
+                || task.getState() == MatchTask.State.TIMED_OUT) return CallbackResponse.error("TASK_GONE");
+        CallbackResponse payloadError = validateCallbackPayload(request.outcome(), request.result(), request.errorCode());
+        if (payloadError != null) return payloadError;
+        if ("SUCCEEDED".equals(request.outcome())) {
+            try {
+                validateResultSchema(request.result());
+                validateEvidence(task, request.result());
+            } catch (RuntimeException invalid) {
+                task.markFailed("MODEL_OUTPUT_INVALID");
+                tasks.saveAndFlush(task);
+                if (task.getPublicationState() == MatchTask.PublicationState.PENDING) {
+                    lifecycle.markPendingRevisionFailed(task.getResumeId(), task.getRevisionId());
+                }
+                return CallbackResponse.error("MODEL_OUTPUT_INVALID");
+            }
+        }
+        receipts.saveAndFlush(new CallbackReceipt(request.callbackId(), request.payloadHash(), Instant.now()));
+        if ("SUCCEEDED".equals(request.outcome())) {
+            results.save(AnalysisResult.from(task.getId(), task.getResumeId(), task.getRevisionId(),
+                    task.getResumeVersion(), task.getJobDescriptionText(), request));
+            task.markSucceeded();
+            if (task.getPublicationState() == MatchTask.PublicationState.PENDING) {
+                lifecycle.publishPendingRevision(task.getResumeId(), task.getRevisionId());
+                task.markPublished();
+            }
+        } else if ("TIMED_OUT".equals(request.outcome())) {
+            task.markTimedOut(request.errorCode());
+            if (task.getPublicationState() == MatchTask.PublicationState.PENDING) {
+                lifecycle.markPendingRevisionFailed(task.getResumeId(), task.getRevisionId());
+            }
+        } else {
+            task.markFailed(request.errorCode());
+            if (task.getPublicationState() == MatchTask.PublicationState.PENDING) {
+                lifecycle.markPendingRevisionFailed(task.getResumeId(), task.getRevisionId());
+            }
+        }
+        tasks.saveAndFlush(task);
+        return CallbackResponse.ok();
+    }
+
+    private CallbackResponse persistRejectedDuplicateTitle(V3AnalysisCallbackRequest request) {
+        if (!validV3CallbackEnvelope(request) || request.payloadHash() == null
+                || !request.payloadHash().matches("[a-f0-9]{64}")) {
+            return CallbackResponse.error("VALIDATION_ERROR");
+        }
+        String computed;
+        try { computed = V3CallbackPayloadHash.compute(request); }
+        catch (RuntimeException invalid) { return CallbackResponse.error("VALIDATION_ERROR"); }
+        if (!request.payloadHash().equals(computed)) return CallbackResponse.error("VALIDATION_ERROR");
+
+        MatchTask snapshot = tasks.findById(request.taskId()).orElseThrow(TaskGoneException::new);
+        Optional<Resume> lockedResume = lifecycle.lockActiveForRevision(snapshot.getResumeId(), request.revisionId());
+        MatchTask task = tasks.lockById(request.taskId()).orElseThrow(TaskGoneException::new);
+        CallbackResponse identityError = validateV3TaskIdentity(request, task, lockedResume.orElse(null));
+        if (identityError != null) return identityError;
+        if (task.getPublicationState() == MatchTask.PublicationState.REJECTED_DUPLICATE_TITLE) {
+            return CallbackResponse.error("DUPLICATE_RESOURCE");
+        }
+        if (results.countByTaskId(task.getId()) == 0) {
+            results.save(AnalysisResult.from(task.getId(), task.getResumeId(), task.getRevisionId(),
+                    task.getResumeVersion(), task.getJobDescriptionText(), request));
+        }
+        if (receipts.findByCallbackId(request.callbackId()).isEmpty()) {
+            receipts.saveAndFlush(new CallbackReceipt(request.callbackId(), request.payloadHash(), Instant.now()));
+        }
+        if (task.getState() != MatchTask.State.SUCCEEDED) task.markSucceeded();
+        task.markRejectedDuplicateTitle();
+        lifecycle.markPendingRevisionFailed(task.getResumeId(), task.getRevisionId());
+        tasks.saveAndFlush(task);
+        return CallbackResponse.error("DUPLICATE_RESOURCE");
+    }
+
+    private CallbackResponse resolveV3CallbackRace(V3AnalysisCallbackRequest request,
+                                                     DataIntegrityViolationException failure) {
+        return inWriteTransaction(() -> {
+            if (!validV3CallbackEnvelope(request) || request.payloadHash() == null
+                    || !request.payloadHash().matches("[a-f0-9]{64}")) {
+                return CallbackResponse.error("VALIDATION_ERROR");
+            }
+            String computed;
+            try { computed = V3CallbackPayloadHash.compute(request); }
+            catch (RuntimeException invalid) { return CallbackResponse.error("IDEMPOTENCY_CONFLICT"); }
+            if (!request.payloadHash().equals(computed)) {
+                return CallbackResponse.error("IDEMPOTENCY_CONFLICT");
+            }
+            CallbackReceipt receipt = receipts.findByCallbackId(request.callbackId()).orElseThrow(() -> failure);
+            MatchTask snapshot = tasks.findById(request.taskId()).orElseThrow(TaskGoneException::new);
+            Optional<Resume> lockedResume = lifecycle.lockActiveForRevision(
+                    snapshot.getResumeId(), request.revisionId());
+            MatchTask task = tasks.lockById(request.taskId()).orElseThrow(TaskGoneException::new);
+            CallbackResponse identityError = validateV3TaskIdentity(request, task, lockedResume.orElse(null));
+            if (identityError != null) return identityError;
+            return request.payloadHash().equals(receipt.payloadHash())
+                    ? CallbackResponse.acceptedReplay() : CallbackResponse.error("IDEMPOTENCY_CONFLICT");
+        });
+    }
+
+    private static boolean isDuplicateResumeTitleViolation(Throwable failure) {
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Throwable current = failure; current != null && seen.add(current); current = current.getCause()) {
+            String message = current.getMessage();
+            if (message != null && message.toLowerCase(Locale.ROOT)
+                    .contains("uq_resumes_owner_effective_title")) return true;
+        }
+        return false;
+    }
+
+    private CallbackResponse validateV3TaskIdentity(V3AnalysisCallbackRequest request, MatchTask task, Resume resume) {
+        if (!request.callbackId().equals(task.getCallbackId())) return CallbackResponse.error("IDEMPOTENCY_CONFLICT");
+        if (request.attempt() != task.getAttempt() || !Objects.equals(request.revisionId(), task.getRevisionId())) {
+            return CallbackResponse.error("STALE_ATTEMPT");
+        }
+        if (!task.tokenMatches(request.callbackToken()) || task.getState() == MatchTask.State.BLOCKED) {
+            return CallbackResponse.error("TASK_GONE");
+        }
+        if (resume == null) {
+            blockIfInFlight(task);
+            return CallbackResponse.error("TASK_GONE");
+        }
+        if (task.getPublicationState() == MatchTask.PublicationState.PENDING
+                && !Objects.equals(resume.getPendingRevisionId(), task.getRevisionId())) {
+            blockIfInFlight(task);
+            return CallbackResponse.error("STALE_ATTEMPT");
+        }
+        if (task.getPublicationState() == MatchTask.PublicationState.NOT_REQUESTED
+                && !Objects.equals(resume.getEffectiveRevisionId(), task.getRevisionId())) {
+            blockIfInFlight(task);
+            return CallbackResponse.error("STALE_ATTEMPT");
+        }
+        return null;
+    }
+
+    private static CallbackResponse validateCallbackPayload(String outcome,
+            AnalysisCallbackRequest.AnalysisResultPayload result, String errorCode) {
+        if (outcome == null || !Set.of("SUCCEEDED", "FAILED", "TIMED_OUT").contains(outcome)) {
+            return CallbackResponse.error("VALIDATION_ERROR");
+        }
+        if ("SUCCEEDED".equals(outcome) && result == null) return CallbackResponse.error("MODEL_OUTPUT_INVALID");
+        if ("SUCCEEDED".equals(outcome) && errorCode != null) return CallbackResponse.error("VALIDATION_ERROR");
+        if (!"SUCCEEDED".equals(outcome) && result != null) return CallbackResponse.error("VALIDATION_ERROR");
+        if (!"SUCCEEDED".equals(outcome) && (errorCode == null || !Set.of("MODEL_UNAVAILABLE",
+                "MODEL_OUTPUT_INVALID", "MODEL_ENDPOINT_REJECTED", "UNSUPPORTED_FILE").contains(errorCode))) {
+            return CallbackResponse.error("VALIDATION_ERROR");
+        }
+        return null;
+    }
+
+    private static boolean validV3CallbackEnvelope(V3AnalysisCallbackRequest request) {
+        return request != null && ReadableIdGenerator.isValid(BusinessIdType.TASK, request.taskId())
+                && ReadableIdGenerator.isValid(BusinessIdType.REVISION, request.revisionId())
+                && ReadableIdGenerator.isValid(BusinessIdType.CALLBACK, request.callbackId())
+                && request.callbackToken() != null && request.callbackToken().length() >= 32
+                && request.callbackToken().length() <= 1024 && request.correlationId() != null
+                && request.attempt() >= 1;
+    }
 
     /**
      * Validate and persist a callback in an isolated transaction.  The receipt
@@ -203,8 +524,9 @@ public class MatchTaskService {
         // lock order prevents a delete holding the resume row from deadlocking
         // with a late callback holding the task row.
         MatchTask taskSnapshot = tasks.findById(request.taskId()).orElseThrow(TaskGoneException::new);
-        boolean resumeActive = lifecycle.lockActiveAtVersion(taskSnapshot.getResumeId(), taskSnapshot.getResumeVersion()).isPresent();
+        boolean resumeActive = lockActiveResumeForTask(taskSnapshot);
         MatchTask task = tasks.lockById(request.taskId()).orElseThrow(TaskGoneException::new);
+        if (!request.callbackId().equals(task.getCallbackId())) return CallbackResponse.error("IDEMPOTENCY_CONFLICT");
         if (request.attempt() < task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
         if (request.attempt() != task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
         if (!task.tokenMatches(request.callbackToken()) || task.getState() == MatchTask.State.BLOCKED) {
@@ -236,7 +558,11 @@ public class MatchTaskService {
         if (request.errorCode() != null && !Set.of("MODEL_UNAVAILABLE","MODEL_OUTPUT_INVALID","MODEL_ENDPOINT_REJECTED","UNSUPPORTED_FILE").contains(request.errorCode())) return CallbackResponse.error("VALIDATION_ERROR");
         if ("SUCCEEDED".equals(request.outcome())) {
             try { validateResultSchema(request.result()); validateEvidence(task, request.result()); }
-            catch (RuntimeException invalid) { return CallbackResponse.error("MODEL_OUTPUT_INVALID"); }
+            catch (RuntimeException invalid) {
+                task.markFailed("MODEL_OUTPUT_INVALID");
+                tasks.saveAndFlush(task);
+                return CallbackResponse.error("MODEL_OUTPUT_INVALID");
+            }
         }
         try {
             // saveAndFlush surfaces the unique-key race before result/task
@@ -245,7 +571,7 @@ public class MatchTaskService {
         } catch (DataIntegrityViolationException duplicate) {
             throw new ReceiptRaceException(duplicate);
         }
-        if ("SUCCEEDED".equals(request.outcome())) { results.save(AnalysisResult.from(task.getId(), task.getResumeId(), task.getResumeVersion(), task.getJobDescriptionText(), request)); task.markSucceeded(); }
+        if ("SUCCEEDED".equals(request.outcome())) { results.save(AnalysisResult.from(task.getId(), task.getResumeId(), task.getRevisionId(), task.getResumeVersion(), task.getJobDescriptionText(), request)); task.markSucceeded(); }
         else if ("TIMED_OUT".equals(request.outcome())) task.markTimedOut(request.errorCode());
         else task.markFailed(request.errorCode());
         tasks.saveAndFlush(task);
@@ -278,8 +604,9 @@ public class MatchTaskService {
         }
 
         MatchTask taskSnapshot = tasks.findById(request.taskId()).orElseThrow(TaskGoneException::new);
-        boolean resumeActive = lifecycle.lockActiveAtVersion(taskSnapshot.getResumeId(), taskSnapshot.getResumeVersion()).isPresent();
+        boolean resumeActive = lockActiveResumeForTask(taskSnapshot);
         MatchTask task = tasks.lockById(request.taskId()).orElseThrow(TaskGoneException::new);
+        if (!request.callbackId().equals(task.getCallbackId())) return CallbackResponse.error("IDEMPOTENCY_CONFLICT");
         if (request.attempt() < task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
         if (request.attempt() != task.getAttempt()) return CallbackResponse.error("STALE_ATTEMPT");
         if (!task.tokenMatches(request.callbackToken()) || task.getState() == MatchTask.State.BLOCKED) {
@@ -300,8 +627,29 @@ public class MatchTaskService {
         }
     }
 
+    private boolean lockActiveResumeForTask(MatchTask task) {
+        return task.getRevisionId() == null
+                ? lifecycle.lockActiveAtVersion(task.getResumeId(), task.getResumeVersion()).isPresent()
+                : lifecycle.lockActiveForRevision(task.getResumeId(), task.getRevisionId()).isPresent();
+    }
+
+    private void recordPythonDispatchFailure(MatchTask persistedTask, String code) {
+        if (dispatchFailures != null) {
+            dispatchFailures.markFailed(persistedTask.getId(), code);
+            return;
+        }
+        // This fallback is for non-Spring embeddings only.  The task has
+        // already committed, so a regular save is the only durable action.
+        if (persistedTask.getState() == MatchTask.State.QUEUED || persistedTask.getState() == MatchTask.State.PROCESSING) {
+            persistedTask.markFailed(code);
+            tasks.save(persistedTask);
+        }
+    }
+
     private static boolean validCallbackEnvelope(AnalysisCallbackRequest request) {
         return request != null && request.callbackId() != null && request.taskId() != null
+                && ReadableIdGenerator.isValid(BusinessIdType.TASK, request.taskId())
+                && ReadableIdGenerator.isValid(BusinessIdType.CALLBACK, request.callbackId())
                 && request.callbackToken() != null && request.callbackToken().length() >= 32 && request.callbackToken().length() <= 1024
                 && request.correlationId() != null && request.attempt() >= 1;
     }
@@ -338,6 +686,24 @@ public class MatchTaskService {
     /** Decrypt the durable resume only inside the callback transaction. */
     private String sourceTextForTask(MatchTask task) {
         if (crypto == null) throw new EvidenceReferenceException();
+        if (task.getRevisionId() != null) {
+            Optional<ResumeRevision> boundRevision = revisions.findById(task.getRevisionId())
+                    .filter(value -> value.getResumeId().equals(task.getResumeId()));
+            if (boundRevision.isPresent()) {
+                ResumeRevision revision = boundRevision.get();
+                final byte[] revisionBytes;
+                try {
+                    revisionBytes = normalizeDocumentBytes(revision.getSourceType(),
+                            crypto.decryptBytes(revision.getCiphertext(), revision.getNonce()));
+                } catch (RuntimeException invalidCiphertext) {
+                    throw new EvidenceReferenceException();
+                }
+                if (revisionBytes.length == 0) throw new EvidenceReferenceException();
+                return revision.getSourceType() == Resume.SourceType.TXT
+                        ? new String(revisionBytes, StandardCharsets.UTF_8)
+                        : String.join("\n", docxParagraphs(revisionBytes));
+            }
+        }
         Resume resume = lifecycle.findActiveForAnalysis(task.getResumeId(), task.getResumeVersion())
                 .orElseThrow(EvidenceReferenceException::new);
         if (resume.getEncryptedRawContent() == null || resume.getRawContentNonce() == null) throw new EvidenceReferenceException();
@@ -360,18 +726,35 @@ public class MatchTaskService {
         if (Double.compare(expected, result.score().composite()) != 0) throw new EvidenceReferenceException();
         Set<String> requirementIds = new HashSet<>();
         for (var requirement : result.requirements()) {
-            if (requirement == null || requirement.requirementId() == null || !safeText(requirement.jobRequirementText(), 20_000) || !Set.of("MANDATORY", "PREFERRED").contains(requirement.requirementType()) || !Set.of("SATISFIED", "PARTIALLY_SATISFIED", "RELATED_BUT_EVIDENCE_INSUFFICIENT", "UNMET").contains(requirement.matchStatus()) || !Set.of("EXACT", "SEMANTIC", "RELATED", "NO_MATCH").contains(requirement.matchType()) || !Set.of("SKILLS", "PROJECT_EXPERIENCE", "WORK_CONTENT", "EDUCATION_EXPERIENCE", "SOFT_SKILLS").contains(requirement.component()) || requirement.evidence() == null || !Set.of("NONE", "LOW", "MEDIUM", "HIGH").contains(requirement.evidenceStrength()) || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(requirement.suggestionState()) || !finiteBetween(requirement.componentScore()) || (requirement.gap() != null && (requirement.gap().length() > 5_000 || !ResumeTextRedactor.isRedacted(requirement.gap())))) throw new EvidenceReferenceException();
+            if (requirement == null || !validResultId("requirement", requirement.requirementId()) || !safeText(requirement.jobRequirementText(), 20_000) || !Set.of("MANDATORY", "PREFERRED").contains(requirement.requirementType()) || !Set.of("SATISFIED", "PARTIALLY_SATISFIED", "RELATED_BUT_EVIDENCE_INSUFFICIENT", "UNMET").contains(requirement.matchStatus()) || !Set.of("EXACT", "SEMANTIC", "RELATED", "NO_MATCH").contains(requirement.matchType()) || !Set.of("SKILLS", "PROJECT_EXPERIENCE", "WORK_CONTENT", "EDUCATION_EXPERIENCE", "SOFT_SKILLS").contains(requirement.component()) || requirement.evidence() == null || requirement.evidence().stream().anyMatch(value -> value == null || !validResultId("evidence", value.evidenceId())) || !Set.of("NONE", "LOW", "MEDIUM", "HIGH").contains(requirement.evidenceStrength()) || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(requirement.suggestionState()) || !finiteBetween(requirement.componentScore()) || (requirement.gap() != null && (requirement.gap().length() > 5_000 || !ResumeTextRedactor.isRedacted(requirement.gap())))) throw new EvidenceReferenceException();
             if (("SATISFIED".equals(requirement.matchStatus()) || "PARTIALLY_SATISFIED".equals(requirement.matchStatus())) && requirement.evidence().isEmpty()) throw new EvidenceReferenceException();
             if (("SUPPORTED_FACT".equals(requirement.suggestionState()) || "WORDING_ONLY_REWRITE".equals(requirement.suggestionState())) && requirement.evidence().isEmpty()) throw new EvidenceReferenceException();
             if (!requirementIds.add(requirement.requirementId())) throw new EvidenceReferenceException();
         }
-        for (var suggestion : result.suggestions()) if (suggestion == null || suggestion.suggestionId() == null || suggestion.requirementId() == null || !requirementIds.contains(suggestion.requirementId()) || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(suggestion.state()) || !safeText(suggestion.proposedText(), 5_000) || suggestion.evidenceIds() == null || (("SUPPORTED_FACT".equals(suggestion.state()) || "WORDING_ONLY_REWRITE".equals(suggestion.state())) && suggestion.evidenceIds().isEmpty())) throw new EvidenceReferenceException();
+        Set<String> suggestionIds = new HashSet<>();
+        for (var suggestion : result.suggestions()) if (suggestion == null
+                || !validResultId("suggestion", suggestion.suggestionId())
+                || !suggestionIds.add(suggestion.suggestionId())
+                || !validResultId("requirement", suggestion.requirementId())
+                || !requirementIds.contains(suggestion.requirementId())
+                || !Set.of("SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED").contains(suggestion.state())
+                || !safeText(suggestion.proposedText(), 5_000) || suggestion.evidenceIds() == null
+                || suggestion.evidenceIds().stream().anyMatch(value -> !validResultId("evidence", value))
+                || (("SUPPORTED_FACT".equals(suggestion.state()) || "WORDING_ONLY_REWRITE".equals(suggestion.state())) && suggestion.evidenceIds().isEmpty())) throw new EvidenceReferenceException();
+    }
+    private static boolean validResultId(String prefix, String value) {
+        return value != null && value.matches(java.util.regex.Pattern.quote(prefix) + "[0-9]{3,}");
     }
     private static boolean blank(String value) { return value == null || value.isBlank(); }
     private static boolean safeText(String value, int maxLength) { return value != null && !value.isBlank() && value.length() <= maxLength && ResumeTextRedactor.isRedacted(value); }
     private static boolean finiteBetween(double value) { return Double.isFinite(value) && value >= 0 && value <= 1; }
     private static String randomToken() { byte[] bytes = new byte[48]; new java.security.SecureRandom().nextBytes(bytes); return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes); }
-    private static URI callbackUri() { return URI.create(System.getProperty("matching.callback-url", System.getProperty("app.matching-callback-url", System.getenv().getOrDefault("MATCHING_CALLBACK_URL", "http://127.0.0.1:8080/internal/v1/analysis-results")))); }
+    private static URI callbackUri() { return URI.create(System.getProperty("matching.callback-url", System.getProperty("app.matching-callback-url", System.getenv().getOrDefault("MATCHING_CALLBACK_URL", "http://127.0.0.1:8080/internal/v2/analysis-results")))); }
+    private static URI callbackUriV3() {
+        String configured = System.getProperty("matching.callback-url", System.getProperty("app.matching-callback-url",
+                System.getenv().getOrDefault("MATCHING_CALLBACK_URL", "http://127.0.0.1:8080/internal/v3/analysis-results")));
+        return URI.create(configured.replace("/internal/v2/analysis-results", "/internal/v3/analysis-results"));
+    }
     private static byte[] normalizeDocumentBytes(Resume.SourceType type, byte[] bytes) {
         if (bytes == null) return new byte[0];
         if (type != Resume.SourceType.TXT) return bytes;
@@ -431,7 +814,14 @@ public class MatchTaskService {
         }
         return out;
     }
-    private static boolean sameSubmission(MatchTask task, CreateMatchTaskCommand command) { return task.getResumeId().equals(command.resumeId()) && task.getLlmProfileId().equals(command.llmProfileId()) && task.getJobFamily() == command.jobFamily() && task.getJobDescriptionText().equals(command.jobDescriptionText()); }
+    private static boolean sameSubmission(MatchTask task, CreateMatchTaskCommand command) {
+        if (command.submissionFingerprint() != null) {
+            return command.submissionFingerprint().equals(task.getSubmissionFingerprint());
+        }
+        return task.getResumeId().equals(command.resumeId()) && task.getLlmProfileId().equals(command.llmProfileId())
+                && task.getJobFamily() == command.jobFamily()
+                && task.getJobDescriptionText().equals(command.jobDescriptionText());
+    }
     private static List<String> docxParagraphs(byte[] bytes) {
         if (bytes == null || bytes.length == 0) return List.of();
         try (var zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {

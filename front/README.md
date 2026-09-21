@@ -10,6 +10,6 @@ pnpm run dev
 ```
 
 该值只能填写 Java 来源地址（例如 `http://localhost:8080`）。客户端会自行拼接
-`/api/v1/...` 路径。当前端运行在 `http://localhost:5173` 或
+`/api/v2/...` 路径。当前端运行在 `http://localhost:5173` 或
 `http://127.0.0.1:5173` 时，请在 Java 的 `APP_CORS_ALLOWED_ORIGINS` 设置中
 保留对应来源地址。

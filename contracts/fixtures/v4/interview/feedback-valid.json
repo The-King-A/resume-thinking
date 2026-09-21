@@ -1,0 +1,23 @@
+{
+  "id": "feedback001",
+  "sessionId": "session001",
+  "answerId": "answer001",
+  "state": "FEEDBACK_READY",
+  "relevance": "HIGH",
+  "completeness": "MEDIUM",
+  "technicalAccuracy": "MEDIUM",
+  "factualConsistency": "HIGH",
+  "clarity": "MEDIUM",
+  "evidenceIds": ["evidence001"],
+  "riskFlags": [],
+  "claims": [
+    { "id": "claim001", "claimText": "可补充具体接口职责", "state": "NEEDS_USER_CONFIRMATION", "evidenceIds": [], "applied": false }
+  ],
+  "improvementSuggestion": "下一次回答补充一个可核验的接口设计细节。",
+  "suggestedAnswer": "我会说明自己负责的接口设计、关键取舍和可核验结果。",
+  "answerComparison": "当前回答覆盖了职责，但还需要补充具体取舍与结果证据。",
+  "submittedAnswer": "我负责接口设计和异常处理。",
+  "nextQuestionId": "question002",
+  "version": 1,
+  "createdAt": "2026-09-20T08:01:00Z"
+}

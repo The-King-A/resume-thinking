@@ -1,0 +1,6 @@
+{
+  "available": true,
+  "testedAt": "2026-09-01T10:00:00Z",
+  "models": ["deepseek-chat", "deepseek-reasoner"],
+  "diagnostic": null
+}

@@ -4,23 +4,10 @@ import asyncio
 from typing import Any
 import httpx
 
-from .settings import is_allowed_callback_url, settings
+from .settings import is_allowed_callback_url, is_usable_internal_service_token, settings
 
 
-STOP_CODES = {"TASK_GONE", "STALE_ATTEMPT", "IDEMPOTENCY_CONFLICT"}
-_TOKEN_PLACEHOLDER_MARKERS = ("replace-with", "change-me", "placeholder")
-
-
-def _is_usable_internal_service_token(token: object) -> bool:
-    """Return whether the configured token is safe to use for internal egress."""
-    if not isinstance(token, str):
-        return False
-    normalized = token.strip()
-    if not normalized or normalized != token:
-        return False
-    return not any(marker in normalized.lower() for marker in _TOKEN_PLACEHOLDER_MARKERS)
-
-
+STOP_CODES = {"TASK_GONE", "STALE_ATTEMPT", "IDEMPOTENCY_CONFLICT", "INTERVIEW_SESSION_GONE", "INTERVIEW_CALLBACK_STALE"}
 class CallbackClient:
     def __init__(self, *, transport: httpx.AsyncBaseTransport | None = None, attempts: int | None = None, backoff_seconds: float | None = None):
         self.transport = transport
@@ -37,7 +24,7 @@ class CallbackClient:
         # Never send a callback without a configured, non-placeholder service
         # token.  This also prevents retries from leaking an unauthenticated
         # request when deployment configuration is incomplete.
-        if not _is_usable_internal_service_token(token):
+        if not is_usable_internal_service_token(token):
             return False
         timeout = httpx.Timeout(settings.read_timeout, connect=settings.connect_timeout)
         headers = {"X-Internal-Service-Token": token}
@@ -51,9 +38,14 @@ class CallbackClient:
                 if 200 <= response.status_code < 300:
                     # Java may return a semantic stop code in an otherwise successful envelope.
                     try:
-                        code = response.json().get("code")
+                        body = response.json()
+                        code = body.get("code") if isinstance(body, dict) else None
+                        accepted = body.get("accepted") if isinstance(body, dict) else None
                     except (ValueError, TypeError):
                         code = None
+                        accepted = None
+                    if accepted is False:
+                        return False
                     if code in STOP_CODES:
                         return False
                     return True

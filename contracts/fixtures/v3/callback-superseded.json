@@ -1,0 +1,11 @@
+{
+  "taskId": "task001",
+  "revisionId": "revision001",
+  "attempt": 1,
+  "callbackId": "callback002",
+  "callbackToken": "REDACTED_CALLBACK_TOKEN_NOT_A_VALUE",
+  "payloadHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "outcome": "FAILED",
+  "errorCode": "MODEL_OUTPUT_INVALID",
+  "correlationId": "00000000-0000-4000-8000-000000000102"
+}

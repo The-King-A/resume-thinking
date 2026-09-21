@@ -1,0 +1,6 @@
+{
+  "llmProfileId": "profile001",
+  "jobFamily": "JAVA_BACKEND",
+  "jobDescriptionText": "Build reliable Java services with clear tests and operational ownership.",
+  "idempotencyKey": "fixture-v3-rematch-invalid-0001"
+}

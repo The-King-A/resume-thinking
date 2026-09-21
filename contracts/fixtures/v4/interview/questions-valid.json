@@ -1,0 +1,26 @@
+{
+  "session": {
+    "id": "session001",
+    "resumeId": "resume001",
+    "revisionId": "revision001",
+    "matchTaskId": "task001",
+    "jobFamily": "JAVA_BACKEND",
+    "state": "WAITING_FOR_ANSWER",
+    "workType": "QUESTION_GENERATION",
+    "questionCount": 4,
+    "answeredQuestionId": null,
+    "activeQuestionId": "question001",
+    "feedbackId": null,
+    "failureCode": null,
+    "version": 1,
+    "createdAt": "2026-09-20T08:00:00Z",
+    "updatedAt": "2026-09-20T08:00:02Z",
+    "deletedAt": null
+  },
+  "questions": [
+    { "id": "question001", "sequence": 1, "questionType": "BASIC_CONFIRMATION", "difficulty": "BASIC", "questionText": "请说明你在 Java 项目中的具体职责。", "requirementId": "requirement001", "requirementText": "Java 服务开发", "evidenceIds": ["evidence001"], "generationReason": "核对已有项目职责", "confidence": 0.9, "answered": false },
+    { "id": "question002", "sequence": 2, "questionType": "PROJECT_DEEP_DIVE", "difficulty": "INTERMEDIATE", "questionText": "请深入说明项目中的接口设计取舍。", "requirementId": "requirement001", "requirementText": "Java 服务开发", "evidenceIds": ["evidence001"], "generationReason": "追问项目证据", "confidence": 0.85, "answered": false },
+    { "id": "question003", "sequence": 3, "questionType": "JOB_SCENARIO", "difficulty": "ADVANCED", "questionText": "如果接口出现超时，你会如何排查？", "requirementId": "requirement002", "requirementText": "故障排查", "evidenceIds": ["evidence002"], "generationReason": "覆盖岗位场景缺口", "confidence": 0.8, "answered": false },
+    { "id": "question004", "sequence": 4, "questionType": "SYNTHESIS_FOLLOW_UP", "difficulty": "ADVANCED", "questionText": "如何把你的项目经历与岗位职责建立联系？", "requirementId": "requirement001", "requirementText": "Java 服务开发", "evidenceIds": ["evidence001"], "generationReason": "形成综合表达练习", "confidence": 0.75, "answered": false }
+  ]
+}

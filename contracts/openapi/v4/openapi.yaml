@@ -1,0 +1,490 @@
+openapi: 3.1.0
+info:
+  title: Resume Thinking Interview Practice API
+  version: 4.0.0
+  license:
+    name: UNLICENSED
+    identifier: LicenseRef-UNLICENSED
+  description: |
+    Java-owned interview preparation and one-answer feedback API. Interview
+    content is scoped to the authenticated owner of an effective resume and
+    is never treated as a resume fact without explicit confirmation.
+servers:
+  - url: http://127.0.0.1:8080
+    description: Local development server
+security:
+  - bearerAuth: []
+tags:
+  - name: Interview Practice
+    description: Evidence-bound interview preparation and one-answer feedback.
+paths:
+  /api/v4/interview-sessions:
+    post:
+      tags: [Interview Practice]
+      summary: Create an interview practice session
+      operationId: createInterviewSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInterviewSessionRequest'
+      responses:
+        '202':
+          description: Session accepted for question generation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewSession'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ResourceNotFound' }
+        '409': { $ref: '#/components/responses/InterviewConflict' }
+  /api/v4/interview-sessions/{sessionId}:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Interview Practice]
+      summary: Read an interview session status
+      operationId: getInterviewSession
+      responses:
+        '200':
+          description: Owner-scoped interview session metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewSession'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/InterviewNotFound' }
+        '410': { $ref: '#/components/responses/InterviewGone' }
+    delete:
+      tags: [Interview Practice]
+      summary: End and clear an interview session
+      operationId: deleteInterviewSession
+      responses:
+        '204':
+          description: Session content was made unreadable. Audit metadata may remain.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/InterviewNotFound' }
+        '410': { $ref: '#/components/responses/InterviewGone' }
+  /api/v4/interview-sessions/{sessionId}/questions:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Interview Practice]
+      summary: Read generated interview questions
+      operationId: getInterviewQuestions
+      responses:
+        '200':
+          description: Four evidence-bound interview questions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewQuestionSet'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/InterviewNotFound' }
+        '409': { $ref: '#/components/responses/InterviewQuestionNotReady' }
+        '410': { $ref: '#/components/responses/InterviewGone' }
+  /api/v4/interview-sessions/{sessionId}/questions/regenerate:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [Interview Practice]
+      summary: Regenerate questions before an answer is submitted
+      operationId: regenerateInterviewQuestions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegenerateInterviewQuestionsRequest'
+      responses:
+        '202':
+          description: Question regeneration accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewSession'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/InterviewNotFound' }
+        '409': { $ref: '#/components/responses/InterviewConflict' }
+        '410': { $ref: '#/components/responses/InterviewGone' }
+  /api/v4/interview-sessions/{sessionId}/answers:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [Interview Practice]
+      summary: Submit one interview answer
+      operationId: submitInterviewAnswer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitInterviewAnswerRequest'
+      responses:
+        '202':
+          description: Answer accepted for one-round feedback.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewAnswerSubmission'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/InterviewNotFound' }
+        '409': { $ref: '#/components/responses/InterviewConflict' }
+        '410': { $ref: '#/components/responses/InterviewGone' }
+  /api/v4/interview-sessions/{sessionId}/feedback:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Interview Practice]
+      summary: Read one-round answer feedback
+      operationId: getInterviewFeedback
+      responses:
+        '200':
+          description: Structured feedback with evidence and confirmation state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewFeedback'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/InterviewNotFound' }
+        '409': { $ref: '#/components/responses/InterviewFeedbackNotReady' }
+        '410': { $ref: '#/components/responses/InterviewGone' }
+  /api/v4/interview-sessions/{sessionId}/next-question:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [Interview Practice]
+      summary: Move to the next unanswered interview question
+      operationId: nextInterviewQuestion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NextInterviewQuestionRequest'
+      responses:
+        '200':
+          description: The same session is ready for the next answer, or has completed all questions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewSession'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/InterviewNotFound' }
+        '409': { $ref: '#/components/responses/InterviewConflict' }
+        '410': { $ref: '#/components/responses/InterviewGone' }
+  /api/v4/interview-sessions/{sessionId}/confirmations:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [Interview Practice]
+      summary: Confirm or reject one feedback claim
+      operationId: confirmInterviewClaim
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmInterviewClaimRequest'
+      responses:
+        '200':
+          description: Confirmation recorded without changing resume facts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewConfirmation'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/InterviewNotFound' }
+        '409': { $ref: '#/components/responses/InterviewConflict' }
+        '410': { $ref: '#/components/responses/InterviewGone' }
+  /internal/v4/interview-jobs:
+    post:
+      tags: [Internal Interview Worker]
+      summary: Submit a Java-owned interview analysis job
+      operationId: submitInterviewJob
+      security:
+        - internalServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: See the internal JSON schema artifact.
+              additionalProperties: true
+      responses:
+        '202':
+          description: Job accepted for background processing.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/BadRequest' }
+  /internal/v4/interview-results:
+    post:
+      tags: [Internal Interview Worker]
+      summary: Receive a Python interview callback
+      operationId: receiveInterviewResult
+      security:
+        - internalServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: See the internal JSON callback schema artifact.
+              additionalProperties: true
+      responses:
+        '200':
+          description: Callback acceptance or safe terminal rejection.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/InterviewConflict' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    internalServiceAuth:
+      type: apiKey
+      in: header
+      name: X-Internal-Service-Token
+  parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^session[0-9]{3,}$'
+  responses:
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Unauthorized:
+      description: Authentication required.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    ResourceNotFound:
+      description: Resource is not visible to the caller.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    InterviewNotFound:
+      description: Interview session is unknown or not owned by the caller.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    InterviewGone:
+      description: Interview content has been cleared or its resume is hidden.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    InterviewConflict:
+      description: Interview state, version, or idempotency conflict.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    InterviewQuestionNotReady:
+      description: Questions are still being generated.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    InterviewFeedbackNotReady:
+      description: Feedback is still being generated.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+  schemas:
+    CreateInterviewSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [matchTaskId, idempotencyKey]
+      properties:
+        matchTaskId: { type: string, pattern: '^task[0-9]{3,}$' }
+        idempotencyKey: { type: string, minLength: 16, maxLength: 128 }
+    RegenerateInterviewQuestionsRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, idempotencyKey]
+      properties:
+        expectedVersion: { type: integer, minimum: 0 }
+        idempotencyKey: { type: string, minLength: 16, maxLength: 128 }
+    SubmitInterviewAnswerRequest:
+      type: object
+      additionalProperties: false
+      required: [questionId, answerText, expectedSessionVersion, idempotencyKey]
+      properties:
+        questionId: { type: string, pattern: '^question[0-9]{3,}$' }
+        answerText: { type: string, minLength: 1, maxLength: 8000 }
+        expectedSessionVersion: { type: integer, minimum: 0 }
+        idempotencyKey: { type: string, minLength: 16, maxLength: 128 }
+    NextInterviewQuestionRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedSessionVersion]
+      properties:
+        expectedSessionVersion: { type: integer, minimum: 0 }
+    ConfirmInterviewClaimRequest:
+      type: object
+      additionalProperties: false
+      required: [claimId, decision, expectedFeedbackVersion]
+      properties:
+        claimId: { type: string, pattern: '^claim[0-9]{3,}$' }
+        decision: { type: string, enum: [CONFIRMED, REJECTED] }
+        expectedFeedbackVersion: { type: integer, minimum: 0 }
+    InterviewSession:
+      type: object
+      additionalProperties: false
+      required: [id, resumeId, revisionId, matchTaskId, jobFamily, state, version, questionCount, answeredQuestionId, activeQuestionId, createdAt, updatedAt]
+      properties:
+        id: { type: string, pattern: '^session[0-9]{3,}$' }
+        resumeId: { type: string, pattern: '^resume[0-9]{3,}$' }
+        revisionId: { type: string, pattern: '^revision[0-9]{3,}$' }
+        matchTaskId: { type: string, pattern: '^task[0-9]{3,}$' }
+        jobFamily: { type: string, const: JAVA_BACKEND }
+        state: { type: string, enum: [QUESTION_GENERATING, WAITING_FOR_ANSWER, ANSWER_ANALYZING, FEEDBACK_READY, COMPLETED, FAILED, DELETED] }
+        workType: { type: [string, 'null'], enum: [QUESTION_GENERATION, ANSWER_ANALYSIS, null] }
+        questionCount: { type: integer, minimum: 0, maximum: 4 }
+        answeredQuestionId: { type: [string, 'null'], pattern: '^question[0-9]{3,}$' }
+        activeQuestionId: { type: [string, 'null'], pattern: '^question[0-9]{3,}$' }
+        feedbackId: { type: [string, 'null'], pattern: '^feedback[0-9]{3,}$' }
+        failureCode: { type: [string, 'null'], enum: [INTERVIEW_MODEL_UNAVAILABLE, INTERVIEW_MODEL_OUTPUT_INVALID, INTERVIEW_SESSION_GONE, INTERVIEW_CALLBACK_STALE, null] }
+        version: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        deletedAt: { type: [string, 'null'], format: date-time }
+    InterviewQuestion:
+      type: object
+      additionalProperties: false
+      required: [id, sequence, questionType, difficulty, questionText, requirementId, requirementText, evidenceIds, generationReason, confidence, answered]
+      properties:
+        id: { type: string, pattern: '^question[0-9]{3,}$' }
+        sequence: { type: integer, minimum: 1, maximum: 4 }
+        questionType: { type: string, enum: [BASIC_CONFIRMATION, PROJECT_DEEP_DIVE, JOB_SCENARIO, SYNTHESIS_FOLLOW_UP] }
+        difficulty: { type: string, enum: [BASIC, INTERMEDIATE, ADVANCED] }
+        questionText: { type: string, minLength: 1, maxLength: 2000 }
+        requirementId: { type: string, pattern: '^requirement[0-9]{3,}$' }
+        requirementText: { type: string, minLength: 1, maxLength: 5000 }
+        evidenceIds:
+          type: array
+          items: { type: string, pattern: '^evidence[0-9]{3,}$' }
+        generationReason: { type: string, minLength: 1, maxLength: 2000 }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        answered: { type: boolean }
+    InterviewQuestionSet:
+      type: object
+      additionalProperties: false
+      required: [session, questions]
+      properties:
+        session: { $ref: '#/components/schemas/InterviewSession' }
+        questions:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items: { $ref: '#/components/schemas/InterviewQuestion' }
+    InterviewAnswerSubmission:
+      type: object
+      additionalProperties: false
+      required: [session, answerId, state, feedbackAvailable]
+      properties:
+        session: { $ref: '#/components/schemas/InterviewSession' }
+        answerId: { type: string, pattern: '^answer[0-9]{3,}$' }
+        state: { type: string, const: ANSWER_ANALYZING }
+        feedbackAvailable: { type: boolean, const: false }
+    FeedbackLevel:
+      type: string
+      enum: [HIGH, MEDIUM, LOW, INSUFFICIENT_EVIDENCE]
+    ClaimState:
+      type: string
+      enum: [SUPPORTED_FACT, WORDING_ONLY_REWRITE, NEEDS_USER_CONFIRMATION, RISKY_OR_UNSUPPORTED]
+    InterviewRiskFlag:
+      type: object
+      additionalProperties: false
+      required: [code, message, level, claimState]
+      properties:
+        code: { type: string, minLength: 1, maxLength: 80 }
+        message: { type: string, minLength: 1, maxLength: 1000 }
+        level: { $ref: '#/components/schemas/FeedbackLevel' }
+        claimState: { $ref: '#/components/schemas/ClaimState' }
+    InterviewClaim:
+      type: object
+      additionalProperties: false
+      required: [id, claimText, state, evidenceIds, applied]
+      properties:
+        id: { type: string, pattern: '^claim[0-9]{3,}$' }
+        claimText: { type: string, minLength: 1, maxLength: 2000 }
+        state: { $ref: '#/components/schemas/ClaimState' }
+        evidenceIds:
+          type: array
+          items: { type: string, pattern: '^evidence[0-9]{3,}$' }
+        applied: { type: boolean, const: false }
+    InterviewFeedback:
+      type: object
+      additionalProperties: false
+      required: [id, sessionId, answerId, state, relevance, completeness, technicalAccuracy, factualConsistency, clarity, evidenceIds, riskFlags, claims, improvementSuggestion, submittedAnswer, nextQuestionId, version, createdAt]
+      properties:
+        id: { type: string, pattern: '^feedback[0-9]{3,}$' }
+        sessionId: { type: string, pattern: '^session[0-9]{3,}$' }
+        answerId: { type: string, pattern: '^answer[0-9]{3,}$' }
+        state: { type: string, const: FEEDBACK_READY }
+        relevance: { $ref: '#/components/schemas/FeedbackLevel' }
+        completeness: { $ref: '#/components/schemas/FeedbackLevel' }
+        technicalAccuracy: { $ref: '#/components/schemas/FeedbackLevel' }
+        factualConsistency: { $ref: '#/components/schemas/FeedbackLevel' }
+        clarity: { $ref: '#/components/schemas/FeedbackLevel' }
+        evidenceIds:
+          type: array
+          items: { type: string, pattern: '^evidence[0-9]{3,}$' }
+        riskFlags:
+          type: array
+          items: { $ref: '#/components/schemas/InterviewRiskFlag' }
+        claims:
+          type: array
+          items: { $ref: '#/components/schemas/InterviewClaim' }
+        improvementSuggestion: { type: string, minLength: 1, maxLength: 3000 }
+        suggestedAnswer: { type: string, minLength: 1, maxLength: 8000 }
+        answerComparison: { type: string, minLength: 1, maxLength: 5000 }
+        submittedAnswer: { type: string, minLength: 1, maxLength: 8000 }
+        nextQuestionId: { type: [string, 'null'], pattern: '^question[0-9]{3,}$' }
+        version: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+    InterviewConfirmation:
+      type: object
+      additionalProperties: false
+      required: [id, sessionId, feedbackId, claimId, decision, createdAt]
+      properties:
+        id: { type: string, pattern: '^confirmation[0-9]{3,}$' }
+        sessionId: { type: string, pattern: '^session[0-9]{3,}$' }
+        feedbackId: { type: string, pattern: '^feedback[0-9]{3,}$' }
+        claimId: { type: string, pattern: '^claim[0-9]{3,}$' }
+        decision: { type: string, enum: [CONFIRMED, REJECTED] }
+        createdAt: { type: string, format: date-time }
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      properties:
+        code:
+          type: string
+          enum: [VALIDATION_ERROR, AUTHENTICATION_REQUIRED, FORBIDDEN, RESOURCE_NOT_FOUND, INTERVIEW_MATCH_NOT_READY, INTERVIEW_SESSION_NOT_FOUND, INTERVIEW_SESSION_GONE, INTERVIEW_QUESTION_NOT_READY, INTERVIEW_FEEDBACK_NOT_READY, INTERVIEW_ANSWER_CONFLICT, INTERVIEW_CALLBACK_STALE, INTERVIEW_MODEL_UNAVAILABLE, INTERVIEW_MODEL_OUTPUT_INVALID, INTERVIEW_CONFIRMATION_REQUIRED]
+        message: { type: string, minLength: 1, maxLength: 200 }
+        correlationId: { type: string, format: uuid }
+        retryable: { type: boolean }
+        detailCode: { type: [string, 'null'] }
+        details:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [field, reason]
+            properties:
+              field: { type: string, minLength: 1, maxLength: 100 }
+              reason: { type: string, minLength: 1, maxLength: 200 }

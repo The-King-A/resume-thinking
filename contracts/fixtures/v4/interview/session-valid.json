@@ -1,0 +1,18 @@
+{
+  "id": "session001",
+  "resumeId": "resume001",
+  "revisionId": "revision001",
+  "matchTaskId": "task001",
+  "jobFamily": "JAVA_BACKEND",
+  "state": "WAITING_FOR_ANSWER",
+  "workType": "QUESTION_GENERATION",
+  "questionCount": 4,
+  "answeredQuestionId": null,
+  "activeQuestionId": "question001",
+  "feedbackId": null,
+  "failureCode": null,
+  "version": 1,
+  "createdAt": "2026-09-20T08:00:00Z",
+  "updatedAt": "2026-09-20T08:00:02Z",
+  "deletedAt": null
+}

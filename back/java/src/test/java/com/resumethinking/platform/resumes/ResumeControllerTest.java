@@ -13,10 +13,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class ResumeControllerTest {
  @Test void deleteSendsExactConfirmationAndVersion() throws Exception {
-  var service=mock(ResumeLifecycleService.class); var id=UUID.randomUUID(); var owner=UUID.randomUUID();
+  var service=mock(ResumeLifecycleService.class); var id="resume001"; var owner="user001";
   var resume=Resume.active(id,owner,"CV",Resume.SourceType.TXT,UserRole.USER,Instant.parse("2026-01-01T00:00:00Z"),2L); when(service.softDelete(any())).thenReturn(resume);
   MockMvc mvc=MockMvcBuilders.standaloneSetup(new ResumeController(service)).build();
-  mvc.perform(delete("/api/v1/resumes/{id}",id).requestAttr("actorId",owner).requestAttr("role",UserRole.USER).contentType(MediaType.APPLICATION_JSON).content("{\"confirmationText\":\"确认删除简历\",\"expectedVersion\":2}"))
+  mvc.perform(delete("/api/v2/resumes/{id}",id).requestAttr("actorId",owner).requestAttr("role",UserRole.USER).contentType(MediaType.APPLICATION_JSON).content("{\"confirmationText\":\"确认删除简历\",\"expectedVersion\":2}"))
     .andExpect(status().isOk()).andExpect(jsonPath("$.status").value(0));
   verify(service).softDelete(new DeleteResumeCommand(id,owner,UserRole.USER,"确认删除简历",2L));
  }

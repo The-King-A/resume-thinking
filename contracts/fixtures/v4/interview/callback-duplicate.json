@@ -1,0 +1,20 @@
+{
+  "contractVersion": "4.0",
+  "workType": "QUESTION_GENERATION",
+  "sessionId": "session001",
+  "revisionId": "revision001",
+  "matchTaskId": "task001",
+  "sessionVersion": 1,
+  "attempt": 1,
+  "callbackId": "callback001",
+  "callbackToken": "placeholder-callback-token-000000000000",
+  "payloadHash": "387cece2bca8348d05979f811caf71fdc292efbbb678740d016296ac33992290",
+  "outcome": "SUCCEEDED",
+  "correlationId": "00000000-0000-4000-8000-000000000001",
+  "questions": [
+    { "questionId": "question001", "sequence": 1, "questionType": "BASIC_CONFIRMATION", "difficulty": "BASIC", "questionText": "请说明职责。", "requirementId": "requirement001", "requirementText": "Java 服务开发", "evidenceIds": ["evidence001"], "generationReason": "核对职责", "confidence": 0.9 },
+    { "questionId": "question002", "sequence": 2, "questionType": "PROJECT_DEEP_DIVE", "difficulty": "INTERMEDIATE", "questionText": "请说明设计取舍。", "requirementId": "requirement001", "requirementText": "Java 服务开发", "evidenceIds": ["evidence001"], "generationReason": "追问项目", "confidence": 0.85 },
+    { "questionId": "question003", "sequence": 3, "questionType": "JOB_SCENARIO", "difficulty": "ADVANCED", "questionText": "请说明排查步骤。", "requirementId": "requirement002", "requirementText": "故障排查", "evidenceIds": ["evidence002"], "generationReason": "覆盖场景", "confidence": 0.8 },
+    { "questionId": "question004", "sequence": 4, "questionType": "SYNTHESIS_FOLLOW_UP", "difficulty": "ADVANCED", "questionText": "请联系岗位职责。", "requirementId": "requirement001", "requirementText": "Java 服务开发", "evidenceIds": ["evidence001"], "generationReason": "综合表达", "confidence": 0.75 }
+  ]
+}

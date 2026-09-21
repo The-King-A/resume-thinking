@@ -1,0 +1,8 @@
+{
+  "code": "INTERVIEW_SESSION_GONE",
+  "message": "面试会话已结束或已清理。",
+  "correlationId": "00000000-0000-4000-8000-000000000004",
+  "retryable": false,
+  "detailCode": null,
+  "details": []
+}

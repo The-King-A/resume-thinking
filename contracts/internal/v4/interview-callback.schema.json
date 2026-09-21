@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://resume-thinking.local/contracts/internal/v4/interview-callback.schema.json",
+  "title": "InternalInterviewCallback",
+  "description": "Strict Python-to-Java interview callback. Java validates state, ownership, callback identity, and evidence scope before persistence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "workType", "sessionId", "revisionId", "matchTaskId", "sessionVersion", "attempt", "callbackId", "callbackToken", "payloadHash", "outcome", "correlationId"],
+  "properties": {
+    "contractVersion": { "const": "4.0" },
+    "workType": { "type": "string", "enum": ["QUESTION_GENERATION", "ANSWER_ANALYSIS"] },
+    "sessionId": { "type": "string", "pattern": "^session[0-9]{3,}$" },
+    "revisionId": { "type": "string", "pattern": "^revision[0-9]{3,}$" },
+    "matchTaskId": { "type": "string", "pattern": "^task[0-9]{3,}$" },
+    "sessionVersion": { "type": "integer", "minimum": 0 },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "callbackId": { "type": "string", "pattern": "^callback[0-9]{3,}$" },
+    "callbackToken": { "type": "string", "minLength": 32, "maxLength": 1024 },
+    "payloadHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "outcome": { "type": "string", "enum": ["SUCCEEDED", "FAILED", "TIMED_OUT"] },
+    "correlationId": { "type": "string", "format": "uuid" },
+    "questions": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "$ref": "#/$defs/Question" } },
+    "feedback": { "$ref": "#/$defs/Feedback" },
+    "errorCode": { "type": "string", "enum": ["INTERVIEW_MODEL_UNAVAILABLE", "INTERVIEW_MODEL_OUTPUT_INVALID", "MODEL_ENDPOINT_REJECTED", "INTERVIEW_SESSION_GONE", "INTERVIEW_CALLBACK_STALE"] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "outcome": { "const": "SUCCEEDED" } } },
+      "then": { "required": [], "not": { "required": ["errorCode"] } }
+    },
+    {
+      "if": { "properties": { "outcome": { "enum": ["FAILED", "TIMED_OUT"] } } },
+      "then": { "required": ["errorCode"], "not": { "anyOf": [{ "required": ["questions"] }, { "required": ["feedback"] }] } }
+    },
+    {
+      "if": { "properties": { "workType": { "const": "QUESTION_GENERATION" }, "outcome": { "const": "SUCCEEDED" } } },
+      "then": { "required": ["questions", "workType"], "not": { "required": ["feedback"] } }
+    },
+    {
+      "if": { "properties": { "workType": { "const": "ANSWER_ANALYSIS" }, "outcome": { "const": "SUCCEEDED" } } },
+      "then": { "required": ["feedback", "workType"], "not": { "required": ["questions"] } }
+    }
+  ],
+  "not": {
+    "anyOf": [
+      { "required": ["ownerId"] },
+      { "required": ["userId"] },
+      { "required": ["databaseCredentials"] },
+      { "required": ["hostFilesystemPath"] },
+      { "required": ["jwt"] },
+      { "required": ["plaintextPassword"] },
+      { "required": ["persistenceCommand"] }
+    ]
+  },
+  "$defs": {
+    "Question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["questionId", "sequence", "questionType", "difficulty", "questionText", "requirementId", "requirementText", "evidenceIds", "generationReason", "confidence"],
+      "properties": {
+        "questionId": { "type": "string", "pattern": "^question[0-9]{3,}$" },
+        "sequence": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "questionType": { "type": "string", "enum": ["BASIC_CONFIRMATION", "PROJECT_DEEP_DIVE", "JOB_SCENARIO", "SYNTHESIS_FOLLOW_UP"] },
+        "difficulty": { "type": "string", "enum": ["BASIC", "INTERMEDIATE", "ADVANCED"] },
+        "questionText": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "requirementId": { "type": "string", "pattern": "^requirement[0-9]{3,}$" },
+        "requirementText": { "type": "string", "minLength": 1, "maxLength": 5000 },
+        "evidenceIds": { "type": "array", "items": { "type": "string", "pattern": "^evidence[0-9]{3,}$" } },
+        "generationReason": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "RiskFlag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "level", "claimState"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "level": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW", "INSUFFICIENT_EVIDENCE"] },
+        "claimState": { "type": "string", "enum": ["SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED"] }
+      }
+    },
+    "Claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "claimText", "state", "evidenceIds", "applied"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^claim[0-9]{3,}$" },
+        "claimText": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "state": { "type": "string", "enum": ["SUPPORTED_FACT", "WORDING_ONLY_REWRITE", "NEEDS_USER_CONFIRMATION", "RISKY_OR_UNSUPPORTED"] },
+        "evidenceIds": { "type": "array", "items": { "type": "string", "pattern": "^evidence[0-9]{3,}$" } },
+        "applied": { "type": "boolean", "const": false }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "state": { "enum": ["SUPPORTED_FACT", "WORDING_ONLY_REWRITE"] } } },
+          "then": { "properties": { "evidenceIds": { "minItems": 1 } } }
+        }
+      ]
+    },
+    "Feedback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["feedbackId", "answerId", "state", "relevance", "completeness", "technicalAccuracy", "factualConsistency", "clarity", "evidenceIds", "riskFlags", "claims", "improvementSuggestion", "version"],
+      "properties": {
+        "feedbackId": { "type": "string", "pattern": "^feedback[0-9]{3,}$" },
+        "answerId": { "type": "string", "pattern": "^answer[0-9]{3,}$" },
+        "state": { "const": "FEEDBACK_READY" },
+        "relevance": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW", "INSUFFICIENT_EVIDENCE"] },
+        "completeness": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW", "INSUFFICIENT_EVIDENCE"] },
+        "technicalAccuracy": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW", "INSUFFICIENT_EVIDENCE"] },
+        "factualConsistency": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW", "INSUFFICIENT_EVIDENCE"] },
+        "clarity": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW", "INSUFFICIENT_EVIDENCE"] },
+        "evidenceIds": { "type": "array", "items": { "type": "string", "pattern": "^evidence[0-9]{3,}$" } },
+        "riskFlags": { "type": "array", "items": { "$ref": "#/$defs/RiskFlag" } },
+        "claims": { "type": "array", "items": { "$ref": "#/$defs/Claim" } },
+        "improvementSuggestion": { "type": "string", "minLength": 1, "maxLength": 3000 },
+        "suggestedAnswer": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "answerComparison": { "type": "string", "minLength": 1, "maxLength": 5000 },
+        "version": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

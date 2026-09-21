@@ -1,0 +1,23 @@
+{
+  "contractVersion": "4.0",
+  "workType": "QUESTION_GENERATION",
+  "sessionId": "session001",
+  "revisionId": "revision001",
+  "matchTaskId": "task001",
+  "sessionVersion": 1,
+  "attempt": 1,
+  "callbackId": "callback001",
+  "callbackUrl": "http://127.0.0.1:8080/internal/v4/interview-results",
+  "callbackToken": "placeholder-callback-token-000000000000",
+  "redactionRequired": true,
+  "provider": { "baseUrl": "http://127.0.0.1:9000", "model": "fixture-model", "apiKey": "fixture-api-key" },
+  "correlationId": "00000000-0000-4000-8000-000000000001",
+  "questionGeneration": {
+    "requirements": [
+      { "requirementId": "requirement001", "requirementText": "Java 服务开发", "requirementType": "MANDATORY", "matchStatus": "SATISFIED", "gap": null, "evidence": [{ "evidenceId": "evidence001", "sourceLocation": "project:0", "sourceStart": 0, "sourceEnd": 12, "excerpt": "Java services", "strength": "HIGH" }] },
+      { "requirementId": "requirement002", "requirementText": "故障排查", "requirementType": "PREFERRED", "matchStatus": "RELATED_BUT_EVIDENCE_INSUFFICIENT", "gap": "缺少排查过程", "evidence": [{ "evidenceId": "evidence002", "sourceLocation": "project:20", "sourceStart": 20, "sourceEnd": 34, "excerpt": "incident notes", "strength": "LOW" }] }
+    ],
+    "questionTypes": ["BASIC_CONFIRMATION", "PROJECT_DEEP_DIVE", "JOB_SCENARIO", "SYNTHESIS_FOLLOW_UP"],
+    "maxQuestions": 4
+  }
+}

@@ -14,7 +14,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.List;
-import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -43,7 +42,9 @@ public class SecurityConfig {
         return builder -> builder.featuresToEnable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     }
 
-    public static final String INTERNAL_CALLBACK_PATH = "/internal/v1/analysis-results";
+    public static final String INTERNAL_CALLBACK_PATH = "/internal/v2/analysis-results";
+    public static final String INTERNAL_CALLBACK_V3_PATH = "/internal/v3/analysis-results";
+    public static final String INTERNAL_INTERVIEW_CALLBACK_V4_PATH = "/internal/v4/interview-results";
     public static final String INTERNAL_TOKEN_HEADER = "X-Internal-Service-Token";
 
     @Bean
@@ -84,8 +85,8 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(e -> e.authenticationEntryPoint(new ApiErrorAuthenticationEntryPoint(objectMapper)))
                 .authorizeHttpRequests(a -> a
-                        .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login", "/actuator/health").permitAll()
-                        .requestMatchers(INTERNAL_CALLBACK_PATH).hasAuthority("ROLE_INTERNAL_SERVICE")
+                        .requestMatchers("/api/v2/auth/register", "/api/v2/auth/login", "/api/v2/auth/password-reset", "/actuator/health").permitAll()
+                        .requestMatchers(INTERNAL_CALLBACK_PATH, INTERNAL_CALLBACK_V3_PATH, INTERNAL_INTERVIEW_CALLBACK_V4_PATH).hasAuthority("ROLE_INTERNAL_SERVICE")
                         .anyRequest().authenticated())
                 .addFilterBefore(new JwtFilter(jwt), UsernamePasswordAuthenticationFilter.class)
                 // Run after JwtFilter so a user JWT cannot bypass the internal credential check.
@@ -106,7 +107,7 @@ public class SecurityConfig {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             objectMapper.writeValue(response.getWriter(),
-                    new ApiExceptionHandler.ApiError("AUTHENTICATION_REQUIRED", "AUTHENTICATION_REQUIRED", UUID.randomUUID(), false));
+                    ApiExceptionHandler.authenticationErrorForPath(request.getRequestURI()));
         }
     }
 
@@ -126,7 +127,7 @@ public class SecurityConfig {
                     req.setAttribute("actorId", c.subject());
                     req.setAttribute("role", c.role());
                     SecurityContextHolder.getContext().setAuthentication(
-                            new UsernamePasswordAuthenticationToken(c.subject().toString(), null,
+                                    new UsernamePasswordAuthenticationToken(c.subject(), null,
                                     List.of(new SimpleGrantedAuthority("ROLE_" + c.role()))));
                 });
             }
@@ -145,7 +146,11 @@ public class SecurityConfig {
         }
 
         private static boolean usableToken(String token) {
-            if (token == null || token.isBlank()) return false;
+            if (token == null || token.length() < 32) return false;
+            for (int i = 0; i < token.length(); i++) {
+                char character = token.charAt(i);
+                if (character < 0x21 || character > 0x7e) return false;
+            }
             String normalized = token.toLowerCase(java.util.Locale.ROOT);
             return !normalized.contains("replace-with") && !normalized.contains("change-me") && !normalized.contains("placeholder");
         }
@@ -153,12 +158,18 @@ public class SecurityConfig {
         @Override
         protected boolean shouldNotFilter(HttpServletRequest request) {
             String servletPath = request.getServletPath();
-            if (INTERNAL_CALLBACK_PATH.equals(servletPath)) return false;
+            if (INTERNAL_CALLBACK_PATH.equals(servletPath) || INTERNAL_CALLBACK_V3_PATH.equals(servletPath)
+                    || INTERNAL_INTERVIEW_CALLBACK_V4_PATH.equals(servletPath)) return false;
             String requestUri = request.getRequestURI();
             String contextPath = request.getContextPath();
             if (requestUri == null) return true;
-            String fullPath = (contextPath == null ? "" : contextPath) + INTERNAL_CALLBACK_PATH;
-            return !INTERNAL_CALLBACK_PATH.equals(requestUri) && !fullPath.equals(requestUri);
+            String prefix = contextPath == null ? "" : contextPath;
+            return !INTERNAL_CALLBACK_PATH.equals(requestUri)
+                    && !(prefix + INTERNAL_CALLBACK_PATH).equals(requestUri)
+                    && !INTERNAL_CALLBACK_V3_PATH.equals(requestUri)
+                    && !(prefix + INTERNAL_CALLBACK_V3_PATH).equals(requestUri)
+                    && !INTERNAL_INTERVIEW_CALLBACK_V4_PATH.equals(requestUri)
+                    && !(prefix + INTERNAL_INTERVIEW_CALLBACK_V4_PATH).equals(requestUri);
         }
 
         @Override
@@ -171,7 +182,7 @@ public class SecurityConfig {
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                 response.setContentType(MediaType.APPLICATION_JSON_VALUE);
                 objectMapper.writeValue(response.getWriter(),
-                        new ApiExceptionHandler.ApiError("AUTHENTICATION_REQUIRED", "AUTHENTICATION_REQUIRED", UUID.randomUUID(), false));
+                        ApiExceptionHandler.authenticationErrorForPath(request.getRequestURI()));
                 return;
             }
             SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(

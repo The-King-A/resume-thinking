@@ -9,13 +9,16 @@ printed by this module.
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 import math
 import os
 import re
 import secrets
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -23,6 +26,7 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from xml.etree import ElementTree
 
 import pytest
@@ -92,6 +96,98 @@ def _error_code(response: Any) -> str | None:
     return None
 
 
+def _upload_media_type(path: Path) -> str:
+    if path.suffix.lower() == ".txt":
+        return "text/plain; charset=utf-8"
+    if path.suffix.lower() == ".docx":
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return "application/octet-stream"
+
+
+def _require_loopback_http_url(value: str, target: str) -> str:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except (TypeError, ValueError) as exc:
+        raise FlowError(target, code="UNSAFE_LOCAL_TARGET") from exc
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+        or port is None
+        or not 1 <= port <= 65535
+    ):
+        raise FlowError(target, code="UNSAFE_LOCAL_TARGET")
+    return f"http://127.0.0.1:{port}"
+
+
+@dataclass(frozen=True)
+class LiveTargets:
+    api_base: str
+    python_base: str | None
+    redis_host: str | None
+    redis_port: int | None
+
+
+def _read_redis_target(host_name: str, port_name: str) -> tuple[str, int] | None:
+    host = os.getenv(host_name)
+    port_raw = os.getenv(port_name)
+    if not host and not port_raw:
+        return None
+    try:
+        port = int(port_raw or "")
+    except ValueError as exc:
+        raise FlowError("redis target", code="UNSAFE_LOCAL_TARGET") from exc
+    if host != "127.0.0.1" or not 1 <= port <= 65535:
+        raise FlowError("redis target", code="UNSAFE_LOCAL_TARGET")
+    return host, port
+
+
+def _resolve_redis_target() -> tuple[str, int]:
+    configured = _read_redis_target("REDIS_HOST", "REDIS_PORT")
+    runtime = _read_redis_target("MVP_REDIS_HOST", "MVP_REDIS_PORT")
+    if configured is not None and runtime is not None and configured != runtime:
+        raise FlowError("redis target", code="UNSAFE_LOCAL_TARGET")
+    target = runtime or configured
+    if target is None:
+        raise FlowError("redis target", code="UNSAFE_LOCAL_TARGET")
+    return target
+
+
+def _validate_live_targets(api_base: str | None, python_base: str | None) -> LiveTargets:
+    if api_base is None or python_base is None:
+        raise FlowError("service target", code="UNSAFE_LOCAL_TARGET")
+    resolved_api_base = _require_loopback_http_url(api_base, "java target")
+    resolved_python_base = _require_loopback_http_url(python_base, "python target")
+    mysql = os.getenv("MYSQL_URL")
+    try:
+        if not mysql or not mysql.startswith("jdbc:"):
+            raise ValueError("missing jdbc URL")
+        parsed = urlsplit(mysql[len("jdbc:"):])
+        mysql_port = parsed.port
+    except ValueError as exc:
+        raise FlowError("mysql target", code="UNSAFE_LOCAL_TARGET") from exc
+    if (
+        parsed.scheme != "mysql"
+        or parsed.hostname != "127.0.0.1"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or mysql_port is None
+        or not 1 <= mysql_port <= 65535
+    ):
+        raise FlowError("mysql target", code="UNSAFE_LOCAL_TARGET")
+    if os.getenv("APP_ALLOW_LOCAL_MODEL_ENDPOINTS") != "true":
+        raise FlowError("local test provider", code="UNSAFE_LOCAL_TARGET")
+    redis_host, redis_port = _resolve_redis_target()
+    return LiveTargets(resolved_api_base, resolved_python_base, redis_host, redis_port)
+
+
 class ApiClient:
     """Small contract client which deliberately discards response bodies on errors."""
 
@@ -114,6 +210,7 @@ class ApiClient:
         body: dict[str, Any] | None = None,
         upload: tuple[str, bytes, str] | None = None,
         title: str | None = None,
+        form: dict[str, str] | None = None,
     ) -> Any:
         headers: dict[str, str] = {}
         if self.token:
@@ -122,7 +219,9 @@ class ApiClient:
         data = None
         if upload is not None:
             files = {"file": upload}
-            data = {"title": title} if title else None
+            data = dict(form or {})
+            if title:
+                data["title"] = title
         try:
             response = self.client.request(
                 method,
@@ -179,22 +278,79 @@ class ApiClient:
             raise FlowError("create profile", code="INVALID_RESPONSE")
         return payload
 
+    def test_profile(self, profile_id: str) -> dict[str, Any]:
+        payload = self._request("POST", f"/api/v2/llm-profiles/{profile_id}/test", {200})
+        if not isinstance(payload, dict):
+            raise FlowError("test profile", code="INVALID_RESPONSE")
+        return payload
+
     def upload_resume(self, path: Path, title: str) -> dict[str, Any]:
-        media_type = "application/octet-stream"
-        if path.suffix.lower() == ".txt":
-            media_type = "text/plain; charset=utf-8"
-        elif path.suffix.lower() == ".docx":
-            media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         payload = self._request(
             "POST",
             "/api/v2/resumes",
             {201},
-            upload=(path.name, path.read_bytes(), media_type),
+            upload=(path.name, path.read_bytes(), _upload_media_type(path)),
             title=title,
         )
         if not isinstance(payload, dict) or not payload.get("id"):
             raise FlowError("upload resume", code="INVALID_RESPONSE")
         return payload
+
+    def submit_initial_match(self, path: Path, title: str, profile_id: str, job_text: str) -> dict[str, Any]:
+        payload = self._request(
+            "POST",
+            "/api/v3/match-submissions",
+            {202},
+            upload=(path.name, path.read_bytes(), _upload_media_type(path)),
+            title=title,
+            form={
+                "llmProfileId": profile_id,
+                "jobFamily": "JAVA_BACKEND",
+                "jobDescriptionText": job_text,
+                "idempotencyKey": f"mvp-v3-{secrets.token_hex(16)}",
+            },
+        )
+        if not isinstance(payload, dict) or not payload.get("id") or not payload.get("revisionId"):
+            raise FlowError("initial match submission", code="INVALID_RESPONSE")
+        return payload
+
+    def submit_rematch(
+        self,
+        resume_id: str,
+        expected_effective_revision_id: str,
+        replacement: Path,
+        title: str,
+        profile_id: str,
+        job_text: str,
+    ) -> dict[str, Any]:
+        payload = self._request(
+            "POST",
+            f"/api/v3/resumes/{resume_id}/match-submissions",
+            {202},
+            upload=(replacement.name, replacement.read_bytes(), _upload_media_type(replacement)),
+            title=title,
+            form={
+                "expectedEffectiveRevisionId": expected_effective_revision_id,
+                "llmProfileId": profile_id,
+                "jobFamily": "JAVA_BACKEND",
+                "jobDescriptionText": job_text,
+                "idempotencyKey": f"mvp-v3-{secrets.token_hex(16)}",
+            },
+        )
+        if not isinstance(payload, dict) or not payload.get("id") or not payload.get("revisionId"):
+            raise FlowError("re-match submission", code="INVALID_RESPONSE")
+        return payload
+
+    def list_effective_resumes(self) -> dict[str, Any]:
+        return self._request("GET", "/api/v3/resumes", {200})
+
+    def delete_effective_resume(self, resume_id: str, version: int) -> None:
+        self._request(
+            "DELETE",
+            f"/api/v3/resumes/{resume_id}",
+            {204},
+            body={"confirmationText": CONFIRMATION, "expectedVersion": version},
+        )
 
     def list_resumes(self) -> dict[str, Any]:
         return self._request("GET", "/api/v2/resumes", {200})
@@ -443,14 +599,11 @@ def _redis_read_line(stream: Any) -> bytes:
     return bytes(line)
 
 
-def _assert_redis_key_absent(key: str) -> None:
-    host = os.getenv("MVP_REDIS_HOST") or os.getenv("REDIS_HOST")
-    port_raw = os.getenv("MVP_REDIS_PORT") or os.getenv("REDIS_PORT")
-    if not host or not port_raw:
+def _assert_redis_key_absent(key: str, host: str | None, port: int | None) -> None:
+    if host is None or port is None:
         _emit("redis result key", state="SKIP")
         return
     try:
-        port = int(port_raw)
         with socket.create_connection((host, port), timeout=2) as connection:
             connection.settimeout(2)
             connection.sendall(b"*1\r\n$4\r\nPING\r\n")
@@ -469,13 +622,20 @@ def _docx_text(path: Path) -> str:
     with zipfile.ZipFile(path) as archive:
         xml = archive.read("word/document.xml")
     root = ElementTree.fromstring(xml)
-    chunks: list[str] = []
-    for node in root.iter():
-        if node.tag.endswith("}t") and node.text:
-            chunks.append(node.text)
-        elif node.tag.endswith("}p"):
-            chunks.append("\n")
-    return "".join(chunks)
+    paragraphs: list[str] = []
+    for paragraph in root.iter():
+        if not paragraph.tag.endswith("}p"):
+            continue
+        fragments: list[str] = []
+        for node in paragraph.iter():
+            if node.tag.endswith(("}t", "}delText")):
+                fragments.append(node.text or "")
+            elif node.tag.endswith("}tab"):
+                fragments.append("\t")
+            elif node.tag.endswith(("}br", "}cr")):
+                fragments.append("\n")
+        paragraphs.append("".join(fragments))
+    return "\n".join(paragraphs)
 
 
 def test_fixture_documents_are_controlled() -> None:
@@ -488,6 +648,10 @@ def test_fixture_documents_are_controlled() -> None:
     assert "apiKey" not in text and "Bearer " not in text
     assert "apiKey" not in job and "Bearer " not in job
     assert "Java developer" in _docx_text(DOCX_PATH)
+
+
+def test_docx_fixture_text_starts_with_its_first_physical_paragraph() -> None:
+    assert not _docx_text(DOCX_PATH).startswith("\n")
 
 
 def test_pdf_fixture_is_explicitly_unsupported() -> None:
@@ -543,6 +707,325 @@ def test_fixture_evidence_assertion_requires_exact_source_bounds() -> None:
         "suggestions": [],
     }
     _assert_result_evidence(synthetic, source_text=source)
+
+
+@pytest.mark.parametrize(("api_base", "python_base"), [
+    ("http://127.0.0.1.example.test:8080", "http://127.0.0.1:8000"),
+    ("http://127.0.0.1:0", "http://127.0.0.1:8000"),
+    ("http://127.0.0.1:8080", "http://127.0.0.1:0"),
+    ("http://127.0.0.1:65536", "http://127.0.0.1:8000"),
+])
+def test_live_flow_rejects_noncanonical_service_target_before_provider_or_network(
+    monkeypatch: pytest.MonkeyPatch,
+    api_base: str,
+    python_base: str,
+) -> None:
+    monkeypatch.setenv("APP_ALLOW_LOCAL_MODEL_ENDPOINTS", "true")
+    monkeypatch.setenv("MYSQL_URL", "jdbc:mysql://127.0.0.1:3306/resume")
+    monkeypatch.setenv("REDIS_HOST", "127.0.0.1")
+    monkeypatch.setenv("REDIS_PORT", "6379")
+    provider_started = False
+    client_constructed = False
+    connection_attempted = False
+
+    class UnexpectedProvider:
+        def start(self) -> Any:
+            nonlocal provider_started
+            provider_started = True
+            return self
+
+    class UnexpectedClient:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            nonlocal client_constructed
+            client_constructed = True
+
+    def unexpected_connection(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal connection_attempted
+        connection_attempted = True
+        raise AssertionError("unsafe target was contacted")
+
+    monkeypatch.setitem(globals(), "FakeOpenAIProvider", UnexpectedProvider)
+    monkeypatch.setitem(globals(), "ApiClient", UnexpectedClient)
+    monkeypatch.setattr(socket, "create_connection", unexpected_connection)
+    with pytest.raises(FlowError, match="UNSAFE_LOCAL_TARGET"):
+        run_live_flow(api_base, python_base)
+    assert not provider_started
+    assert not client_constructed
+    assert not connection_attempted
+
+
+def test_live_target_guard_rejects_remote_mysql_and_redis_without_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ALLOW_LOCAL_MODEL_ENDPOINTS", "true")
+    monkeypatch.setenv("MYSQL_URL", "jdbc:mysql://mysql.example.test:3306/resume")
+    monkeypatch.setenv("REDIS_HOST", "redis.example.test")
+    with pytest.raises(FlowError, match="UNSAFE_LOCAL_TARGET"):
+        _validate_live_targets("http://127.0.0.1:8080", "http://127.0.0.1:8000")
+
+
+def test_live_flow_rejects_runtime_mvp_redis_target_before_provider_or_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Catch a later runtime override that would otherwise evade preflight."""
+    monkeypatch.setenv("APP_ALLOW_LOCAL_MODEL_ENDPOINTS", "true")
+    monkeypatch.setenv("MYSQL_URL", "jdbc:mysql://127.0.0.1:3306/resume")
+    monkeypatch.setenv("MVP_REDIS_HOST", "redis.example.test")
+    monkeypatch.setenv("MVP_REDIS_PORT", "6379")
+    provider_started = False
+    client_constructed = False
+    connection_attempted = False
+
+    class UnexpectedProvider:
+        def start(self) -> Any:
+            nonlocal provider_started
+            provider_started = True
+            return self
+
+    class UnexpectedClient:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            nonlocal client_constructed
+            client_constructed = True
+
+    def unexpected_connection(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal connection_attempted
+        connection_attempted = True
+        raise AssertionError("unsafe target was contacted")
+
+    monkeypatch.setitem(globals(), "FakeOpenAIProvider", UnexpectedProvider)
+    monkeypatch.setitem(globals(), "ApiClient", UnexpectedClient)
+    monkeypatch.setattr(socket, "create_connection", unexpected_connection)
+    with pytest.raises(FlowError, match="UNSAFE_LOCAL_TARGET"):
+        run_live_flow("http://127.0.0.1:8080", "http://127.0.0.1:8000")
+    assert not provider_started
+    assert not client_constructed
+    assert not connection_attempted
+
+
+@pytest.mark.parametrize("missing_target", ["java", "python"])
+def test_direct_live_rejects_missing_service_target_instead_of_using_a_default(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    missing_target: str,
+) -> None:
+    monkeypatch.setenv("APP_ALLOW_LOCAL_MODEL_ENDPOINTS", "true")
+    monkeypatch.setenv("MYSQL_URL", "jdbc:mysql://127.0.0.1:3306/resume")
+    monkeypatch.setenv("REDIS_HOST", "127.0.0.1")
+    monkeypatch.setenv("REDIS_PORT", "6379")
+    monkeypatch.delenv("MVP_API_BASE_URL", raising=False)
+    monkeypatch.delenv("MVP_PYTHON_BASE_URL", raising=False)
+    provider_started = False
+    client_constructed = False
+    connection_attempted = False
+
+    class UnexpectedProvider:
+        base_url = "http://127.0.0.1:18001"
+
+        def start(self) -> Any:
+            nonlocal provider_started
+            provider_started = True
+            return self
+
+
+    class UnexpectedClient:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            nonlocal client_constructed
+            client_constructed = True
+            raise AssertionError("client constructed before target validation")
+
+    def unexpected_connection(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal connection_attempted
+        connection_attempted = True
+        raise AssertionError("network connection attempted before target validation")
+
+    monkeypatch.setitem(globals(), "FakeOpenAIProvider", UnexpectedProvider)
+    monkeypatch.setitem(globals(), "ApiClient", UnexpectedClient)
+    monkeypatch.setattr(socket, "create_connection", unexpected_connection)
+    arguments = ["--live"]
+    if missing_target != "java":
+        arguments.extend(["--api-base", "http://127.0.0.1:18080"])
+    if missing_target != "python":
+        arguments.extend(["--python-base", "http://127.0.0.1:18000"])
+
+    exit_code = main(arguments)
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "[flow] FAIL" in output
+    assert "UNSAFE_LOCAL_TARGET" in output
+    assert not provider_started
+    assert not client_constructed
+    assert not connection_attempted
+
+
+@pytest.mark.parametrize("missing_target", ["mysql", "redis"])
+def test_direct_live_rejects_missing_database_or_redis_before_provider_or_network(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    missing_target: str,
+) -> None:
+    monkeypatch.setenv("APP_ALLOW_LOCAL_MODEL_ENDPOINTS", "true")
+    monkeypatch.delenv("MYSQL_URL", raising=False)
+    monkeypatch.delenv("REDIS_HOST", raising=False)
+    monkeypatch.delenv("REDIS_PORT", raising=False)
+    monkeypatch.delenv("MVP_REDIS_HOST", raising=False)
+    monkeypatch.delenv("MVP_REDIS_PORT", raising=False)
+    if missing_target == "mysql":
+        monkeypatch.setenv("REDIS_HOST", "127.0.0.1")
+        monkeypatch.setenv("REDIS_PORT", "6379")
+    else:
+        monkeypatch.setenv("MYSQL_URL", "jdbc:mysql://127.0.0.1:3306/resume")
+
+    provider_started = False
+    client_constructed = False
+    connection_attempted = False
+
+    class UnexpectedProvider:
+        base_url = "http://127.0.0.1:18001"
+
+        def start(self) -> Any:
+            nonlocal provider_started
+            provider_started = True
+            return self
+
+        def close(self) -> None:
+            return
+
+    class UnexpectedClient:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            nonlocal client_constructed
+            client_constructed = True
+            raise AssertionError("client constructed before target validation")
+
+    def unexpected_connection(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal connection_attempted
+        connection_attempted = True
+        raise AssertionError("network connection attempted before target validation")
+
+    monkeypatch.setitem(globals(), "FakeOpenAIProvider", UnexpectedProvider)
+    monkeypatch.setitem(globals(), "ApiClient", UnexpectedClient)
+    monkeypatch.setattr(socket, "create_connection", unexpected_connection)
+
+    exit_code = main([
+        "--live",
+        "--api-base", "http://127.0.0.1:18080",
+        "--python-base", "http://127.0.0.1:18000",
+    ])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "[flow] FAIL" in output
+    assert "UNSAFE_LOCAL_TARGET" in output
+    assert not provider_started
+    assert not client_constructed
+    assert not connection_attempted
+
+
+@pytest.mark.parametrize("mysql_url", [
+    "jdbc:mysql://127.0.0.1/resume",
+    "jdbc:mysql://127.0.0.1:3306/resume?target=mysql.example.test",
+    "jdbc:mysql://127.0.0.1:3306/resume#fragment",
+    "jdbc:mysql://user@127.0.0.1:3306/resume",
+    "jdbc:mysql://127.0.0.1:0/resume",
+])
+def test_live_flow_rejects_noncanonical_mysql_target_before_provider_or_network(monkeypatch: pytest.MonkeyPatch, mysql_url: str) -> None:
+    monkeypatch.setenv("APP_ALLOW_LOCAL_MODEL_ENDPOINTS", "true")
+    monkeypatch.setenv("MYSQL_URL", mysql_url)
+    monkeypatch.setenv("REDIS_HOST", "127.0.0.1")
+    monkeypatch.setenv("REDIS_PORT", "6379")
+    monkeypatch.delenv("MVP_REDIS_HOST", raising=False)
+    monkeypatch.delenv("MVP_REDIS_PORT", raising=False)
+    provider_started = False
+    client_constructed = False
+    connection_attempted = False
+
+    class UnexpectedProvider:
+        def start(self) -> Any:
+            nonlocal provider_started
+            provider_started = True
+            return self
+
+    class UnexpectedClient:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            nonlocal client_constructed
+            client_constructed = True
+
+    def unexpected_connection(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal connection_attempted
+        connection_attempted = True
+        raise AssertionError("unsafe target was contacted")
+
+    monkeypatch.setitem(globals(), "FakeOpenAIProvider", UnexpectedProvider)
+    monkeypatch.setitem(globals(), "ApiClient", UnexpectedClient)
+    monkeypatch.setattr(socket, "create_connection", unexpected_connection)
+    with pytest.raises(FlowError, match="UNSAFE_LOCAL_TARGET"):
+        run_live_flow("http://127.0.0.1:8080", "http://127.0.0.1:8000")
+    assert not provider_started
+    assert not client_constructed
+    assert not connection_attempted
+
+
+def test_live_flow_rejects_unsafe_configured_redis_when_mvp_runtime_pair_is_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ALLOW_LOCAL_MODEL_ENDPOINTS", "true")
+    monkeypatch.setenv("MYSQL_URL", "jdbc:mysql://127.0.0.1:3306/resume")
+    monkeypatch.setenv("REDIS_HOST", "redis.example.test")
+    monkeypatch.setenv("REDIS_PORT", "6379")
+    monkeypatch.setenv("MVP_REDIS_HOST", "127.0.0.1")
+    monkeypatch.setenv("MVP_REDIS_PORT", "6379")
+    provider_started = False
+    client_constructed = False
+    connection_attempted = False
+
+    class UnexpectedProvider:
+        def start(self) -> Any:
+            nonlocal provider_started
+            provider_started = True
+            return self
+
+    class UnexpectedClient:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            nonlocal client_constructed
+            client_constructed = True
+
+    def unexpected_connection(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal connection_attempted
+        connection_attempted = True
+        raise AssertionError("unsafe target was contacted")
+
+    monkeypatch.setitem(globals(), "FakeOpenAIProvider", UnexpectedProvider)
+    monkeypatch.setitem(globals(), "ApiClient", UnexpectedClient)
+    monkeypatch.setattr(socket, "create_connection", unexpected_connection)
+    with pytest.raises(FlowError, match="UNSAFE_LOCAL_TARGET"):
+        run_live_flow("http://127.0.0.1:8080", "http://127.0.0.1:8000")
+    assert not provider_started
+    assert not client_constructed
+    assert not connection_attempted
+
+
+def test_runner_rejects_mysql_url_with_unvalidated_query_before_service_checks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Catch a JDBC URL that a prefix regex accepted without parsing its complete authority."""
+    powershell = shutil.which("powershell.exe")
+    if powershell is None:
+        pytest.skip("PowerShell is unavailable")
+    env = os.environ.copy()
+    env.update({
+        "MYSQL_URL": "jdbc:mysql://127.0.0.1:3306/resume?target=mysql.example.test",
+        "MYSQL_USERNAME": "test-user",
+        "MYSQL_PASSWORD": "test-password",
+        "REDIS_HOST": "127.0.0.1",
+        "REDIS_PORT": "6379",
+        "JWT_SIGNING_KEY_BASE64": "test-signing-key",
+        "APP_ENCRYPTION_KEY_BASE64": "test-encryption-key",
+        "PYTHON_INTERNAL_SERVICE_TOKEN": "test-internal-token",
+        "MVP_API_BASE_URL": "http://127.0.0.1:8080",
+        "MVP_PYTHON_BASE_URL": "http://127.0.0.1:8000",
+    })
+    completed = subprocess.run(
+        [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(__file__).with_name("run_mvp_flow.ps1")), "-NoStart"],
+        cwd=Path(__file__).resolve().parents[2],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0
+    assert "[flow] SKIP targets=UNSAFE_LOCAL_TARGET" in completed.stdout
 
 
 def test_callback_fixture_races_preserve_duplicate_and_stale_semantics() -> None:
@@ -622,6 +1105,10 @@ class _ProviderState:
         self.released = threading.Event()
         self.request_seen = threading.Event()
         self.request_count = 0
+        self.request_authorizations: list[str | None] = []
+        self.request_models: list[str | None] = []
+        self.models_authorizations: list[str | None] = []
+        self.fail_next_analysis = False
         self.lock = threading.Lock()
 
 
@@ -647,6 +1134,10 @@ class FakeOpenAIProvider:
             def do_GET(self) -> None:  # noqa: N802
                 if self.path == "/health":
                     self._send(200, {"status": "ok", "data": []})
+                elif self.path.rstrip("/") == "/models":
+                    with state.lock:
+                        state.models_authorizations.append(self.headers.get("Authorization"))
+                    self._send(200, {"data": [{"id": "mvp-fixture-model"}]})
                 else:
                     self._send(404, {"status": "not-found"})
 
@@ -667,15 +1158,35 @@ class FakeOpenAIProvider:
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
                     outer = json.loads(self.rfile.read(length))
-                    content = outer["messages"][0]["content"]
-                    request = json.loads(content) if isinstance(content, str) else content
-                except (ValueError, KeyError, IndexError, TypeError):
+                    messages = outer["messages"]
+                    content = next(
+                        message["content"]
+                        for message in messages
+                        if isinstance(message, dict) and message.get("role") == "user"
+                    )
+                except (StopIteration, ValueError, KeyError, IndexError, TypeError):
                     self._send(400, {"status": "invalid"})
                     return
                 with state.lock:
                     state.request_count += 1
+                    state.request_authorizations.append(self.headers.get("Authorization"))
+                    state.request_models.append(outer.get("model") if isinstance(outer, dict) else None)
                     state.request_seen.set()
                     gated = state.gated
+                    fail_next_analysis = state.fail_next_analysis
+                    state.fail_next_analysis = False
+                if content in {'Return only the JSON object {"ok":true}.', "Reply with exactly OK."}:
+                    reply = "OK" if content == "Reply with exactly OK." else '{"ok":true}'
+                    self._send(200, {"choices": [{"message": {"content": reply}}]})
+                    return
+                if fail_next_analysis:
+                    self._send(503, {"status": "unavailable"})
+                    return
+                try:
+                    request = json.loads(content) if isinstance(content, str) else content
+                except (ValueError, TypeError):
+                    self._send(400, {"status": "invalid"})
+                    return
                 if gated:
                     state.released.wait(timeout=45)
                 evidence = request.get("evidence", []) if isinstance(request, dict) else []
@@ -740,6 +1251,10 @@ class FakeOpenAIProvider:
     def release(self) -> None:
         self.state.released.set()
 
+    def fail_next_analysis(self) -> None:
+        with self.state.lock:
+            self.state.fail_next_analysis = True
+
     def wait_for_request(self, timeout: float) -> bool:
         return self.state.request_seen.wait(timeout)
 
@@ -748,6 +1263,58 @@ class FakeOpenAIProvider:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)
+
+
+def test_loopback_provider_reads_analysis_data_from_the_user_message() -> None:
+    provider = FakeOpenAIProvider().start()
+    httpx = _require_httpx()
+    try:
+        response = httpx.post(
+            f"{provider.base_url}/chat/completions",
+            headers={"Authorization": "Bearer loopback-test-key"},
+            json={
+                "model": "loopback-test-model",
+                "messages": [
+                    {"role": "system", "content": "Return structured JSON."},
+                    {"role": "user", "content": json.dumps({"evidence": []})},
+                ]
+            },
+            timeout=3,
+        )
+    finally:
+        provider.close()
+
+    assert response.status_code == 200
+    assert provider.state.request_authorizations == ["Bearer loopback-test-key"]
+    assert provider.state.request_models == ["loopback-test-model"]
+
+
+def test_loopback_provider_supports_the_saved_profile_connection_probe() -> None:
+    provider = FakeOpenAIProvider().start()
+    httpx = _require_httpx()
+    try:
+        models = httpx.get(
+            f"{provider.base_url}/models",
+            headers={"Authorization": "Bearer loopback-test-key"},
+            timeout=3,
+        )
+        probe = httpx.post(
+            f"{provider.base_url}/chat/completions",
+            headers={"Authorization": "Bearer loopback-test-key"},
+            json={
+                "model": "loopback-test-model",
+                "messages": [{"role": "user", "content": "Reply with exactly OK."}],
+                "response_format": {"type": "json_object"},
+            },
+            timeout=3,
+        )
+    finally:
+        provider.close()
+
+    assert models.status_code == 200
+    assert models.json() == {"data": [{"id": "mvp-fixture-model"}]}
+    assert probe.status_code == 200
+    assert probe.json()["choices"][0]["message"]["content"] == "OK"
 
 
 def _wait_for_state(client: ApiClient, task_id: str, timeout: float) -> dict[str, Any]:
@@ -776,16 +1343,40 @@ def _wait_for_gone(client: ApiClient, task_id: str, timeout: float) -> FlowError
     raise FlowError(f"wait task gone ({last_state or 'unknown'})", code="DEADLINE_EXCEEDED")
 
 
+def _wait_for_duplicate_publication(client: ApiClient, task_id: str, timeout: float) -> FlowError:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            client.task(task_id)
+        except FlowError as exc:
+            if exc.status == 409 and exc.code == "DUPLICATE_RESOURCE":
+                return exc
+            raise
+        time.sleep(0.25)
+    raise FlowError("wait duplicate publication", code="DEADLINE_EXCEEDED")
+
+
 def _assert_absent(page: dict[str, Any], resume_id: str) -> None:
     items = page.get("items", []) if isinstance(page, dict) else []
     if any(isinstance(item, dict) and item.get("id") == resume_id for item in items):
         raise AssertionError("resume remained visible")
 
 
-def run_live_flow(api_base: str, python_base: str | None = None, timeout: float = 45.0) -> None:
+def _effective_resume(page: dict[str, Any], resume_id: str) -> dict[str, Any]:
+    items = page.get("items", []) if isinstance(page, dict) else []
+    for item in items:
+        if isinstance(item, dict) and item.get("id") == resume_id:
+            return item
+    raise AssertionError("effective resume missing")
+
+
+def run_live_flow(api_base: str | None, python_base: str | None = None, timeout: float = 45.0) -> None:
+    targets = _validate_live_targets(api_base, python_base)
     provider = FakeOpenAIProvider().start()
-    user = ApiClient(api_base, timeout=8)
-    admin = ApiClient(api_base, timeout=8)
+    provider_base = _require_loopback_http_url(provider.base_url, "test provider target")
+    user = ApiClient(targets.api_base, timeout=8)
+    admin = ApiClient(targets.api_base, timeout=8)
+    other = ApiClient(targets.api_base, timeout=8)
     suffix = secrets.token_hex(5)
     user_password = secrets.token_urlsafe(18)
     admin_password = secrets.token_urlsafe(18)
@@ -794,8 +1385,8 @@ def run_live_flow(api_base: str, python_base: str | None = None, timeout: float 
     try:
         if not user.health("/actuator/health"):
             raise FlowError("java health", code="SERVICE_UNAVAILABLE")
-        if python_base:
-            python_health = ApiClient(python_base, timeout=3)
+        if targets.python_base:
+            python_health = ApiClient(targets.python_base, timeout=3)
             try:
                 if not python_health.health("/health"):
                     raise FlowError("python health", code="SERVICE_UNAVAILABLE")
@@ -812,15 +1403,127 @@ def run_live_flow(api_base: str, python_base: str | None = None, timeout: float 
         registered_admin = admin.register(f"mvp_admin_{suffix}", f"mvp_admin_{suffix}@example.test", admin_password, "ADMIN")
         admin_id = str(registered_admin["user"]["id"])
         _emit("registered admin", identifier=admin_id, state="PASS")
+        registered_other = other.register(f"mvp_other_{suffix}", f"mvp_other_{suffix}@example.test", secrets.token_urlsafe(18), "USER")
+        _emit("registered other user", identifier=str(registered_other["user"]["id"]), state="PASS")
 
         try:
-            profile = user.create_profile(provider.base_url, fixture_api_key)
+            profile = user.create_profile(provider_base, fixture_api_key)
         except FlowError as exc:
             if exc.code == "MODEL_ENDPOINT_REJECTED":
                 raise FlowError("create local provider profile; enable APP_ALLOW_LOCAL_MODEL_ENDPOINTS", exc.status, exc.code) from exc
             raise
         profile_id = str(profile["id"])
         _emit("model profile", identifier=profile_id, state="PASS")
+        profile_test = user.test_profile(profile_id)
+        if not profile_test.get("available") or "mvp-fixture-model" not in profile_test.get("models", []):
+            raise AssertionError("saved model profile connection probe did not succeed")
+        _emit("model profile test", identifier=profile_id, state="PASS")
+
+        job_text = JOB_PATH.read_text(encoding="utf-8")
+        lifecycle_title = f"MVP effective lifecycle {suffix}"
+        initial = user.submit_initial_match(RESUME_PATH, lifecycle_title, profile_id, job_text)
+        initial_task_id = str(initial["id"])
+        lifecycle_resume_id = str(initial["resumeId"])
+        lifecycle_revision_id = str(initial["revisionId"])
+        if initial.get("publicationState") != "PENDING":
+            raise AssertionError("initial v3 submission did not start pending publication")
+        _emit("v3 initial submission", identifier=initial_task_id, state=str(initial.get("publicationState", "UNKNOWN")))
+        initial_terminal = _wait_for_state(user, initial_task_id, timeout)
+        if initial_terminal.get("state") != "SUCCEEDED":
+            raise AssertionError("initial v3 submission did not succeed")
+        initial_result = user.result(initial_task_id)
+        _assert_result_evidence(initial_result, source_text=RESUME_PATH.read_text(encoding="utf-8"))
+        initial_effective = _effective_resume(user.list_effective_resumes(), lifecycle_resume_id)
+        if initial_effective.get("effectiveRevisionId") != lifecycle_revision_id or initial_effective.get("latestSuccessfulTaskId") != initial_task_id:
+            raise AssertionError("initial v3 submission did not publish the effective report")
+        _emit("v3 initial publication", identifier=lifecycle_resume_id, state="PUBLISHED")
+        try:
+            other.result(initial_task_id)
+        except FlowError as exc:
+            if exc.status != 404:
+                raise AssertionError("other user received an unexpected report authorization response") from exc
+        else:
+            raise AssertionError("other user read a protected report")
+        _assert_absent(other.list_effective_resumes(), lifecycle_resume_id)
+        try:
+            other.delete_effective_resume(lifecycle_resume_id, int(initial_effective.get("version", 0)))
+        except FlowError as exc:
+            if exc.status != 404:
+                raise AssertionError("other user received an unexpected delete authorization response") from exc
+        else:
+            raise AssertionError("other user deleted a protected effective resume")
+        _emit("v3 other-user authorization", identifier=lifecycle_resume_id, state="NOT_VISIBLE", status=404)
+
+        provider.fail_next_analysis()
+        replacement = user.submit_rematch(
+            lifecycle_resume_id,
+            lifecycle_revision_id,
+            DOCX_PATH,
+            f"{lifecycle_title} replacement",
+            profile_id,
+            job_text,
+        )
+        replacement_task_id = str(replacement["id"])
+        _emit("v3 replacement submission", identifier=replacement_task_id, state=str(replacement.get("publicationState", "UNKNOWN")))
+        replacement_terminal = _wait_for_state(user, replacement_task_id, timeout)
+        if replacement_terminal.get("state") not in {"FAILED", "TIMED_OUT"}:
+            raise AssertionError("forced replacement did not fail")
+        if replacement_terminal.get("failureCode") != "MODEL_UNAVAILABLE":
+            raise AssertionError("forced replacement did not report model unavailability")
+        after_failed_replacement = _effective_resume(user.list_effective_resumes(), lifecycle_resume_id)
+        if (
+            after_failed_replacement.get("title") != lifecycle_title
+            or after_failed_replacement.get("effectiveRevisionId") != lifecycle_revision_id
+            or after_failed_replacement.get("latestSuccessfulTaskId") != initial_task_id
+        ):
+            raise AssertionError("failed replacement changed the existing effective report")
+        _assert_result_evidence(user.result(initial_task_id), source_text=RESUME_PATH.read_text(encoding="utf-8"))
+        _emit("v3 failed replacement preserved", identifier=lifecycle_resume_id, state="PUBLISHED")
+
+        duplicate = user.submit_initial_match(DOCX_PATH, lifecycle_title, profile_id, job_text)
+        duplicate_task_id = str(duplicate["id"])
+        duplicate_resume_id = str(duplicate["resumeId"])
+        duplicate_conflict = _wait_for_duplicate_publication(user, duplicate_task_id, timeout)
+        if duplicate_conflict.status != 409 or duplicate_conflict.code != "DUPLICATE_RESOURCE":
+            raise AssertionError("duplicate publication did not return the v2 compatibility conflict")
+        _assert_result_evidence(user.result(duplicate_task_id), source_text=_docx_text(DOCX_PATH))
+        _assert_absent(user.list_effective_resumes(), duplicate_resume_id)
+        _emit("v3 duplicate report", identifier=duplicate_task_id, state="REJECTED_DUPLICATE_TITLE", status=duplicate_conflict.status, code=duplicate_conflict.code)
+
+        user.delete_effective_resume(lifecycle_resume_id, int(after_failed_replacement.get("version", 0)))
+        _assert_absent(user.list_effective_resumes(), lifecycle_resume_id)
+        recovery = user.recovery()
+        if not any(item.get("id") == lifecycle_resume_id for item in recovery.get("items", [])):
+            raise AssertionError("soft-deleted effective resume missing from recovery")
+        try:
+            other.restore(lifecycle_resume_id, int(next(item for item in recovery.get("items", []) if item.get("id") == lifecycle_resume_id).get("version", 0)))
+        except FlowError as exc:
+            if exc.status != 404:
+                raise AssertionError("other user received an unexpected restore authorization response") from exc
+        else:
+            raise AssertionError("other user restored a protected effective resume")
+        _emit("v3 effective soft delete", identifier=lifecycle_resume_id, state="USER_SOFT_DELETED")
+
+        reused = user.submit_initial_match(RESUME_PATH, lifecycle_title, profile_id, job_text)
+        reused_task_id = str(reused["id"])
+        reused_resume_id = str(reused["resumeId"])
+        if _wait_for_state(user, reused_task_id, timeout).get("state") != "SUCCEEDED":
+            raise AssertionError("same-title submission after soft deletion did not succeed")
+        _assert_result_evidence(user.result(reused_task_id), source_text=RESUME_PATH.read_text(encoding="utf-8"))
+        reused_effective = _effective_resume(user.list_effective_resumes(), reused_resume_id)
+        if reused_effective.get("title") != lifecycle_title:
+            raise AssertionError("same-title resume did not publish after soft deletion")
+        _emit("v3 title reuse publication", identifier=reused_resume_id, state="PUBLISHED")
+
+        deleted_original = next(item for item in recovery.get("items", []) if item.get("id") == lifecycle_resume_id)
+        try:
+            user.restore(lifecycle_resume_id, int(deleted_original.get("version", 0)))
+        except FlowError as exc:
+            if exc.status != 409 or exc.code != "DUPLICATE_RESOURCE":
+                raise AssertionError("old restore did not return the duplicate-title error") from exc
+            _emit("v3 restore duplicate", identifier=lifecycle_resume_id, state="DUPLICATE_RESOURCE", status=exc.status, code=exc.code)
+        else:
+            raise AssertionError("old effective resume restored despite same-title replacement")
 
         resume = user.upload_resume(RESUME_PATH, "MVP student resume")
         resume_id = str(resume["id"])
@@ -840,7 +1543,6 @@ def run_live_flow(api_base: str, python_base: str | None = None, timeout: float 
         else:
             raise AssertionError("PDF upload unexpectedly succeeded")
 
-        job_text = JOB_PATH.read_text(encoding="utf-8")
         task = user.create_task(resume_id, profile_id, job_text)
         task_id = str(task["id"])
         _emit("match task", identifier=task_id, state=str(task.get("state", "UNKNOWN")))
@@ -850,6 +1552,22 @@ def run_live_flow(api_base: str, python_base: str | None = None, timeout: float 
         result = user.result(task_id)
         _assert_result_evidence(result, source_text=RESUME_PATH.read_text(encoding="utf-8"))
         _emit("match result", identifier=task_id, state="SUCCEEDED")
+
+        docx_task = user.create_task(str(docx_resume["id"]), profile_id, job_text)
+        docx_task_id = str(docx_task["id"])
+        _emit("DOCX match task", identifier=docx_task_id, state=str(docx_task.get("state", "UNKNOWN")))
+        docx_terminal = _wait_for_state(user, docx_task_id, timeout)
+        if docx_terminal.get("state") != "SUCCEEDED":
+            raise AssertionError("DOCX match task did not succeed")
+        docx_result = user.result(docx_task_id)
+        _assert_result_evidence(docx_result, source_text=_docx_text(DOCX_PATH))
+        _emit("DOCX match result", identifier=docx_task_id, state="SUCCEEDED")
+        if provider.state.models_authorizations != [f"Bearer {fixture_api_key}"]:
+            raise AssertionError("model list did not receive the configured authorization")
+        if provider.state.request_authorizations[:3] != [f"Bearer {fixture_api_key}"] * 3:
+            raise AssertionError("model provider did not receive the configured authorization")
+        if provider.state.request_models[:3] != ["mvp-fixture-model"] * 3:
+            raise AssertionError("model provider did not receive the configured model")
 
         deleted = user.delete_resume(resume_id, int(resume.get("version", 0)))
         _emit("user soft delete", identifier=resume_id, state=str(deleted.get("visibilityState", "UNKNOWN")))
@@ -878,7 +1596,7 @@ def run_live_flow(api_base: str, python_base: str | None = None, timeout: float 
                 raise AssertionError("late result did not return TASK_GONE") from exc
         else:
             raise AssertionError("late result unexpectedly available")
-        _assert_redis_key_absent(f"resume:v2:view:{late_id}")
+        _assert_redis_key_absent(f"resume:v2:view:{late_id}", targets.redis_host, targets.redis_port)
         _emit("late resume recovery", identifier=late_id, state=str(late_deleted.get("visibilityState", "UNKNOWN")))
 
         # Administrative deletion hides the record from the owner, including recovery.
@@ -894,13 +1612,14 @@ def run_live_flow(api_base: str, python_base: str | None = None, timeout: float 
     finally:
         user.close()
         admin.close()
+        other.close()
         provider.close()
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true", help="run against live Java/Python services")
-    parser.add_argument("--api-base", default=os.getenv("MVP_API_BASE_URL", "http://127.0.0.1:8080"))
+    parser.add_argument("--api-base", default=os.getenv("MVP_API_BASE_URL"))
     parser.add_argument("--python-base", default=os.getenv("MVP_PYTHON_BASE_URL"))
     parser.add_argument("--timeout", type=float, default=float(os.getenv("MVP_FLOW_TIMEOUT_SECONDS", "45")))
     return parser.parse_args(argv)

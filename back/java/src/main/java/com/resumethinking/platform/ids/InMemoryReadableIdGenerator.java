@@ -20,4 +20,17 @@ public final class InMemoryReadableIdGenerator implements ReadableIdGenerator {
         }
         return ReadableIdGenerator.format(type, sequences.get(type).incrementAndGet());
     }
+
+    @Override
+    public void ensureNextAtLeast(BusinessIdType type, long nextValue) {
+        if (type == null) {
+            throw new IllegalArgumentException("business id type must not be null");
+        }
+        if (nextValue < 1) {
+            throw new IllegalArgumentException("business id sequence must be at least 1");
+        }
+        // The in-memory counter stores the last allocated suffix, whereas the
+        // public operation is expressed in terms of the next suffix.
+        sequences.get(type).updateAndGet(current -> Math.max(current, nextValue - 1));
+    }
 }
