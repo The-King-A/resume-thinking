@@ -51,6 +51,17 @@ describe('LoginView', () => {
     expect(wrapper.text()).toContain('简历驱动岗位匹配与模拟面试平台')
   })
 
+  it('replaces the duplicate validation banner with the job-matching flow cue', async () => {
+    const wrapper = mountLoginView()
+    await wrapper.get('button[type="submit"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('p.error').exists()).toBe(false)
+    expect(wrapper.get('[data-test="login-flow"]').text()).toContain('简历事实')
+    expect(wrapper.get('[data-test="login-flow"]').text()).toContain('岗位要求')
+    expect(wrapper.get('[data-test="login-flow"]').text()).toContain('面试演练')
+  })
+
   it('submits a valid LoginRequest', async () => {
     const wrapper = mountLoginView()
     await wrapper.get('input[autocomplete="username"]').setValue('user@example.com')

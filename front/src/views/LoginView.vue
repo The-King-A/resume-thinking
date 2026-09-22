@@ -53,7 +53,20 @@ async function submit() {
       <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent="submit">
         <el-form-item label="用户名或邮箱" prop="identifier"><input v-model="form.identifier" autocomplete="username" /></el-form-item>
         <el-form-item label="密码" prop="password"><input v-model="form.password" type="password" autocomplete="current-password" /></el-form-item>
-        <p v-if="validationMessage" class="error">{{ validationMessage }}</p>
+        <p v-if="validationMessage && validationMessage !== '用户名或邮箱不能为空' && validationMessage !== '密码不能为空'" class="error">{{ validationMessage }}</p>
+        <div class="login-flow" data-test="login-flow" aria-label="求职分析路径">
+          <div class="login-flow-heading">
+            <strong>分析从这里开始</strong>
+            <small>把经历转成可行动的求职准备</small>
+          </div>
+          <div class="login-flow-steps">
+            <span class="login-flow-step"><i class="login-flow-dot" aria-hidden="true"></i><b>简历事实</b></span>
+            <i class="login-flow-connector" aria-hidden="true"></i>
+            <span class="login-flow-step"><i class="login-flow-dot" aria-hidden="true"></i><b>岗位要求</b></span>
+            <i class="login-flow-connector" aria-hidden="true"></i>
+            <span class="login-flow-step"><i class="login-flow-dot" aria-hidden="true"></i><b>面试演练</b></span>
+          </div>
+        </div>
         <button class="primary-button" type="submit" @click.prevent="submit" :disabled="auth.loading"><span>{{ auth.loading ? '正在进入...' : '登录工作区' }}</span><b aria-hidden="true">&gt;</b></button>
       </el-form>
       <nav class="auth-links auth-footer" aria-label="账号操作"><span>还没有账号？</span><RouterLink to="/register">创建账号</RouterLink><RouterLink to="/forgot-password">忘记密码</RouterLink></nav>
