@@ -328,6 +328,8 @@ def _thinking_parameter(provider: Provider) -> dict[str, str] | None:
     """
     mode = settings.model_thinking
     if mode == "auto":
+        if _is_deepseek_pro(provider):
+            return {"type": "enabled"}
         if not _is_deepseek_structured_model(provider):
             return None
         mode = "disabled"
@@ -341,6 +343,10 @@ def _provider_hostname(provider: Provider) -> str:
 
 def _is_deepseek_provider(provider: Provider) -> bool:
     return _provider_hostname(provider) == "api.deepseek.com"
+
+
+def _is_deepseek_pro(provider: Provider) -> bool:
+    return _is_deepseek_provider(provider) and provider.model.strip().lower() == "deepseek-v4-pro"
 
 
 def _is_deepseek_v4(provider: Provider) -> bool:
@@ -394,6 +400,12 @@ def _should_send_temperature(provider: Provider, thinking: dict[str, str] | None
     # The legacy DeepSeek reasoner is always a reasoning model even when no
     # explicit thinking extension is sent in auto mode.
     return not (thinking is None and _is_deepseek_reasoning_model(provider))
+
+
+def _reasoning_effort_parameter(provider: Provider, thinking: dict[str, str] | None) -> str | None:
+    if _is_deepseek_pro(provider) and thinking is not None and thinking.get("type") == "enabled":
+        return "high"
+    return None
 
 
 class OpenAICompatibleClient:
@@ -483,6 +495,9 @@ class OpenAICompatibleClient:
         thinking = _thinking_parameter(self.provider)
         if thinking is not None:
             payload["thinking"] = thinking
+        reasoning_effort = _reasoning_effort_parameter(self.provider, thinking)
+        if reasoning_effort is not None:
+            payload["reasoning_effort"] = reasoning_effort
         # DeepSeek reasoning mode rejects temperature.  For ordinary JSON
         # mode, deterministic sampling substantially reduces malformed or
         # incomplete structured responses.
@@ -618,6 +633,9 @@ class OpenAICompatibleClient:
         thinking = _thinking_parameter(self.provider)
         if thinking is not None:
             payload["thinking"] = thinking
+        reasoning_effort = _reasoning_effort_parameter(self.provider, thinking)
+        if reasoning_effort is not None:
+            payload["reasoning_effort"] = reasoning_effort
         if _should_send_temperature(self.provider, thinking):
             payload["temperature"] = 0
         timeout = httpx.Timeout(settings.model_read_timeout, connect=settings.connect_timeout)

@@ -115,7 +115,7 @@ async def test_deepseek_flash_auto_disables_thinking_and_keeps_configured_budget
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("model", ["deepseek-v4-flash", "deepseek-v4-pro"])
+@pytest.mark.parametrize("model", ["deepseek-v4-flash"])
 async def test_deepseek_v4_auto_uses_explicit_non_reasoning_structured_request(monkeypatch, model):
     seen = {}
 
@@ -149,6 +149,40 @@ async def test_deepseek_v4_auto_uses_explicit_non_reasoning_structured_request(m
     assert seen["payload"]["thinking"] == {"type": "disabled"}
     assert seen["payload"]["max_tokens"] == 100000
     assert seen["payload"]["temperature"] == 0
+
+
+@pytest.mark.asyncio
+async def test_deepseek_v4_pro_auto_uses_reasoning_mode_for_structured_requests(monkeypatch):
+    seen = {}
+
+    async def handler(request):
+        seen["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": "{\"score\":{\"skills\":0,\"projectExperience\":0,\"workContent\":0,\"educationExperience\":0,\"softSkills\":0,\"composite\":0},\"requirements\":[],\"suggestions\":[]}"
+                    },
+                }],
+            },
+        )
+
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    monkeypatch.setattr(settings, "model_max_tokens", 100000)
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://api.deepseek.com", "model": "deepseek-v4-pro", "apiKey": "k"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
+
+    assert seen["payload"]["model"] == "deepseek-v4-pro"
+    assert seen["payload"]["thinking"] == {"type": "enabled"}
+    assert seen["payload"]["reasoning_effort"] == "high"
+    assert "temperature" not in seen["payload"]
 
 
 @pytest.mark.asyncio
@@ -874,6 +908,9 @@ async def test_interview_provider_accepts_a_complete_feedback_object_when_pro_re
 
     assert result.answer_id == "answer001"
     assert seen["payload"]["model"] == "deepseek-v4-pro"
+    assert seen["payload"]["thinking"] == {"type": "enabled"}
+    assert seen["payload"]["reasoning_effort"] == "high"
+    assert "temperature" not in seen["payload"]
 
 
 @pytest.mark.asyncio

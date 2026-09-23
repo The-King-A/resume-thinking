@@ -106,9 +106,10 @@ FastAPI 在未显式设置进程环境变量时，会从仓库根目录 `.env` �
 
 对于 DeepSeek 官方 `deepseek-flash`、`deepseek-v4-flash`（兼容别名）和
 `deepseek-v4-pro` 模型，Python 会保留配置中的精确模型名，不会把 Pro 静默降级为
-Flash。由于官方思考模式默认开启，`PYTHON_MODEL_THINKING=auto` 会对这些结构化请求显式发送
-`thinking: {"type":"disabled"}`，并保留配置的输出预算，避免推理 token 抢占 JSON 报告空间。
-如需显式启用思考，请设置 `PYTHON_MODEL_THINKING=enabled`，并让
+Flash。`PYTHON_MODEL_THINKING=auto` 会让 Flash 与旧版 v4-flash 别名使用非思考结构化请求，
+而让 `deepseek-v4-pro` 使用官方的高强度思考模式（`thinking: {"type":"enabled"}` 与
+`reasoning_effort: "high"`），并保留配置的输出预算。这样 Pro 的报告、面试题和回答分析都会真正走 Pro 模型。
+如需显式覆盖思考策略，请设置 `PYTHON_MODEL_THINKING=enabled` 或 `disabled`，并让
 `PYTHON_MODEL_MAX_TOKENS` 覆盖思考和最终 JSON 的总输出预算，按所选模型上限调小。
 Python 日志只记录请求模型、响应模型、完成原因和 usage 等元数据，可据此核对实际调用与计费模型，
 不会记录 API Key、简历正文或回答内容。客户端会拒绝 `finish_reason=length` 的不完整响应，
