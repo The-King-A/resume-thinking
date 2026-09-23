@@ -4,7 +4,7 @@
 分析服务和 Vue 网页应用。版本化 API 与内部消息契约位于
 [`contracts/`](contracts/README.md)，它们是各服务共同遵循的接口依据。
 
-从 GitHub 下载 v2.0.0 的用户请先阅读 [`DEPLOYMENT.md`](DEPLOYMENT.md)，其中包含依赖安装、
+从 GitHub 下载 v2.1.0 的用户请先阅读 [`DEPLOYMENT.md`](DEPLOYMENT.md)，其中包含依赖安装、
 数据库初始化、服务启动顺序和本地验证步骤。
 
 当前运行时契约为 v2：公共 API 使用 `/api/v2`，Java 与 Python 的内部任务/回调使用

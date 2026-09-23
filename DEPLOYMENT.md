@@ -1,6 +1,6 @@
-# v2.0.0 本地部署指南
+# v2.1.0 本地部署指南
 
-本文档面向从 GitHub 下载 `resume-thinking` v2.0.0 的用户。项目是本地开发版，包含三个独立进程：
+本文档面向从 GitHub 下载 `resume-thinking` v2.1.0 的用户。项目是本地开发版，包含三个独立进程：
 
 - Java 21 / Spring Boot：公共 API、认证、数据库和任务编排
 - Python 3.11 / FastAPI：简历解析、岗位匹配和面试推演分析
@@ -10,12 +10,12 @@
 
 ## 1. 获取代码与准备依赖
 
-可以下载 GitHub Release 的 `resume-thinking-v2.0.0.zip`，也可以克隆仓库：
+可以下载 GitHub Release 的 `ai-resume-thinkingv2.1.0.zip`，也可以克隆仓库：
 
 ```powershell
 git clone https://github.com/The-King-A/resume-thinking.git
 cd resume-thinking
-git checkout v2.0.0
+git checkout v2.1.0
 ```
 
 安装以下工具并确保它们已经加入 PATH：
