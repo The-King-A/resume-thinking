@@ -39,6 +39,7 @@ describe('InterviewFeedbackView terminal failures', () => {
   })
 
   it('stops polling when Java reports invalid model output', async () => {
+    mocks.getSession.mockResolvedValue({ state: 'FEEDBACK_READY' })
     mocks.getFeedback.mockRejectedValue(new ApiError({
       code: 'INTERVIEW_MODEL_OUTPUT_INVALID', message: 'safe', correlationId: 'c', retryable: false,
     }, 409))
@@ -51,19 +52,61 @@ describe('InterviewFeedbackView terminal failures', () => {
   })
 
   it('stops polling when the session status is failed', async () => {
-    mocks.getFeedback.mockRejectedValue(new ApiError({
-      code: 'INTERVIEW_FEEDBACK_NOT_READY', message: 'safe', correlationId: 'c', retryable: true,
-    }, 409))
     mocks.getSession.mockResolvedValue({ state: 'FAILED', failureCode: 'INTERVIEW_MODEL_UNAVAILABLE' })
     const wrapper = mount(InterviewFeedbackView)
     await flushPromises()
 
     expect(wrapper.text()).toContain('面试分析服务暂时不可用，请稍后重试。')
     await vi.advanceTimersByTimeAsync(4000)
+    expect(mocks.getFeedback).toHaveBeenCalledTimes(0)
+  })
+
+  it('waits for a ready session before requesting feedback', async () => {
+    mocks.getSession
+      .mockResolvedValueOnce({ state: 'ANSWER_ANALYZING' })
+      .mockResolvedValueOnce({ state: 'FEEDBACK_READY' })
+    mocks.getFeedback.mockResolvedValue({
+      state: 'FEEDBACK_READY', relevance: 'HIGH', completeness: 'MEDIUM', technicalAccuracy: 'HIGH',
+      factualConsistency: 'HIGH', clarity: 'MEDIUM', evidenceIds: [], riskFlags: [], claims: [],
+      submittedAnswer: '回答', suggestedAnswer: '建议', answerComparison: '对比', version: 1,
+    })
+
+    const wrapper = mount(InterviewFeedbackView)
+    await flushPromises()
+
+    expect(mocks.getSession).toHaveBeenCalledTimes(1)
+    expect(mocks.getFeedback).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1200)
+    await flushPromises()
+
+    expect(mocks.getSession).toHaveBeenCalledTimes(2)
+    expect(mocks.getFeedback).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('建议')
+  })
+
+  it('clears a pending retry after feedback becomes available', async () => {
+    mocks.getFeedback.mockResolvedValueOnce({
+        state: 'FEEDBACK_READY', relevance: 'HIGH', completeness: 'MEDIUM', technicalAccuracy: 'HIGH',
+        factualConsistency: 'HIGH', clarity: 'MEDIUM', evidenceIds: [], riskFlags: [], claims: [],
+        submittedAnswer: '回答', suggestedAnswer: '建议', answerComparison: '对比', version: 1,
+      })
+    mocks.getSession
+      .mockResolvedValueOnce({ state: 'ANSWER_ANALYZING' })
+      .mockResolvedValueOnce({ state: 'FEEDBACK_READY' })
+    const wrapper = mount(InterviewFeedbackView)
+    await flushPromises()
+
+    await vi.advanceTimersByTimeAsync(1200)
+    await flushPromises()
+    expect(wrapper.text()).toContain('建议')
+
+    await vi.advanceTimersByTimeAsync(5000)
     expect(mocks.getFeedback).toHaveBeenCalledTimes(1)
   })
 
   it('renders the submitted answer, suggested answer, and comparison without risk or claim panels', async () => {
+    mocks.getSession.mockResolvedValue({ state: 'FEEDBACK_READY' })
     mocks.getFeedback.mockResolvedValue({
       state: 'FEEDBACK_READY', relevance: 'HIGH', completeness: 'MEDIUM', technicalAccuracy: 'HIGH',
       factualConsistency: 'HIGH', clarity: 'MEDIUM', evidenceIds: ['evidence001'], riskFlags: [], claims: [],

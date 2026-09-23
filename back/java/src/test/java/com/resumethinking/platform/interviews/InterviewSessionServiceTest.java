@@ -86,6 +86,44 @@ class InterviewSessionServiceTest {
     }
 
     @Test
+    void exposesModelFailureAsTerminalFeedbackErrorInsteadOfNotReady() {
+        Fixture fixture = fixture();
+        InterviewSession session = fixture.service.create(new InterviewSessionService.CreateInterviewSessionCommand(
+                "user001", UserRole.USER, "task001", "interview-failure-key-0001"));
+        var failure = new InterviewAnalysisCallbackRequest("4.0", "QUESTION_GENERATION", session.getId(),
+                "revision001", "task001", session.getVersion(), session.getAttempt(), session.getCallbackId(),
+                session.callbackTokenForTests(), "", "FAILED", java.util.UUID.randomUUID(), null, null,
+                "INTERVIEW_MODEL_OUTPUT_INVALID").withComputedPayloadHash();
+
+        assertThat(fixture.service.acceptCallback(failure).code()).isEqualTo("ACCEPTED");
+        assertThat(fixture.service.getSession(session.getId(), "user001").getState())
+                .isEqualTo(InterviewSession.State.FAILED);
+        assertThatThrownBy(() -> fixture.service.getFeedback(session.getId(), "user001"))
+                .isInstanceOf(InterviewSessionFailedException.class)
+                .extracting(Throwable::getMessage)
+                .isEqualTo("INTERVIEW_MODEL_OUTPUT_INVALID");
+    }
+
+    @Test
+    void terminalizesAnAuthenticatedCallbackWhenItsPayloadHashIsInvalid() {
+        Fixture fixture = fixture();
+        InterviewSession session = fixture.service.create(new InterviewSessionService.CreateInterviewSessionCommand(
+                "user001", UserRole.USER, "task001", "interview-invalid-hash-key-0001"));
+        var valid = new InterviewAnalysisCallbackRequest("4.0", "QUESTION_GENERATION", session.getId(),
+                "revision001", "task001", session.getVersion(), session.getAttempt(), session.getCallbackId(),
+                session.callbackTokenForTests(), "", "SUCCEEDED", java.util.UUID.randomUUID(), questions(), null,
+                null).withComputedPayloadHash();
+        var invalid = new InterviewAnalysisCallbackRequest(valid.contractVersion(), valid.workType(), valid.sessionId(),
+                valid.revisionId(), valid.matchTaskId(), valid.sessionVersion(), valid.attempt(), valid.callbackId(),
+                valid.callbackToken(), "0".repeat(64), valid.outcome(), valid.correlationId(), valid.questions(),
+                valid.feedback(), valid.errorCode());
+
+        assertThat(fixture.service.acceptCallback(invalid).code()).isEqualTo("INTERVIEW_MODEL_OUTPUT_INVALID");
+        assertThat(fixture.service.getSession(session.getId(), "user001").getState())
+                .isEqualTo(InterviewSession.State.FAILED);
+    }
+
+    @Test
     void encryptsOneAnswerAndDispatchesAnswerAnalysisOnlyOncePerQuestion() {
         Fixture fixture = fixture();
         InterviewSession session = fixture.service.create(new InterviewSessionService.CreateInterviewSessionCommand(
@@ -138,6 +176,33 @@ class InterviewSessionServiceTest {
         assertThat(next.getState()).isEqualTo(InterviewSession.State.WAITING_FOR_ANSWER);
         assertThat(next.getCurrentQuestionId()).isEqualTo("question003");
         assertThat(fixture.service.getAnsweredQuestionIds(session.getId(), "user001")).containsExactly("question002");
+    }
+
+    @Test
+    void keepsGeneratedQuestionsWhenAnswerFeedbackIsRejected() {
+        Fixture fixture = fixture();
+        InterviewSession session = fixture.service.create(new InterviewSessionService.CreateInterviewSessionCommand(
+                "user001", UserRole.USER, "task001", "interview-feedback-failure-0001"));
+        var questionsCallback = new InterviewAnalysisCallbackRequest("4.0", "QUESTION_GENERATION", session.getId(),
+                "revision001", "task001", session.getVersion(), session.getAttempt(), session.getCallbackId(),
+                session.callbackTokenForTests(), "", "SUCCEEDED", java.util.UUID.randomUUID(), questions(), null, null)
+                .withComputedPayloadHash();
+        fixture.service.acceptCallback(questionsCallback);
+        InterviewSession ready = fixture.service.getSession(session.getId(), "user001");
+        fixture.service.submitAnswer(session.getId(), "user001",
+                new InterviewSessionService.SubmitInterviewAnswerCommand("question001", "我负责接口设计。",
+                        ready.getVersion(), "interview-feedback-answer-0001"));
+        InterviewSession analyzing = fixture.service.getSession(session.getId(), "user001");
+        var invalidFeedback = new InterviewAnalysisCallbackRequest.FeedbackPayload("feedback001", "answer001",
+                "FEEDBACK_READY", "HIGH", "MEDIUM", "HIGH", "HIGH", "MEDIUM", List.of("evidence999"),
+                List.of(), List.of(), "补充技术取舍。", "说明职责和取舍。", "已覆盖职责但缺少取舍。", 1);
+        var callback = new InterviewAnalysisCallbackRequest("4.0", "ANSWER_ANALYSIS", session.getId(),
+                "revision001", "task001", analyzing.getVersion(), analyzing.getAttempt(), analyzing.getCallbackId(),
+                analyzing.callbackTokenForTests(), "", "SUCCEEDED", java.util.UUID.randomUUID(), null,
+                invalidFeedback, null).withComputedPayloadHash();
+
+        assertThat(fixture.service.acceptCallback(callback).code()).isEqualTo("INTERVIEW_MODEL_OUTPUT_INVALID");
+        assertThat(fixture.questions.findBySessionIdOrderBySequenceNo(session.getId())).hasSize(4);
     }
 
     @Test
@@ -206,13 +271,14 @@ class InterviewSessionServiceTest {
                 .thenReturn(new DispatchLlmProfile(URI.create("http://127.0.0.1:9000"), "fixture-model", "fixture-key"));
         when(tasks.findByCreatorIdAndIdempotencyKey(userId, "matching-key-0001"))
                 .thenReturn(java.util.Optional.of(task));
+        var questionRepository = new InterviewQuestionRepository.InMemory();
         return new Fixture(new InterviewSessionService(lifecycle, profiles, tasks, results, evidence,
-                new InterviewSessionRepository.InMemory(), new InterviewQuestionRepository.InMemory(),
+                new InterviewSessionRepository.InMemory(), questionRepository,
                 new InterviewAnswerRepository.InMemory(), new InterviewFeedbackRepository.InMemory(),
                 new InterviewConfirmationRepository.InMemory(), new InterviewCallbackReceiptRepository.InMemory(),
                 new AesGcmCryptoService("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="),
                 new com.resumethinking.platform.ids.InMemoryReadableIdGenerator(), python,
-                Clock.fixed(NOW, ZoneOffset.UTC)), python, tasks, results, evidence);
+                Clock.fixed(NOW, ZoneOffset.UTC)), python, tasks, results, evidence, questionRepository);
     }
 
     private static Fixture fixtureWithTwoRequirements() {
@@ -240,5 +306,5 @@ class InterviewSessionServiceTest {
 
     private record Fixture(InterviewSessionService service, PythonInterviewClient python,
                            MatchTaskRepository tasks, AnalysisResultRepository results,
-                           AnalysisEvidenceRepository evidence) { }
+                           AnalysisEvidenceRepository evidence, InterviewQuestionRepository questions) { }
 }

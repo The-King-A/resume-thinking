@@ -225,6 +225,9 @@ public class InterviewSessionService {
     @Transactional(readOnly = true)
     public InterviewFeedback getFeedback(String sessionId, String actorId) {
         InterviewSession session = getSession(sessionId, actorId);
+        if (session.getState() == InterviewSession.State.FAILED) {
+            throw new InterviewSessionFailedException(session.getFailureCode());
+        }
         if (session.getFeedbackId() == null) throw new InterviewFeedbackNotReadyException();
         return feedback.findById(session.getFeedbackId()).orElseThrow(InterviewFeedbackNotReadyException::new);
     }
@@ -315,8 +318,7 @@ public class InterviewSessionService {
 
     @Transactional
     public CallbackResponse acceptCallback(InterviewAnalysisCallbackRequest request) {
-        if (!validCallbackEnvelope(request)
-                || !Objects.equals(request.payloadHash(), InterviewCallbackPayloadHash.compute(request))) {
+        if (!validCallbackEnvelope(request)) {
             return new CallbackResponse("VALIDATION_ERROR", false);
         }
         InterviewSession session = sessions.findByIdForUpdate(request.sessionId()).orElse(null);
@@ -334,9 +336,16 @@ public class InterviewSessionService {
                 || !session.tokenMatches(request.callbackToken())) {
             return new CallbackResponse("INTERVIEW_CALLBACK_STALE", false);
         }
+        // The callback token identifies the active internal job.  Once that
+        // identity is verified, a malformed hash or envelope must terminate
+        // the job; otherwise Python stops retrying a 4xx response while the
+        // public session remains ANSWER_ANALYZING forever.
+        if (!callbackHashMatches(request)) {
+            return terminalizeInvalidCallback(session);
+        }
         if (!Objects.equals(session.getRevisionId(), request.revisionId())
                 || !Objects.equals(session.getMatchTaskId(), request.matchTaskId())) {
-            return new CallbackResponse("VALIDATION_ERROR", false);
+            return terminalizeInvalidCallback(session);
         }
         if (!"SUCCEEDED".equals(request.outcome())) {
             session.markFailed(request.errorCode() == null ? "INTERVIEW_MODEL_OUTPUT_INVALID" : request.errorCode(), clock.instant());
@@ -355,7 +364,9 @@ public class InterviewSessionService {
                 return new CallbackResponse("VALIDATION_ERROR", false);
             }
         } catch (RuntimeException invalid) {
-            questions.deleteBySessionId(session.getId());
+            if ("QUESTION_GENERATION".equals(request.workType())) {
+                questions.deleteBySessionId(session.getId());
+            }
             session.markFailed("INTERVIEW_MODEL_OUTPUT_INVALID", clock.instant());
             sessions.saveAndFlush(session);
             receipts.save(new InterviewCallbackReceipt(request.callbackId(), request.payloadHash(), clock.instant()));
@@ -418,8 +429,22 @@ public class InterviewSessionService {
         return request != null && "4.0".equals(request.contractVersion())
                 && request.sessionId() != null && request.revisionId() != null && request.matchTaskId() != null
                 && request.callbackId() != null && request.callbackToken() != null && request.callbackToken().length() >= 32
-                && request.payloadHash() != null && request.payloadHash().matches("[a-f0-9]{64}")
                 && request.attempt() >= 1 && request.sessionVersion() >= 0 && request.correlationId() != null;
+    }
+
+    private static boolean callbackHashMatches(InterviewAnalysisCallbackRequest request) {
+        if (request.payloadHash() == null || !request.payloadHash().matches("[a-f0-9]{64}")) return false;
+        try {
+            return Objects.equals(request.payloadHash(), InterviewCallbackPayloadHash.compute(request));
+        } catch (RuntimeException invalidPayload) {
+            return false;
+        }
+    }
+
+    private CallbackResponse terminalizeInvalidCallback(InterviewSession session) {
+        session.markFailed("INTERVIEW_MODEL_OUTPUT_INVALID", clock.instant());
+        sessions.saveAndFlush(session);
+        return new CallbackResponse("INTERVIEW_MODEL_OUTPUT_INVALID", false);
     }
 
     private PythonInterviewClient.InternalInterviewJob buildQuestionJob(InterviewSession session, MatchTask task,

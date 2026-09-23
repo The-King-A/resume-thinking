@@ -32,4 +32,14 @@ class LocalProfileNetworkBoundaryTest {
 
   assertThat(yaml.getObject()).containsEntry("spring.profiles.default", "local");
  }
+
+ @Test
+ void localProfileAllowsReasoningModelsEnoughTimeToDeliverCallbacks() {
+  var yaml = new YamlPropertiesFactoryBean();
+  yaml.setResources(new ClassPathResource("application-local.yml"));
+
+  assertThat(yaml.getObject())
+          .containsEntry("app.match-task-processing-lease", "${APP_MATCH_TASK_PROCESSING_LEASE:PT15M}")
+          .containsEntry("app.interview-session-processing-lease", "${APP_INTERVIEW_SESSION_PROCESSING_LEASE:PT15M}");
+ }
 }

@@ -23,6 +23,13 @@ const duplicateTitleRejected = ref(false)
 const pendingCandidateDeletable = ref(false)
 let pollTimer: number | undefined
 let requestGeneration = 0
+let pollAttempt = 0
+let resultRetryCount = 0
+
+const POLL_INITIAL_DELAY_MS = 1500
+const POLL_MAX_DELAY_MS = 10000
+const MAX_STATUS_POLL_ATTEMPTS = 120
+const MAX_RESULT_RETRIES = 8
 
 const statusLabel = computed(() => ({ QUEUED: '排队中', PROCESSING: '处理中', SUCCEEDED: '已完成', FAILED: '失败', TIMED_OUT: '已超时', BLOCKED: '已归档或阻塞' }[task.value?.state || 'QUEUED']))
 const scoreItems = computed(() => result.value ? [
@@ -170,19 +177,43 @@ function isCurrent(id: string, generation: number) {
 
 function schedulePoll(id: string, generation: number, force = false) {
   if (!isCurrent(id, generation) || (!force && task.value?.state !== 'QUEUED' && task.value?.state !== 'PROCESSING')) return
+  if (pollAttempt >= MAX_STATUS_POLL_ATTEMPTS) {
+    error.value = '分析等待时间过长，请刷新后重试。'
+    notReady.value = false
+    return
+  }
   if (pollTimer) window.clearTimeout(pollTimer)
+  const delay = Math.min(POLL_INITIAL_DELAY_MS * 2 ** Math.min(pollAttempt, 3), POLL_MAX_DELAY_MS)
+  pollAttempt += 1
   pollTimer = window.setTimeout(() => {
     pollTimer = undefined
     if (isCurrent(id, generation)) void loadTask(id, generation)
-  }, 1500)
+  }, delay)
 }
 
 async function loadResult(id: string, generation: number) {
-  const nextResult = await lifecycleApi.getMatchResult(id)
-  if (!isCurrent(id, generation)) return
-  result.value = nextResult
-  notReady.value = false
-  report(rejectedDuplicateTitle.value ? '报告已就绪，但该候选简历未成为有效简历。' : '匹配报告已就绪。', rejectedDuplicateTitle.value ? 'error' : 'success')
+  try {
+    const nextResult = await lifecycleApi.getMatchResult(id)
+    if (!isCurrent(id, generation)) return
+    result.value = nextResult
+    resultRetryCount = 0
+    notReady.value = false
+    report(rejectedDuplicateTitle.value ? '报告已就绪，但该候选简历未成为有效简历。' : '匹配报告已就绪。', rejectedDuplicateTitle.value ? 'error' : 'success')
+  } catch (caught) {
+    if (!isCurrent(id, generation)) return
+    if (caught instanceof ApiError && caught.code === 'TASK_NOT_READY') {
+      resultRetryCount += 1
+      if (resultRetryCount <= MAX_RESULT_RETRIES) {
+        notReady.value = true
+        schedulePoll(id, generation, true)
+        return
+      }
+      notReady.value = false
+      error.value = '任务状态已完成，但报告数据尚未同步，请刷新后重试。'
+      return
+    }
+    throw caught
+  }
 }
 
 async function loadPendingCandidateEligibility(nextTask: MatchTask, generation: number) {
@@ -267,6 +298,8 @@ watch(() => route.params.taskId, (next) => {
   notReady.value = false
   duplicateTitleRejected.value = false
   pendingCandidateDeletable.value = false
+  pollAttempt = 0
+  resultRetryCount = 0
   deletePendingOpen.value = false
   deletingPending.value = false
   deletionStatus.value = ''
@@ -274,7 +307,7 @@ watch(() => route.params.taskId, (next) => {
   loading.value = true
   void loadTask(taskId.value, generation)
 })
-onMounted(() => { const generation = ++requestGeneration; void loadTask(taskId.value, generation) })
+onMounted(() => { const generation = ++requestGeneration; pollAttempt = 0; resultRetryCount = 0; void loadTask(taskId.value, generation) })
 onBeforeUnmount(() => { ++requestGeneration; if (pollTimer) window.clearTimeout(pollTimer) })
 </script>
 

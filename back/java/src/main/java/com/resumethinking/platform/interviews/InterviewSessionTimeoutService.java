@@ -25,7 +25,7 @@ public class InterviewSessionTimeoutService {
 
     @Autowired
     public InterviewSessionTimeoutService(InterviewSessionRepository sessions, Clock clock,
-                                          @Value("${app.interview-session-processing-lease:PT5M}") Duration lease) {
+                                          @Value("${app.interview-session-processing-lease:PT15M}") Duration lease) {
         this.sessions = sessions;
         this.clock = clock;
         if (lease == null || lease.isNegative() || lease.isZero()) {
@@ -34,7 +34,7 @@ public class InterviewSessionTimeoutService {
         this.lease = lease;
     }
 
-    @Scheduled(fixedDelayString = "${app.interview-session-timeout-check-delay:60000}")
+    @Scheduled(fixedDelayString = "${app.interview-session-timeout-check-delay:30000}")
     @Transactional
     public int timeoutStaleSessions() {
         Instant cutoff = clock.instant().minus(lease);

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import ipaddress
+import logging
 import socket
 import re
 from urllib.parse import urlsplit
@@ -14,6 +15,9 @@ from pydantic import ValidationError
 from .models import AnalysisRequest, AnalysisResult, Provider
 from .redaction import redact_text
 from .settings import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 STRUCTURED_ANALYSIS_INSTRUCTION = """You are a resume-to-job matching service. Return only one JSON object, with no markdown or commentary, that exactly conforms to this AnalysisResult shape and contains no extra fields:
@@ -35,10 +39,13 @@ EMPTY_JSON_CONTENT_ATTEMPTS = 2
 INTERVIEW_JSON_CONTENT_ATTEMPTS = 3
 RESOURCE_RETRY_ATTEMPTS = 2
 RESOURCE_RETRY_BACKOFF_SECONDS = 0.1
+REASONING_BUDGET_RETRY_ATTEMPTS = 1
+REASONING_MAX_TOKENS_FLOOR = 32768
 NON_DEEPSEEK_MAX_TOKENS = 8192
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.IGNORECASE | re.DOTALL)
 _JSON_REPAIR_INSTRUCTION = """Correction: the previous response was not accepted. Return one complete valid json object only, with every required field present. If the supplied job description has at least 20 characters, identify every actionable requirement and return one requirement object for each; do not return an empty requirements array. If there is no safe suggestion, return an empty suggestions array; never emit a suggestion with a blank or null proposedText. Keep evidence IDs and source ranges exactly within the supplied evidence, and do not use markdown."""
 _INTERVIEW_JSON_REPAIR_INSTRUCTION = """Correction: the previous response was not accepted. Return one complete valid JSON object for the same interview JSON contract stated above, with every required field present and no extra fields. Preserve the required field names, enum values, identifiers, evidence constraints, and fact-safety rules from the interview task. Do not return a resume matching result, score, requirements, or suggestions array. Do not use markdown or commentary."""
+_REASONING_CONTENT_KEYS = ("reasoning_content", "reasoningContent", "reasoning", "thinking")
 
 
 class ModelOutputInvalid(Exception):
@@ -55,6 +62,41 @@ class ModelUnavailable(Exception):
 
 class ModelEndpointRejected(Exception):
     code = "MODEL_ENDPOINT_REJECTED"
+
+
+def _has_non_empty_model_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, dict):
+        return any(_has_non_empty_model_value(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_non_empty_model_value(item) for item in value)
+    return False
+
+
+def _has_reasoning_content(message: Any) -> bool:
+    """Detect hidden reasoning without treating it as user-facing result content."""
+    if not isinstance(message, dict):
+        return False
+    return any(_has_non_empty_model_value(message.get(key)) for key in _REASONING_CONTENT_KEYS)
+
+
+def _next_reasoning_max_tokens(current: Any) -> int | None:
+    """Return one bounded larger budget for a structured response.
+
+    The global setting may be 100000 for DeepSeek, but spending that entire
+    budget on hidden reasoning can starve the JSON response on other gateways.
+    Keep the cross-provider retry cap at 32768 tokens.
+    """
+    try:
+        current_tokens = int(current)
+    except (TypeError, ValueError):
+        return None
+    configured_max = settings.model_max_tokens
+    target = min(configured_max, REASONING_MAX_TOKENS_FLOOR)
+    if current_tokens >= target:
+        return None
+    return target
 
 
 def _extract_json_content(content: Any) -> Any:
@@ -130,6 +172,107 @@ def _sanitize_model_value(value: Any, secrets: tuple[str, ...]) -> Any:
     return value
 
 
+def _valid_business_id(value: Any, prefix: str) -> bool:
+    return isinstance(value, str) and re.fullmatch(rf"{re.escape(prefix)}[0-9]{{3,}}", value) is not None
+
+
+def _normalize_interview_payload(value: Any, request_payload: dict[str, Any], result_model: type[Any]) -> Any:
+    """Apply only safe, identifier-level normalization before strict validation.
+
+    Provider-generated identifiers are labels, not authority.  Some compatible
+    models copy the illustrative IDs from the prompt or set ``applied`` to
+    true despite the contract.  Binding the answer to Java's submitted ID and
+    forcing every claim back to ``false`` prevents either value from becoming
+    a cross-answer write or a resume mutation.  Content, scores, enums, and
+    evidence remain subject to the strict Pydantic contract.
+    """
+    if not isinstance(value, dict) or "feedback_id" not in getattr(result_model, "model_fields", {}):
+        return value
+
+    normalized = dict(value)
+    answer_analysis = request_payload.get("answerAnalysis")
+    if isinstance(answer_analysis, dict):
+        expected_answer_id = answer_analysis.get("answerId")
+        if _valid_business_id(expected_answer_id, "answer"):
+            normalized["answerId"] = expected_answer_id
+
+    feedback_id = normalized.get("feedbackId")
+    if not _valid_business_id(feedback_id, "feedback"):
+        normalized["feedbackId"] = "feedback001"
+
+    for field in ("evidenceIds", "riskFlags", "claims"):
+        if field not in normalized or normalized[field] is None:
+            normalized[field] = []
+
+    claims = normalized.get("claims")
+    if isinstance(claims, list):
+        normalized_claims = []
+        for index, raw_claim in enumerate(claims, start=1):
+            if not isinstance(raw_claim, dict):
+                normalized_claims.append(raw_claim)
+                continue
+            claim = dict(raw_claim)
+            if not _valid_business_id(claim.get("id"), "claim"):
+                claim["id"] = f"claim{index:03d}"
+            claim["applied"] = False
+            if claim.get("evidenceIds") is None:
+                claim["evidenceIds"] = []
+            normalized_claims.append(claim)
+        normalized["claims"] = normalized_claims
+    return normalized
+
+
+def _safe_diagnostic_text(value: Any, default: str = "unknown") -> str:
+    if not isinstance(value, str) or not value:
+        return default
+    return "".join(char if 0x20 <= ord(char) <= 0x7E else "?" for char in value[:120])
+
+
+def _usage_count(usage: Any, *keys: str) -> int | None:
+    if not isinstance(usage, dict):
+        return None
+    for key in keys:
+        value = usage.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    return None
+
+
+def _log_provider_response(provider: Provider, body: Any, *, operation: str, attempt: int, max_tokens: int) -> None:
+    """Log only provider metadata needed to prove model selection and billing.
+
+    Never include prompt, completion content, API keys, callback tokens, or
+    resume/answer text in this diagnostic line.
+    """
+    response_model = body.get("model") if isinstance(body, dict) else None
+    choices = body.get("choices") if isinstance(body, dict) else None
+    choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+    finish_reason = choice.get("finish_reason")
+    usage = body.get("usage") if isinstance(body, dict) else None
+    details = usage.get("completion_tokens_details") if isinstance(usage, dict) else None
+    if not isinstance(details, dict):
+        details = usage.get("output_tokens_details") if isinstance(usage, dict) else None
+    reasoning_tokens = _usage_count(usage, "reasoning_tokens")
+    if reasoning_tokens is None:
+        reasoning_tokens = _usage_count(details, "reasoning_tokens")
+    logger.info(
+        "model_completion operation=%s request_model=%s response_model=%s model_match=%s "
+        "finish_reason=%s attempt=%s max_tokens=%s prompt_tokens=%s completion_tokens=%s "
+        "total_tokens=%s reasoning_tokens=%s",
+        operation,
+        _safe_diagnostic_text(provider.model.strip()),
+        _safe_diagnostic_text(response_model),
+        isinstance(response_model, str) and response_model.strip() == provider.model.strip(),
+        _safe_diagnostic_text(finish_reason),
+        attempt,
+        max_tokens,
+        _usage_count(usage, "prompt_tokens", "input_tokens"),
+        _usage_count(usage, "completion_tokens", "output_tokens"),
+        _usage_count(usage, "total_tokens"),
+        reasoning_tokens,
+    )
+
+
 def _filter_blank_suggestions(value: Any) -> Any:
     """Drop suggestions whose proposed text is blank while preserving strict validation.
 
@@ -175,18 +318,17 @@ def _repair_payload(payload: dict[str, Any], correction_instruction: str = _JSON
 
 
 def _thinking_parameter(provider: Provider) -> dict[str, str] | None:
-    """Choose the optional DeepSeek thinking-mode extension.
+    """Select DeepSeek's explicit thinking mode for structured requests.
 
-    DeepSeek v4 enables reasoning by default.  ``auto`` disables that optional
-    mode for the known endpoint so a structured result is returned quickly and
-    the completion budget cannot be consumed by hidden reasoning tokens.  Set
-    ``PYTHON_MODEL_THINKING=enabled`` explicitly when a larger reasoning budget
-    and the provider's longer processing lease are acceptable.  Custom
-    OpenAI-compatible gateways are left untouched in ``auto`` mode.
+    DeepSeek thinking is enabled by default, including on ``deepseek-flash``.
+    In ``auto`` mode the current official structured models therefore receive
+    an explicit disable switch so reasoning tokens cannot consume the JSON
+    response budget. The older reasoner path keeps its established request
+    shape unless the operator explicitly selects a mode.
     """
     mode = settings.model_thinking
     if mode == "auto":
-        if not _is_deepseek_v4(provider):
+        if not _is_deepseek_structured_model(provider):
             return None
         mode = "disabled"
     return {"type": mode}
@@ -197,11 +339,28 @@ def _provider_hostname(provider: Provider) -> str:
     return (parsed.hostname or "").strip().lower().rstrip(".")
 
 
+def _is_deepseek_provider(provider: Provider) -> bool:
+    return _provider_hostname(provider) == "api.deepseek.com"
+
+
 def _is_deepseek_v4(provider: Provider) -> bool:
+    model = provider.model.strip().lower()
     return (
-        _provider_hostname(provider) == "api.deepseek.com"
-        and provider.model.strip().lower().startswith("deepseek-v4")
+        _is_deepseek_provider(provider)
+        and model.startswith("deepseek-v4")
     )
+
+
+def _is_deepseek_structured_model(provider: Provider) -> bool:
+    """Identify the official DeepSeek models used by the structured flows.
+
+    ``deepseek-v4-flash`` and related legacy aliases are retained by the
+    provider, so the v4 prefix remains intentionally accepted here.
+    """
+    if not _is_deepseek_provider(provider):
+        return False
+    model = provider.model.strip().lower()
+    return model == "deepseek-flash" or model.startswith("deepseek-v4")
 
 
 def _is_deepseek_reasoning_model(provider: Provider) -> bool:
@@ -217,14 +376,14 @@ def _is_deepseek_reasoning_model(provider: Provider) -> bool:
 
 
 def _effective_max_tokens(provider: Provider) -> int:
-    """Keep the large budget for known DeepSeek v4, cap unknown endpoints.
+    """Use the configured DeepSeek budget; cap unknown providers conservatively.
 
-    OpenAI-compatible gateways do not share one output-limit contract.  A
-    conservative 8192-token ceiling prevents a local 100000-token DeepSeek
-    setting from making common GPT/Claude/custom endpoints reject the request.
-    Users can still choose a lower global value through the existing setting.
+    DeepSeek documents a much larger output limit than the compatibility cap
+    used by arbitrary OpenAI-compatible gateways. The configured value is
+    already bounded by ``Settings`` and covers both visible JSON and, when
+    explicitly enabled, reasoning tokens.
     """
-    if _is_deepseek_v4(provider):
+    if _is_deepseek_structured_model(provider):
         return settings.model_max_tokens
     return min(settings.model_max_tokens, NON_DEEPSEEK_MAX_TOKENS)
 
@@ -311,8 +470,9 @@ class OpenAICompatibleClient:
             "evidence": safe_evidence,
         })
         base = self.provider.base_url.rstrip("/")
+        request_model = self.provider.model.strip()
         payload = {
-            "model": self.provider.model,
+            "model": request_model,
             "messages": [
                 {"role": "system", "content": STRUCTURED_ANALYSIS_INSTRUCTION},
                 {"role": "user", "content": req.model_dump_json(by_alias=True)},
@@ -333,7 +493,33 @@ class OpenAICompatibleClient:
         # The constructor check protects configuration, while this check
         # limits the DNS-rebinding window between validation and the request.
         self._validate_endpoint(self.provider.base_url)
-        for attempt in range(EMPTY_JSON_CONTENT_ATTEMPTS):
+        json_attempt = 0
+        reasoning_budget_retries = 0
+        resource_retries = 0
+
+        def retry_json_payload() -> bool:
+            nonlocal json_attempt, payload
+            if json_attempt + 1 >= EMPTY_JSON_CONTENT_ATTEMPTS:
+                return False
+            json_attempt += 1
+            payload = _repair_payload(payload)
+            return True
+
+        def parse_result(content: Any) -> AnalysisResult:
+            if content is None or (isinstance(content, str) and not content.strip()):
+                raise ModelOutputInvalid("model output invalid")
+            parsed = _extract_json_content(content)
+            safe_parsed = _sanitize_model_value(
+                parsed,
+                (self.provider.api_key, *self.blocked_secrets),
+            )
+            safe_parsed = _filter_blank_suggestions(safe_parsed)
+            result = AnalysisResult.model_validate(safe_parsed)
+            if requires_requirements and not result.requirements:
+                raise ModelOutputInvalid("model output invalid")
+            return result
+
+        while json_attempt < EMPTY_JSON_CONTENT_ATTEMPTS:
             try:
                 async with httpx.AsyncClient(timeout=timeout, transport=self.transport) as client:
                     async with client.stream(
@@ -352,55 +538,60 @@ class OpenAICompatibleClient:
                 raise ModelUnavailable("model unavailable") from exc
             try:
                 body = json.loads(response_body)
+                _log_provider_response(
+                    self.provider,
+                    body,
+                    operation="matching",
+                    attempt=json_attempt + 1,
+                    max_tokens=payload["max_tokens"],
+                )
                 choices = body.get("choices") if isinstance(body, dict) else None
                 if isinstance(choices, list) and choices:
                     choice = choices[0]
                     if not isinstance(choice, dict):
                         raise ModelOutputInvalid("model output invalid")
+                    message = choice.get("message")
                     finish_reason = choice.get("finish_reason")
                     if finish_reason == "insufficient_system_resource":
-                        if attempt + 1 < RESOURCE_RETRY_ATTEMPTS:
+                        if resource_retries + 1 < RESOURCE_RETRY_ATTEMPTS:
+                            resource_retries += 1
                             await asyncio.sleep(RESOURCE_RETRY_BACKOFF_SECONDS)
                             continue
                         raise ModelUnavailable("model unavailable")
-                    if finish_reason == "length":
-                        raise ModelOutputTruncated("model output invalid")
-                    message = choice.get("message")
                     content = message.get("content") if isinstance(message, dict) else None
+                    if finish_reason == "length":
+                        if (
+                            _has_reasoning_content(message)
+                            and not _is_deepseek_provider(self.provider)
+                            and reasoning_budget_retries < REASONING_BUDGET_RETRY_ATTEMPTS
+                        ):
+                            next_tokens = _next_reasoning_max_tokens(payload.get("max_tokens"))
+                            if next_tokens is not None:
+                                payload = {**payload, "max_tokens": next_tokens}
+                                reasoning_budget_retries += 1
+                                continue
+                        try:
+                            return parse_result(content)
+                        except (ModelOutputInvalid, ValueError, KeyError, IndexError, TypeError,
+                                AttributeError, ValidationError, json.JSONDecodeError) as exc:
+                            raise ModelOutputTruncated("model output invalid") from exc
                 else:
                     content = body
-                if content is None or (isinstance(content, str) and not content.strip()):
-                    if attempt + 1 < EMPTY_JSON_CONTENT_ATTEMPTS:
-                        payload = _repair_payload(payload)
+                try:
+                    result = parse_result(content)
+                except ModelOutputInvalid:
+                    if retry_json_payload():
                         continue
-                    raise ModelOutputInvalid("model output invalid")
-                parsed = _extract_json_content(content)
-                safe_parsed = _sanitize_model_value(
-                    parsed,
-                    (self.provider.api_key, *self.blocked_secrets),
-                )
-                safe_parsed = _filter_blank_suggestions(safe_parsed)
-                result = AnalysisResult.model_validate(safe_parsed)
-                # A non-trivial job description must yield an actionable
-                # requirement list.  One bounded correction handles providers
-                # that occasionally return the schema's empty example instead
-                # of analyzing the supplied job text.
-                if requires_requirements and not result.requirements:
-                    if attempt + 1 < EMPTY_JSON_CONTENT_ATTEMPTS:
-                        payload = _repair_payload(payload)
-                        continue
-                    raise ModelOutputInvalid("model output invalid")
+                    raise
                 return result
             except ModelOutputTruncated:
                 raise
             except ModelOutputInvalid:
-                if attempt + 1 < EMPTY_JSON_CONTENT_ATTEMPTS:
-                    payload = _repair_payload(payload)
+                if retry_json_payload():
                     continue
                 raise
             except (ValueError, KeyError, IndexError, TypeError, AttributeError, ValidationError, json.JSONDecodeError) as exc:
-                if attempt + 1 < EMPTY_JSON_CONTENT_ATTEMPTS:
-                    payload = _repair_payload(payload)
+                if retry_json_payload():
                     continue
                 raise ModelOutputInvalid("model output invalid") from exc
         raise ModelOutputInvalid("model output invalid")
@@ -414,8 +605,9 @@ class OpenAICompatibleClient:
         """
         safe_request = _sanitize_model_value(request_payload, (self.provider.api_key, *self.blocked_secrets))
         base = self.provider.base_url.rstrip("/")
+        request_model = self.provider.model.strip()
         payload: dict[str, Any] = {
-            "model": self.provider.model,
+            "model": request_model,
             "messages": [
                 {"role": "system", "content": instruction},
                 {"role": "user", "content": json.dumps(safe_request, ensure_ascii=False, separators=(",", ":"))},
@@ -430,7 +622,32 @@ class OpenAICompatibleClient:
             payload["temperature"] = 0
         timeout = httpx.Timeout(settings.model_read_timeout, connect=settings.connect_timeout)
         self._validate_endpoint(self.provider.base_url)
-        for attempt in range(INTERVIEW_JSON_CONTENT_ATTEMPTS):
+        json_attempt = 0
+        reasoning_budget_retries = 0
+        resource_retries = 0
+
+        def retry_json_payload() -> bool:
+            nonlocal json_attempt, payload
+            if json_attempt + 1 >= INTERVIEW_JSON_CONTENT_ATTEMPTS:
+                return False
+            json_attempt += 1
+            payload = _repair_payload(payload, _INTERVIEW_JSON_REPAIR_INSTRUCTION)
+            return True
+
+        def parse_result(content: Any) -> Any:
+            if content is None or (isinstance(content, str) and not content.strip()):
+                raise ModelOutputInvalid("model output invalid")
+            parsed = _sanitize_model_value(
+                _normalize_interview_payload(
+                    _extract_json_content(content),
+                    request_payload,
+                    result_model,
+                ),
+                (self.provider.api_key, *self.blocked_secrets),
+            )
+            return result_model.model_validate(parsed)
+
+        while json_attempt < INTERVIEW_JSON_CONTENT_ATTEMPTS:
             try:
                 async with httpx.AsyncClient(timeout=timeout, transport=self.transport) as client:
                     async with client.stream(
@@ -447,36 +664,53 @@ class OpenAICompatibleClient:
                 raise ModelUnavailable("model unavailable") from exc
             try:
                 body = json.loads(response_body)
+                _log_provider_response(
+                    self.provider,
+                    body,
+                    operation="interview",
+                    attempt=json_attempt + 1,
+                    max_tokens=payload["max_tokens"],
+                )
                 choices = body.get("choices") if isinstance(body, dict) else None
                 if isinstance(choices, list) and choices:
                     choice = choices[0]
                     if not isinstance(choice, dict):
                         raise ModelOutputInvalid("model output invalid")
+                    message = choice.get("message")
+                    content = message.get("content") if isinstance(message, dict) else None
                     if choice.get("finish_reason") == "length":
-                        raise ModelOutputTruncated("model output invalid")
+                        if (
+                            _has_reasoning_content(message)
+                            and not _is_deepseek_provider(self.provider)
+                            and reasoning_budget_retries < REASONING_BUDGET_RETRY_ATTEMPTS
+                        ):
+                            next_tokens = _next_reasoning_max_tokens(payload.get("max_tokens"))
+                            if next_tokens is not None:
+                                payload = {**payload, "max_tokens": next_tokens}
+                                reasoning_budget_retries += 1
+                                continue
+                        try:
+                            return parse_result(content)
+                        except (ModelOutputInvalid, ValueError, KeyError, IndexError, TypeError,
+                                AttributeError, ValidationError, json.JSONDecodeError) as exc:
+                            raise ModelOutputTruncated("model output invalid") from exc
                     if choice.get("finish_reason") == "insufficient_system_resource":
-                        if attempt + 1 < RESOURCE_RETRY_ATTEMPTS:
+                        if resource_retries + 1 < RESOURCE_RETRY_ATTEMPTS:
+                            resource_retries += 1
                             await asyncio.sleep(RESOURCE_RETRY_BACKOFF_SECONDS)
                             continue
                         raise ModelUnavailable("model unavailable")
-                    message = choice.get("message")
-                    content = message.get("content") if isinstance(message, dict) else None
                 else:
                     content = body
-                if content is None or (isinstance(content, str) and not content.strip()):
-                    raise ModelOutputInvalid("model output invalid")
-                parsed = _sanitize_model_value(_extract_json_content(content), (self.provider.api_key, *self.blocked_secrets))
-                return result_model.model_validate(parsed)
+                return parse_result(content)
             except ModelOutputTruncated:
                 raise
             except ModelOutputInvalid:
-                if attempt + 1 < INTERVIEW_JSON_CONTENT_ATTEMPTS:
-                    payload = _repair_payload(payload, _INTERVIEW_JSON_REPAIR_INSTRUCTION)
+                if retry_json_payload():
                     continue
                 raise
             except (ValueError, KeyError, IndexError, TypeError, AttributeError, ValidationError, json.JSONDecodeError) as exc:
-                if attempt + 1 < INTERVIEW_JSON_CONTENT_ATTEMPTS:
-                    payload = _repair_payload(payload, _INTERVIEW_JSON_REPAIR_INSTRUCTION)
+                if retry_json_payload():
                     continue
                 raise ModelOutputInvalid("model output invalid") from exc
         raise ModelOutputInvalid("model output invalid")

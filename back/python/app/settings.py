@@ -59,7 +59,7 @@ _MODEL_MAX_TOKENS_MIN = 1024
 # current DeepSeek models.  Invalid or excessive environment values are
 # clamped instead of preventing the worker from starting.
 _MODEL_MAX_TOKENS_MAX = 100_000
-_MODEL_READ_TIMEOUT_DEFAULT = 300.0
+_MODEL_READ_TIMEOUT_DEFAULT = 900.0
 _MODEL_READ_TIMEOUT_MIN = 1.0
 _MODEL_READ_TIMEOUT_MAX = 900.0
 

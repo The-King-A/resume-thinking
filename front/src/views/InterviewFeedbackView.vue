@@ -8,39 +8,67 @@ import type { InterviewFeedback, InterviewSession } from '../api/contracts'
 
 const route = useRoute(); const router = useRouter(); const sessionId = String(route.params.sessionId || '')
 const feedback = ref<InterviewFeedback | null>(null); const error = ref(''); const loading = ref(true); const moving = ref(false); let timer: number | undefined
-function scheduleRetry() {
+let loadGeneration = 0
+let retryCount = 0
+const MAX_FEEDBACK_RETRIES = 120
+const FEEDBACK_RETRY_INITIAL_DELAY_MS = 1200
+const FEEDBACK_RETRY_MAX_DELAY_MS = 10000
+function clearRetry() {
   if (timer) window.clearTimeout(timer)
-  timer = window.setTimeout(() => { if (loading.value) void load() }, 1200)
+  timer = undefined
+}
+function scheduleRetry(generation: number) {
+  if (generation !== loadGeneration || !loading.value || timer) return
+  if (retryCount >= MAX_FEEDBACK_RETRIES) {
+    loading.value = false
+    error.value = '回答分析等待时间过长，请刷新后重试。'
+    return
+  }
+  retryCount += 1
+  if (timer) window.clearTimeout(timer)
+  const delay = Math.min(FEEDBACK_RETRY_INITIAL_DELAY_MS * 2 ** Math.min(retryCount - 1, 3), FEEDBACK_RETRY_MAX_DELAY_MS)
+  timer = window.setTimeout(() => {
+    timer = undefined
+    if (generation === loadGeneration && loading.value) void load(generation)
+  }, delay)
 }
 
-async function load() {
+async function load(generation = loadGeneration) {
+  if (generation !== loadGeneration || !loading.value) return
   try {
-    feedback.value = await interviewApi.getFeedback(sessionId)
-    loading.value = false
-  } catch (caught) {
-    if (caught instanceof ApiError && caught.code === 'INTERVIEW_FEEDBACK_NOT_READY') {
-      try {
-        const current: InterviewSession = await interviewApi.getSession(sessionId)
-        if (current.state === 'FAILED') {
-          loading.value = false
-          error.value = friendlyFailureCode(current.failureCode) || '回答分析失败，请重新开始练习。'
-          return
-        }
-        if (current.state === 'DELETED' || current.state === 'COMPLETED') {
-          loading.value = false
-          error.value = '面试会话已结束或已清理。'
-          return
-        }
-      } catch (statusError) {
-        if (statusError instanceof ApiError && statusError.code !== 'INTERVIEW_FEEDBACK_NOT_READY') {
-          loading.value = false
-          error.value = friendlyError(statusError, '无法读取回答分析状态。')
-          return
-        }
-      }
-      scheduleRetry()
+    const current: InterviewSession = await interviewApi.getSession(sessionId)
+    if (generation !== loadGeneration) return
+
+    if (current.state === 'FAILED') {
+      clearRetry()
+      loading.value = false
+      error.value = friendlyFailureCode(current.failureCode) || '回答分析失败，请重新开始练习。'
       return
     }
+    if (current.state === 'DELETED' || current.state === 'COMPLETED') {
+      clearRetry()
+      loading.value = false
+      error.value = '面试会话已结束或已清理。'
+      return
+    }
+    if (current.state !== 'FEEDBACK_READY') {
+      scheduleRetry(generation)
+      return
+    }
+
+    const nextFeedback = await interviewApi.getFeedback(sessionId)
+    if (generation !== loadGeneration) return
+    clearRetry()
+    feedback.value = nextFeedback
+    retryCount = 0
+    loading.value = false
+  } catch (caught) {
+    if (generation !== loadGeneration) return
+    if (caught instanceof ApiError && caught.code === 'INTERVIEW_FEEDBACK_NOT_READY') {
+      scheduleRetry(generation)
+      return
+    }
+    clearRetry()
     loading.value = false
     error.value = friendlyError(caught, '回答分析失败，请重新开始练习。')
   }
@@ -64,7 +92,7 @@ async function nextQuestion() {
   }
 }
 async function stop() { try { await interviewApi.deleteSession(sessionId); await router.replace('/resumes') } catch { error.value = '无法结束面试会话。' } }
-onMounted(() => void load()); onBeforeUnmount(() => { if (timer) window.clearTimeout(timer) })
+onMounted(() => { loadGeneration += 1; retryCount = 0; void load(loadGeneration) }); onBeforeUnmount(() => { loadGeneration += 1; clearRetry() })
 </script>
 
 <template>

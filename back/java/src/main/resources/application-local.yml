@@ -19,6 +19,10 @@ app:
   jwt-signing-key-base64: ${JWT_SIGNING_KEY_BASE64}
   encryption-key-base64: ${APP_ENCRYPTION_KEY_BASE64}
   python-analysis-base-url: ${PYTHON_ANALYSIS_BASE_URL}
+  match-task-processing-lease: ${APP_MATCH_TASK_PROCESSING_LEASE:PT15M}
+  match-task-timeout-check-delay: ${APP_MATCH_TASK_TIMEOUT_CHECK_DELAY:30000}
+  interview-session-processing-lease: ${APP_INTERVIEW_SESSION_PROCESSING_LEASE:PT15M}
+  interview-session-timeout-check-delay: ${APP_INTERVIEW_SESSION_TIMEOUT_CHECK_DELAY:30000}
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://127.0.0.1:5173,http://localhost:5173}
   demo-seed:

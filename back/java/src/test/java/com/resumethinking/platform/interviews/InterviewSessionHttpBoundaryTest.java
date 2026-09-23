@@ -87,4 +87,19 @@ class InterviewSessionHttpBoundaryTest {
                 .andExpect(jsonPath("$.questions[0].answered").value(true))
                 .andExpect(jsonPath("$.questions[0].answerText").doesNotExist());
     }
+
+    @Test
+    void failedInterviewFeedbackUsesTerminalErrorInsteadOfConflictRetry() throws Exception {
+        var service = mock(InterviewSessionService.class);
+        when(service.getFeedback("session001", "user001"))
+                .thenThrow(new InterviewSessionFailedException("INTERVIEW_MODEL_OUTPUT_INVALID"));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(new InterviewSessionController(service))
+                .setControllerAdvice(new ApiExceptionHandler()).build();
+
+        mvc.perform(get("/api/v4/interview-sessions/session001/feedback")
+                        .requestAttr("actorId", "user001"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INTERVIEW_MODEL_OUTPUT_INVALID"))
+                .andExpect(jsonPath("$.retryable").value(false));
+    }
 }

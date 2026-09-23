@@ -69,6 +69,63 @@ def _validate_question_evidence(result: InterviewQuestionSet, job: InterviewJob)
             raise ModelOutputInvalid("question evidence is not bound to the selected requirement")
 
 
+def _bind_feedback_answer_id(result: InterviewFeedbackPayload, job: InterviewJob) -> InterviewFeedbackPayload:
+    """Bind the callback to Java's authoritative submitted-answer identity.
+
+    ``answerId`` is a correlation key, not model-generated content. Providers
+    can copy the illustrative ``answer001`` from the contract example even
+    when the request contains a different answer ID; Java correctly rejects
+    that callback to prevent cross-answer writes. Replacing only this
+    authoritative key keeps the validated feedback content intact.
+    """
+    expected = job.answer_analysis.answer_id
+    if result.answer_id == expected:
+        return result
+    return result.model_copy(update={"answer_id": expected})
+
+
+def _bind_feedback_evidence(result: InterviewFeedbackPayload, job: InterviewJob) -> InterviewFeedbackPayload:
+    """Keep feedback citations inside the evidence supplied for this answer.
+
+    The prompt contains a JSON example with ``evidence001``. Providers can
+    copy that illustrative value even when the real job uses another stable
+    evidence ID. Treat those values as untrusted model output: remove them
+    from the callback and downgrade any claim that lost its only supporting
+    evidence instead of letting Java reject the whole answer analysis.
+    """
+    if job.answer_analysis is None:
+        raise ModelOutputInvalid("answer analysis payload is missing")
+    allowed = {item.evidence_id for item in job.answer_analysis.evidence}
+
+    def bound_ids(values: list[str]) -> list[str]:
+        return list(dict.fromkeys(value for value in values if value in allowed))
+
+    claims = []
+    for claim in result.claims:
+        evidence_ids = bound_ids(claim.evidence_ids)
+        state = claim.state
+        if state in {"SUPPORTED_FACT", "WORDING_ONLY_REWRITE"} and not evidence_ids:
+            state = "NEEDS_USER_CONFIRMATION"
+        claims.append(claim.model_copy(update={
+            "state": state,
+            "evidence_ids": evidence_ids,
+            "applied": False,
+        }))
+
+    risk_flags = []
+    for flag in result.risk_flags:
+        claim_state = flag.claim_state
+        if claim_state in {"SUPPORTED_FACT", "WORDING_ONLY_REWRITE"} and not allowed:
+            claim_state = "NEEDS_USER_CONFIRMATION"
+        risk_flags.append(flag.model_copy(update={"claim_state": claim_state}))
+
+    return result.model_copy(update={
+        "evidence_ids": bound_ids(result.evidence_ids),
+        "claims": claims,
+        "risk_flags": risk_flags,
+    })
+
+
 async def analyze_interview_job(job: InterviewJob | dict[str, Any]) -> dict[str, Any]:
     parsed = job if isinstance(job, InterviewJob) else InterviewJob.model_validate(job)
     base = _base(parsed)
@@ -83,6 +140,8 @@ async def analyze_interview_job(job: InterviewJob | dict[str, Any]) -> dict[str,
             request = _redact_value(parsed.answer_analysis.model_dump(by_alias=True, mode="json"))
             result = await OpenAICompatibleClient(parsed.provider, blocked_secrets=(parsed.callback_token,)).complete_interview_structured(
                 FEEDBACK_INSTRUCTION, request, InterviewFeedbackPayload)
+            result = _bind_feedback_answer_id(result, parsed)
+            result = _bind_feedback_evidence(result, parsed)
             payload = {**base, "outcome": "SUCCEEDED", "feedback": result.model_dump(by_alias=True, mode="json")}
     except ModelUnavailable:
         payload = {**base, "outcome": "TIMED_OUT", "errorCode": "INTERVIEW_MODEL_UNAVAILABLE"}

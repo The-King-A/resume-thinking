@@ -78,6 +78,14 @@ public class ApiExceptionHandler {
     ResponseEntity<?> interviewQuestionNotReady() { return error(HttpStatus.CONFLICT, "INTERVIEW_QUESTION_NOT_READY"); }
     @ExceptionHandler(InterviewFeedbackNotReadyException.class)
     ResponseEntity<?> interviewFeedbackNotReady() { return error(HttpStatus.CONFLICT, "INTERVIEW_FEEDBACK_NOT_READY"); }
+    @ExceptionHandler(InterviewSessionFailedException.class)
+    ResponseEntity<?> interviewSessionFailed(InterviewSessionFailedException exception) {
+        String code = Set.of("INTERVIEW_MODEL_UNAVAILABLE", "INTERVIEW_MODEL_OUTPUT_INVALID")
+                .contains(exception.getMessage()) ? exception.getMessage() : "INTERVIEW_MODEL_OUTPUT_INVALID";
+        HttpStatus status = "INTERVIEW_MODEL_UNAVAILABLE".equals(code)
+                ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.BAD_REQUEST;
+        return error(status, code);
+    }
     @ExceptionHandler(InterviewAnswerConflictException.class)
     ResponseEntity<?> interviewAnswerConflict() { return error(HttpStatus.CONFLICT, "INTERVIEW_ANSWER_CONFLICT"); }
     @ExceptionHandler(InterviewCallbackStaleException.class)

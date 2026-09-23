@@ -20,7 +20,7 @@ public class MatchTaskTimeoutService {
 
     @Autowired
     public MatchTaskTimeoutService(MatchTaskRepository tasks, Clock clock,
-                                   @Value("${app.match-task-processing-lease:PT5M}") Duration lease) {
+                                   @Value("${app.match-task-processing-lease:PT15M}") Duration lease) {
         this.tasks = tasks;
         this.clock = clock;
         if (lease == null || lease.isNegative() || lease.isZero()) {
@@ -29,7 +29,7 @@ public class MatchTaskTimeoutService {
         this.lease = lease;
     }
 
-    @Scheduled(fixedDelayString = "${app.match-task-timeout-check-delay:60000}")
+    @Scheduled(fixedDelayString = "${app.match-task-timeout-check-delay:30000}")
     @Transactional
     public int timeoutStaleTasks() {
         Instant cutoff = clock.instant().minus(lease);

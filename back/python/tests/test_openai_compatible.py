@@ -1,4 +1,5 @@
 import json
+import logging
 import pytest
 import httpx
 
@@ -79,7 +80,7 @@ async def test_provider_request_separates_structured_instruction_from_analysis_r
 
 
 @pytest.mark.asyncio
-async def test_deepseek_v4_disables_thinking_when_auto_is_selected(monkeypatch):
+async def test_deepseek_flash_auto_disables_thinking_and_keeps_configured_budget(monkeypatch):
     seen = {}
 
     async def handler(request):
@@ -99,19 +100,59 @@ async def test_deepseek_v4_disables_thinking_when_auto_is_selected(monkeypatch):
         )
 
     monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    monkeypatch.setattr(settings, "model_max_tokens", 100000)
     monkeypatch.setattr(settings, "model_thinking", "auto")
     client = OpenAICompatibleClient(
-        {"baseUrl": "https://api.deepseek.com", "model": "deepseek-v4-flash", "apiKey": "k"},
+        {"baseUrl": "https://api.deepseek.com", "model": "deepseek-flash", "apiKey": "k"},
         transport=httpx.MockTransport(handler),
     )
 
     await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
 
     assert seen["payload"]["thinking"] == {"type": "disabled"}
+    assert seen["payload"]["max_tokens"] == 100000
+    assert seen["payload"]["temperature"] == 0
 
 
 @pytest.mark.asyncio
-async def test_deepseek_v4_auto_trims_model_name_before_thinking_detection(monkeypatch):
+@pytest.mark.parametrize("model", ["deepseek-v4-flash", "deepseek-v4-pro"])
+async def test_deepseek_v4_auto_uses_explicit_non_reasoning_structured_request(monkeypatch, model):
+    seen = {}
+
+    async def handler(request):
+        seen["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": "{\"score\":{\"skills\":0,\"projectExperience\":0,\"workContent\":0,\"educationExperience\":0,\"softSkills\":0,\"composite\":0},\"requirements\":[],\"suggestions\":[]}"
+                        },
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    monkeypatch.setattr(settings, "model_max_tokens", 100000)
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://api.deepseek.com", "model": model, "apiKey": "k"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
+
+    assert seen["payload"]["model"] == model
+    assert seen["payload"]["thinking"] == {"type": "disabled"}
+    assert seen["payload"]["max_tokens"] == 100000
+    assert seen["payload"]["temperature"] == 0
+
+
+@pytest.mark.asyncio
+async def test_deepseek_v4_auto_disables_thinking_for_trimmed_model_name(monkeypatch):
     seen = {}
 
     async def handler(request):
@@ -140,6 +181,49 @@ async def test_deepseek_v4_auto_trims_model_name_before_thinking_detection(monke
 
     assert seen["payload"]["thinking"] == {"type": "disabled"}
     assert seen["payload"]["temperature"] == 0
+
+
+@pytest.mark.asyncio
+async def test_provider_logs_model_identity_and_usage_without_model_input(caplog, monkeypatch):
+    seen = {}
+
+    async def handler(request):
+        seen["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "model": "deepseek-v4-pro",
+                "choices": [{
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": "{\"score\":{\"skills\":0,\"projectExperience\":0,\"workContent\":0,\"educationExperience\":0,\"softSkills\":0,\"composite\":0},\"requirements\":[],\"suggestions\":[]}",
+                    },
+                }],
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 34,
+                    "total_tokens": 46,
+                    "completion_tokens_details": {"reasoning_tokens": 0},
+                },
+            },
+        )
+
+    caplog.set_level(logging.INFO, logger="app.openai_compatible")
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://api.deepseek.com", "model": "deepseek-v4-pro", "apiKey": "secret-key"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    await client.complete_structured({"resumeText": "private resume text", "jobDescriptionText": "y", "evidence": []})
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "request_model=deepseek-v4-pro" in messages
+    assert "response_model=deepseek-v4-pro" in messages
+    assert "finish_reason=stop" in messages
+    assert "total_tokens=46" in messages
+    assert "secret-key" not in messages
+    assert "private resume text" not in messages
 
 
 @pytest.mark.asyncio
@@ -207,7 +291,7 @@ async def test_non_deepseek_provider_caps_max_tokens_for_compatibility(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_deepseek_v4_keeps_configured_max_tokens(monkeypatch):
+async def test_deepseek_v4_auto_keeps_configured_structured_budget(monkeypatch):
     seen = {}
 
     async def handler(request):
@@ -237,6 +321,35 @@ async def test_deepseek_v4_keeps_configured_max_tokens(monkeypatch):
     await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
 
     assert seen["payload"]["max_tokens"] == 100000
+
+
+@pytest.mark.asyncio
+async def test_deepseek_v4_does_not_use_cross_provider_reasoning_budget_retry(monkeypatch):
+    calls = 0
+    budgets = []
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        budgets.append(json.loads(request.content)["max_tokens"])
+        return httpx.Response(
+            200,
+            json={"choices": [{"finish_reason": "length", "message": {"content": "{", "reasoning_content": "r"}}]},
+        )
+
+    monkeypatch.setattr(settings, "model_max_tokens", 100000)
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://api.deepseek.com", "model": "deepseek-v4-pro", "apiKey": "k"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ModelOutputInvalid):
+        await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
+
+    assert calls == 1
+    assert budgets == [100000]
 
 
 @pytest.mark.asyncio
@@ -324,6 +437,39 @@ async def test_custom_openai_endpoint_does_not_receive_deepseek_thinking_extensi
     await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
 
     assert "thinking" not in seen["payload"]
+
+
+@pytest.mark.asyncio
+async def test_qwen_compatible_endpoint_keeps_existing_auto_request_shape(monkeypatch):
+    seen = {}
+
+    async def handler(request):
+        seen["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": "{\"score\":{\"skills\":0,\"projectExperience\":0,\"workContent\":0,\"educationExperience\":0,\"softSkills\":0,\"composite\":0},\"requirements\":[],\"suggestions\":[]}"
+                    },
+                }],
+            },
+        )
+
+    monkeypatch.setattr(settings, "model_max_tokens", 100000)
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen-plus", "apiKey": "k"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
+
+    assert "thinking" not in seen["payload"]
+    assert seen["payload"]["max_tokens"] == 8192
+    assert seen["payload"]["temperature"] == 0
 
 
 @pytest.mark.asyncio
@@ -647,6 +793,321 @@ async def test_provider_does_not_retry_length_terminated_response():
 
 
 @pytest.mark.asyncio
+async def test_provider_accepts_a_complete_matching_json_object_when_provider_reports_length():
+    calls = 0
+    content = json.dumps({
+        "score": {
+            "skills": 0,
+            "projectExperience": 0,
+            "workContent": 0,
+            "educationExperience": 0,
+            "softSkills": 0,
+            "composite": 0,
+        },
+        "requirements": [],
+        "suggestions": [],
+    })
+
+    async def handler(_request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={"choices": [{"finish_reason": "length", "message": {"content": content}}]},
+        )
+
+    client = OpenAICompatibleClient(
+        {"baseUrl": "http://127.0.0.1:8080", "model": "m", "apiKey": "k"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
+
+    assert result.score.composite == 0
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_interview_provider_accepts_a_complete_feedback_object_when_pro_reports_length(monkeypatch):
+    feedback = {
+        "feedbackId": "feedback001",
+        "answerId": "answer001",
+        "state": "FEEDBACK_READY",
+        "relevance": "HIGH",
+        "completeness": "MEDIUM",
+        "technicalAccuracy": "HIGH",
+        "factualConsistency": "HIGH",
+        "clarity": "MEDIUM",
+        "evidenceIds": [],
+        "riskFlags": [],
+        "claims": [],
+        "improvementSuggestion": "补充技术取舍。",
+        "suggestedAnswer": "我会说明职责和技术取舍。",
+        "answerComparison": "当前回答说明了职责，还需要补充技术取舍。",
+        "version": 1,
+    }
+    seen = {}
+
+    async def handler(request):
+        seen["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{
+                    "finish_reason": "length",
+                    "message": {"content": json.dumps(feedback, ensure_ascii=False)},
+                }],
+            },
+        )
+
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    monkeypatch.setattr(settings, "model_max_tokens", 100000)
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://api.deepseek.com", "model": "deepseek-v4-pro", "apiKey": "fixture-api-key"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.complete_interview_structured(
+        "Return exactly one interview JSON object.", {"answerId": "answer001"}, InterviewFeedbackPayload,
+    )
+
+    assert result.answer_id == "answer001"
+    assert seen["payload"]["model"] == "deepseek-v4-pro"
+
+
+@pytest.mark.asyncio
+async def test_deepseek_flash_interview_request_disables_thinking_and_keeps_budget(monkeypatch):
+    seen = {}
+    feedback = {
+        "feedbackId": "feedback001",
+        "answerId": "answer001",
+        "state": "FEEDBACK_READY",
+        "relevance": "HIGH",
+        "completeness": "MEDIUM",
+        "technicalAccuracy": "HIGH",
+        "factualConsistency": "HIGH",
+        "clarity": "MEDIUM",
+        "evidenceIds": [],
+        "riskFlags": [],
+        "claims": [],
+        "improvementSuggestion": "补充技术取舍。",
+        "suggestedAnswer": "我会说明职责和技术取舍。",
+        "answerComparison": "当前回答说明了职责，还需要补充技术取舍。",
+        "version": 1,
+    }
+
+    async def handler(request):
+        seen["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(feedback, ensure_ascii=False)}}]},
+        )
+
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    monkeypatch.setattr(settings, "model_max_tokens", 100000)
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://api.deepseek.com", "model": "deepseek-flash", "apiKey": "fixture-api-key-1234567890"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.complete_interview_structured(
+        "Return exactly one interview JSON object.", {"answerId": "answer001"}, InterviewFeedbackPayload,
+    )
+
+    assert result.suggested_answer == feedback["suggestedAnswer"]
+    assert seen["payload"]["thinking"] == {"type": "disabled"}
+    assert seen["payload"]["max_tokens"] == 100000
+    assert seen["payload"]["temperature"] == 0
+
+
+@pytest.mark.asyncio
+async def test_interview_feedback_normalizes_provider_claim_labels_without_applying_them(monkeypatch):
+    feedback = {
+        "feedbackId": "feedback-from-provider",
+        "answerId": "answer-from-provider",
+        "state": "FEEDBACK_READY",
+        "relevance": "HIGH",
+        "completeness": "MEDIUM",
+        "technicalAccuracy": "HIGH",
+        "factualConsistency": "HIGH",
+        "clarity": "MEDIUM",
+        "evidenceIds": [],
+        "riskFlags": [],
+        "claims": [{
+            "id": "claim1",
+            "claimText": "A claim requiring confirmation",
+            "state": "NEEDS_USER_CONFIRMATION",
+            "evidenceIds": [],
+            "applied": True,
+        }],
+        "improvementSuggestion": "Add one verifiable technical detail.",
+        "suggestedAnswer": "I would explain the technical trade-off.",
+        "answerComparison": "The answer needs a concrete trade-off.",
+        "version": 1,
+    }
+
+    async def handler(_request):
+        return httpx.Response(200, json={
+            "model": "deepseek-v4-pro",
+            "choices": [{"finish_reason": "stop", "message": {"content": json.dumps(feedback)}}],
+        })
+
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://api.deepseek.com", "model": "deepseek-v4-pro", "apiKey": "fixture-key"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.complete_interview_structured(
+        "Return one feedback object.",
+        {"answerAnalysis": {"answerId": "answer009"}},
+        InterviewFeedbackPayload,
+    )
+
+    assert result.feedback_id == "feedback001"
+    assert result.answer_id == "answer009"
+    assert result.claims[0].id == "claim001"
+    assert result.claims[0].applied is False
+
+
+@pytest.mark.asyncio
+async def test_provider_retries_reasoning_length_with_a_larger_budget(monkeypatch):
+    calls = 0
+    budgets = []
+    valid_content = json.dumps({
+        "score": {
+            "skills": 0,
+            "projectExperience": 0,
+            "workContent": 0,
+            "educationExperience": 0,
+            "softSkills": 0,
+            "composite": 0,
+        },
+        "requirements": [],
+        "suggestions": [],
+    })
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        payload = json.loads(request.content)
+        budgets.append(payload["max_tokens"])
+        if calls == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [{
+                        "finish_reason": "length",
+                        "message": {"content": "{", "reasoning_content": "r" * 1000},
+                    }]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={"choices": [{"finish_reason": "stop", "message": {"content": valid_content}}]},
+        )
+
+    monkeypatch.setattr(settings, "model_max_tokens", 32768)
+    client = OpenAICompatibleClient(
+        {"baseUrl": "http://127.0.0.1:8080", "model": "reasoning-model", "apiKey": "fixture-api-key"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
+
+    assert result.score.composite == 0
+    assert calls == 2
+    assert budgets == [8192, 32768]
+
+
+@pytest.mark.asyncio
+async def test_provider_does_not_expand_reasoning_budget_beyond_structured_response_cap(monkeypatch):
+    calls = 0
+    budgets = []
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        budgets.append(json.loads(request.content)["max_tokens"])
+        return httpx.Response(
+            200,
+            json={"choices": [{"finish_reason": "length", "message": {"content": "{", "reasoning_content": "r"}}]},
+        )
+
+    monkeypatch.setattr(settings, "model_max_tokens", 100000)
+    client = OpenAICompatibleClient(
+        {"baseUrl": "http://127.0.0.1:8080", "model": "reasoning-model", "apiKey": "fixture-api-key"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ModelOutputInvalid):
+        await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
+
+    assert calls == 2
+    assert budgets == [8192, 32768]
+
+
+@pytest.mark.asyncio
+async def test_interview_provider_retries_reasoning_length_with_a_larger_budget(monkeypatch):
+    calls = 0
+    budgets = []
+    valid_content = {
+        "feedbackId": "feedback001",
+        "answerId": "answer001",
+        "state": "FEEDBACK_READY",
+        "relevance": "HIGH",
+        "completeness": "MEDIUM",
+        "technicalAccuracy": "HIGH",
+        "factualConsistency": "HIGH",
+        "clarity": "MEDIUM",
+        "evidenceIds": [],
+        "riskFlags": [],
+        "claims": [],
+        "improvementSuggestion": "补充技术取舍。",
+        "suggestedAnswer": "我会说明职责和技术取舍。",
+        "answerComparison": "当前回答说明了职责，还需要补充技术取舍。",
+        "version": 1,
+    }
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        payload = json.loads(request.content)
+        budgets.append(payload["max_tokens"])
+        if calls == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [{
+                        "finish_reason": "length",
+                        "message": {"content": "{", "reasoning_content": "r" * 1000},
+                    }]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(valid_content, ensure_ascii=False)}}]},
+        )
+
+    monkeypatch.setattr(settings, "model_max_tokens", 32768)
+    client = OpenAICompatibleClient(
+        {"baseUrl": "http://127.0.0.1:8080", "model": "reasoning-model", "apiKey": "fixture-api-key"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.complete_interview_structured(
+        "Return exactly one interview JSON object.", {"answerId": "answer001"}, InterviewFeedbackPayload,
+    )
+
+    assert result.suggested_answer == valid_content["suggestedAnswer"]
+    assert calls == 2
+    assert budgets == [8192, 32768]
+
+
+@pytest.mark.asyncio
 async def test_provider_http_error_is_not_retried():
     calls = 0
 
@@ -806,8 +1267,12 @@ async def test_provider_keeps_rejecting_suggestions_without_proposed_text():
 
 
 @pytest.mark.asyncio
-async def test_provider_rejects_length_terminated_json_even_if_the_partial_content_looks_valid():
+async def test_provider_rejects_length_terminated_json_when_content_is_truly_truncated():
+    calls = 0
+
     async def handler(_request):
+        nonlocal calls
+        calls += 1
         return httpx.Response(
             200,
             json={
@@ -815,20 +1280,7 @@ async def test_provider_rejects_length_terminated_json_even_if_the_partial_conte
                     {
                         "finish_reason": "length",
                         "message": {
-                            "content": json.dumps(
-                                {
-                                    "score": {
-                                        "skills": 0,
-                                        "projectExperience": 0,
-                                        "workContent": 0,
-                                        "educationExperience": 0,
-                                        "softSkills": 0,
-                                        "composite": 0,
-                                    },
-                                    "requirements": [],
-                                    "suggestions": [],
-                                }
-                            )
+                            "content": '{"score":{"skills":0,"projectExperience":0'
                         },
                     }
                 ]
@@ -842,6 +1294,8 @@ async def test_provider_rejects_length_terminated_json_even_if_the_partial_conte
 
     with pytest.raises(ModelOutputInvalid):
         await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
+
+    assert calls == 1
 
 
 @pytest.mark.asyncio

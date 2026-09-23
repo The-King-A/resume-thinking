@@ -135,3 +135,77 @@ async def test_feedback_generation_prompt_requires_the_complete_feedback_contrac
     assert "applied must always be false" in FeedbackClient.instruction
     assert '"suggestedAnswer"' in FeedbackClient.instruction
     assert '"answerComparison"' in FeedbackClient.instruction
+
+
+@pytest.mark.asyncio
+async def test_feedback_binds_model_answer_id_to_the_submitted_answer(monkeypatch):
+    class FeedbackClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def complete_interview_structured(self, *_args, **_kwargs):
+            from app.interview_models import InterviewFeedbackPayload
+            return InterviewFeedbackPayload.model_validate({
+                "feedbackId": "feedback001", "answerId": "answer001", "state": "FEEDBACK_READY",
+                "relevance": "HIGH", "completeness": "MEDIUM", "technicalAccuracy": "HIGH",
+                "factualConsistency": "HIGH", "clarity": "MEDIUM", "evidenceIds": [],
+                "riskFlags": [], "claims": [], "improvementSuggestion": "补充技术取舍。",
+                "suggestedAnswer": "我会说明职责和技术取舍。",
+                "answerComparison": "当前回答说明了职责，还需要补充技术取舍。", "version": 1,
+            })
+
+    job = question_job()
+    job["workType"] = "ANSWER_ANALYSIS"
+    job.pop("questionGeneration")
+    job["answerAnalysis"] = {
+        "answerId": "answer009", "answerText": "我负责 Java 服务开发。",
+        "question": {"questionId": "question001", "questionType": "BASIC_CONFIRMATION", "questionText": "说明职责。", "requirementId": "requirement001", "requirementText": "Java 服务开发", "evidenceIds": ["evidence001"]},
+        "requirement": {"requirementId": "requirement001", "requirementText": "Java 服务开发", "requirementType": "MANDATORY", "matchStatus": "SATISFIED", "gap": None, "evidence": [{"evidenceId": "evidence001", "sourceLocation": "txt:0", "sourceStart": 0, "sourceEnd": 12, "excerpt": "Java services", "strength": "HIGH"}]},
+        "evidence": [{"evidenceId": "evidence001", "sourceLocation": "txt:0", "sourceStart": 0, "sourceEnd": 12, "excerpt": "Java services", "strength": "HIGH"}],
+    }
+    monkeypatch.setattr("app.interview_service.OpenAICompatibleClient", FeedbackClient)
+
+    callback = await analyze_interview_job(job)
+
+    assert callback["outcome"] == "SUCCEEDED"
+    assert callback["feedback"]["answerId"] == "answer009"
+
+
+@pytest.mark.asyncio
+async def test_feedback_discards_model_example_evidence_that_is_not_in_the_submitted_job(monkeypatch):
+    class FeedbackClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def complete_interview_structured(self, *_args, **_kwargs):
+            from app.interview_models import InterviewFeedbackPayload
+            return InterviewFeedbackPayload.model_validate({
+                "feedbackId": "feedback001", "answerId": "answer001", "state": "FEEDBACK_READY",
+                "relevance": "HIGH", "completeness": "MEDIUM", "technicalAccuracy": "HIGH",
+                "factualConsistency": "HIGH", "clarity": "MEDIUM", "evidenceIds": ["evidence001"],
+                "riskFlags": [], "claims": [{"id": "claim001", "claimText": "Java 服务经验",
+                    "state": "SUPPORTED_FACT", "evidenceIds": ["evidence001"], "applied": False}],
+                "improvementSuggestion": "补充技术取舍。", "suggestedAnswer": "说明职责和技术取舍。",
+                "answerComparison": "回答说明了职责，还可以补充取舍。", "version": 1,
+            })
+
+    job = question_job()
+    job["workType"] = "ANSWER_ANALYSIS"
+    job.pop("questionGeneration")
+    job["answerAnalysis"] = {
+        "answerId": "answer009", "answerText": "我负责 Java 服务开发。",
+        "question": {"questionId": "question001", "questionType": "BASIC_CONFIRMATION", "questionText": "说明职责。", "requirementId": "requirement001", "requirementText": "Java 服务开发", "evidenceIds": ["evidence009"]},
+        "requirement": {"requirementId": "requirement001", "requirementText": "Java 服务开发", "requirementType": "MANDATORY", "matchStatus": "SATISFIED", "gap": None, "evidence": [{"evidenceId": "evidence009", "sourceLocation": "txt:0", "sourceStart": 0, "sourceEnd": 12, "excerpt": "Java services", "strength": "HIGH"}]},
+        "evidence": [{"evidenceId": "evidence009", "sourceLocation": "txt:0", "sourceStart": 0, "sourceEnd": 12, "excerpt": "Java services", "strength": "HIGH"}],
+    }
+    monkeypatch.setattr("app.interview_service.OpenAICompatibleClient", FeedbackClient)
+
+    callback = await analyze_interview_job(job)
+
+    assert callback["outcome"] == "SUCCEEDED"
+    assert callback["feedback"]["answerId"] == "answer009"
+    assert callback["feedback"]["evidenceIds"] == []
+    assert callback["feedback"]["claims"] == [{
+        "id": "claim001", "claimText": "Java 服务经验", "state": "NEEDS_USER_CONFIRMATION",
+        "evidenceIds": [], "applied": False,
+    }]

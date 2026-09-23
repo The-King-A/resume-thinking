@@ -77,6 +77,19 @@ describe('MatchResultView task lifecycle', () => {
     expect(wrapper.text()).not.toContain('结果尚未就绪')
   })
 
+  it('stops polling after a bounded result-not-ready window for a terminal task', async () => {
+    lifecycleApi.getMatchTask.mockResolvedValue({ id: 'task001', state: 'SUCCEEDED', resultAvailable: true })
+    lifecycleApi.getMatchResult.mockRejectedValue(new ApiError({ code: 'TASK_NOT_READY', message: 'private backend detail', correlationId: 'c', retryable: true }, 409))
+    const wrapper = mount(MatchResultView, { global: { stubs: { RouterLink: true, MatchEvidenceTable: true } } })
+    await flushPromises()
+
+    await vi.advanceTimersByTimeAsync(120000)
+    await flushPromises()
+
+    expect(lifecycleApi.getMatchResult.mock.calls.length).toBeLessThanOrEqual(10)
+    expect(wrapper.text()).toContain('报告数据尚未同步')
+  })
+
   it('shows archived state on a 410 TASK_GONE', async () => {
     lifecycleApi.getMatchTask.mockRejectedValue(new ApiError({ code: 'TASK_GONE', message: 'private backend detail', correlationId: 'c', retryable: false }, 410))
     const wrapper = mount(MatchResultView, { global: { stubs: { RouterLink: true, MatchEvidenceTable: true } } })

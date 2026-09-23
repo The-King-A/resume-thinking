@@ -58,19 +58,19 @@ def test_local_runtime_environment_does_not_override_explicit_process_settings(t
 
 
 def test_model_read_timeout_is_separate_from_callback_timeout(monkeypatch):
-    monkeypatch.setenv("PYTHON_MODEL_READ_TIMEOUT", "300")
+    monkeypatch.delenv("PYTHON_MODEL_READ_TIMEOUT", raising=False)
     monkeypatch.delenv("PYTHON_MODEL_MAX_TOKENS", raising=False)
     monkeypatch.delenv("PYTHON_MODEL_THINKING", raising=False)
     config = Settings()
     assert config.read_timeout == 30
-    assert config.model_read_timeout == 300
+    assert config.model_read_timeout == 900
     assert config.model_max_tokens == 8192
     assert config.model_thinking == "auto"
 
 
 @pytest.mark.parametrize(
     "raw,expected",
-    [("not-a-number", 300), ("0", 1), ("10000", 900), ("nan", 300)],
+    [("not-a-number", 900), ("0", 1), ("10000", 900), ("nan", 900)],
 )
 def test_model_read_timeout_env_is_bounded_without_startup_failure(monkeypatch, raw, expected):
     monkeypatch.setenv("PYTHON_MODEL_READ_TIMEOUT", raw)

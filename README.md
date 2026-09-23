@@ -104,11 +104,15 @@ FastAPI 在未显式设置进程环境变量时，会从仓库根目录 `.env` �
 密钥和其他 `.env` 内容不会被 Python 导入。修改这些值后必须重启 Python 进程；
 如果 Java 服务已经在运行，也要重启 Java 服务，使新的任务交接和回调代码生效。
 
-对于 DeepSeek v4 等默认启用思考过程的模型，Python 在 `PYTHON_MODEL_THINKING=auto`
-时会显式关闭思考模式，优先保证结构化 JSON 快速返回；如需启用思考，请设置
-`PYTHON_MODEL_THINKING=enabled`，并让 `PYTHON_MODEL_MAX_TOKENS` 覆盖思考和最终 JSON
-的总输出预算，建议从 `100000` 开始并按所选模型上限调小。Python 客户端会拒绝
-`finish_reason=length` 的不完整响应，不会把截断 JSON 当成成功结果。
+对于 DeepSeek 官方 `deepseek-flash`、`deepseek-v4-flash`（兼容别名）和
+`deepseek-v4-pro` 模型，Python 会保留配置中的精确模型名，不会把 Pro 静默降级为
+Flash。由于官方思考模式默认开启，`PYTHON_MODEL_THINKING=auto` 会对这些结构化请求显式发送
+`thinking: {"type":"disabled"}`，并保留配置的输出预算，避免推理 token 抢占 JSON 报告空间。
+如需显式启用思考，请设置 `PYTHON_MODEL_THINKING=enabled`，并让
+`PYTHON_MODEL_MAX_TOKENS` 覆盖思考和最终 JSON 的总输出预算，按所选模型上限调小。
+Python 日志只记录请求模型、响应模型、完成原因和 usage 等元数据，可据此核对实际调用与计费模型，
+不会记录 API Key、简历正文或回答内容。客户端会拒绝 `finish_reason=length` 的不完整响应，
+不会把截断 JSON 当成成功结果。
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir back\python --host 127.0.0.1 --port 8000
