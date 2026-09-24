@@ -113,7 +113,9 @@ Flash。`PYTHON_MODEL_THINKING=auto` 会让 Flash 与旧版 v4-flash 别名使�
 `PYTHON_MODEL_MAX_TOKENS` 覆盖思考和最终 JSON 的总输出预算，按所选模型上限调小。
 
 千问AI平台的 OpenAI 兼容地址使用
-`https://maas.qianwenaiapi.com/compatible-mode/v1`。对于 Qwen3.8、Qwen3.7、
+`https://maas.qianwenaiapi.com/compatible-mode/v1`。当前已支持并验证
+`qwen3.8-flash` 和 `qwen3.8-max` 两个 Qwen3.8 模型，二者均可完成匹配报告、
+面试题生成和回答分析的完整流程。对于 Qwen3.8、Qwen3.7、
 Qwen3.6、Qwen3.5、Qwen3 及平台直供的兼容思考模型，`PYTHON_MODEL_THINKING=auto`
 会发送官方要求的顶层 `enable_thinking=false`，保证匹配报告、面试题和回答分析使用稳定的
 非思考 JSON 输出；但 `qwen3.8-flash` 按官方结构化输出要求使用顶层
