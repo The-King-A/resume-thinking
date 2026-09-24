@@ -280,6 +280,36 @@ async def test_valid_model_evidence_range_rebuilds_provider_excerpt(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_qwen_flash_retries_when_first_evidence_candidate_fails_local_validation(monkeypatch):
+    calls = 0
+
+    class RetryClient(CapturingClient):
+        async def complete_structured(self, request, correction_instruction=None):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return AnalysisResult.model_validate({
+                    "score": {"skills": 0.8, "projectExperience": 0, "workContent": 0, "educationExperience": 0, "softSkills": 0, "composite": 0.32},
+                    "requirements": [{
+                        "requirementId": "requirement001", "jobRequirementText": "Java backend", "requirementType": "MANDATORY",
+                        "matchStatus": "SATISFIED", "matchType": "EXACT", "component": "SKILLS", "componentScore": 0.8,
+                        "evidence": [{"evidenceId": request.evidence[0].evidence_id, "sourceStart": 0, "sourceEnd": 99, "excerpt": "invalid", "confidence": 0.9}],
+                        "evidenceStrength": "HIGH", "gap": None, "suggestionState": "NEEDS_USER_CONFIRMATION",
+                    }], "suggestions": [],
+                })
+            return await MisquotedEvidenceClient().complete_structured(request)
+
+    monkeypatch.setattr("app.analysis_service.OpenAICompatibleClient", RetryClient)
+    job = _job("Java backend", 0, 12)
+    job["provider"] = {"baseUrl": "https://maas.qianwenaiapi.com/compatible-mode/v1", "model": "qwen3.8-flash", "apiKey": "fixture-api-secret-123"}
+
+    callback = await analyze_job(job)
+
+    assert callback["outcome"] == "SUCCEEDED"
+    assert calls == 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "start,end",
     [(0, 99), (12, 13)],

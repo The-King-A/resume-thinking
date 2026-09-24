@@ -507,6 +507,240 @@ async def test_qwen_compatible_endpoint_keeps_existing_auto_request_shape(monkey
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["qwen3.8-max"])
+async def test_qwen_mixed_thinking_model_auto_disables_thinking_for_structured_matching(monkeypatch, model):
+    seen = {}
+
+    async def handler(request):
+        seen["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": "{\"score\":{\"skills\":0,\"projectExperience\":0,\"workContent\":0,\"educationExperience\":0,\"softSkills\":0,\"composite\":0},\"requirements\":[],\"suggestions\":[]}"
+                    },
+                }],
+            },
+        )
+
+    monkeypatch.setattr(settings, "model_max_tokens", 100000)
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://maas.qianwenaiapi.com/compatible-mode/v1", "model": model, "apiKey": "fixture-api-secret-123"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
+
+    assert seen["payload"]["model"] == model
+    assert seen["payload"]["enable_thinking"] is False
+    assert "thinking" not in seen["payload"]
+    assert seen["payload"]["max_tokens"] == 8192
+    assert seen["payload"]["temperature"] == 0
+
+
+@pytest.mark.asyncio
+async def test_qwen_mixed_thinking_model_auto_disables_thinking_for_interview_feedback(monkeypatch):
+    seen = {}
+    feedback = {
+        "feedbackId": "feedback001",
+        "answerId": "answer001",
+        "state": "FEEDBACK_READY",
+        "relevance": "HIGH",
+        "completeness": "MEDIUM",
+        "technicalAccuracy": "HIGH",
+        "factualConsistency": "HIGH",
+        "clarity": "MEDIUM",
+        "evidenceIds": [],
+        "riskFlags": [],
+        "claims": [],
+        "improvementSuggestion": "补充技术取舍。",
+        "suggestedAnswer": "我会说明职责和技术取舍。",
+        "answerComparison": "当前回答说明了职责，还需要补充技术取舍。",
+        "version": 1,
+    }
+
+    async def handler(request):
+        seen["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(feedback, ensure_ascii=False)}}]},
+        )
+
+    monkeypatch.setattr(settings, "model_max_tokens", 100000)
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://maas.qianwenaiapi.com/compatible-mode/v1", "model": "qwen3.8-max", "apiKey": "fixture-api-secret-123"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.complete_interview_structured(
+        "Return exactly one interview JSON object.", {"answerId": "answer001"}, InterviewFeedbackPayload,
+    )
+
+    assert result.answer_id == "answer001"
+    assert seen["payload"]["enable_thinking"] is False
+    assert seen["payload"]["max_tokens"] == 8192
+    assert seen["payload"]["temperature"] == 0
+
+
+def _qwen_stream_response(content: str) -> httpx.Response:
+    events = [
+        {"model": "qwen3.8-flash", "choices": [{"index": 0, "delta": {"reasoning_content": "reasoning"}, "finish_reason": None}]},
+        {"model": "qwen3.8-flash", "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}]},
+        {"model": "qwen3.8-flash", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}},
+    ]
+    body = "".join(f"data: {json.dumps(event, ensure_ascii=False)}\n\n" for event in events) + "data: [DONE]\n\n"
+    return httpx.Response(200, content=body.encode("utf-8"), headers={"content-type": "text/event-stream"})
+
+
+@pytest.mark.asyncio
+async def test_qwen38_flash_auto_uses_official_thinking_stream_for_structured_matching(monkeypatch):
+    seen = {}
+    content = "{\"score\":{\"skills\":0,\"projectExperience\":0,\"workContent\":0,\"educationExperience\":0,\"softSkills\":0,\"composite\":0},\"requirements\":[],\"suggestions\":[]}"
+
+    async def handler(request):
+        seen["payload"] = json.loads(request.content)
+        return _qwen_stream_response(content)
+
+    monkeypatch.setattr(settings, "model_max_tokens", 100000)
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://maas.qianwenaiapi.com/compatible-mode/v1", "model": "qwen3.8-flash", "apiKey": "fixture-api-secret-123"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
+
+    assert result.score.composite == 0
+    assert seen["payload"]["enable_thinking"] is True
+    assert seen["payload"]["stream"] is True
+    assert seen["payload"]["max_tokens"] == 32768
+    assert "temperature" not in seen["payload"]
+
+
+@pytest.mark.asyncio
+async def test_qwen38_flash_auto_uses_official_thinking_stream_for_interview_feedback(monkeypatch):
+    seen = {}
+    feedback = {
+        "feedbackId": "feedback001",
+        "answerId": "answer001",
+        "state": "FEEDBACK_READY",
+        "relevance": "HIGH",
+        "completeness": "MEDIUM",
+        "technicalAccuracy": "HIGH",
+        "factualConsistency": "HIGH",
+        "clarity": "MEDIUM",
+        "evidenceIds": [],
+        "riskFlags": [],
+        "claims": [],
+        "improvementSuggestion": "补充技术取舍。",
+        "suggestedAnswer": "我会说明职责和技术取舍。",
+        "answerComparison": "当前回答说明了职责，还需要补充技术取舍。",
+        "version": 1,
+    }
+
+    async def handler(request):
+        seen["payload"] = json.loads(request.content)
+        return _qwen_stream_response(json.dumps(feedback, ensure_ascii=False))
+
+    monkeypatch.setattr(settings, "model_max_tokens", 100000)
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://maas.qianwenaiapi.com/compatible-mode/v1", "model": "qwen3.8-flash", "apiKey": "fixture-api-secret-123"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.complete_interview_structured(
+        "Return exactly one interview JSON object.", {"answerId": "answer001"}, InterviewFeedbackPayload,
+    )
+
+    assert result.answer_id == "answer001"
+    assert seen["payload"]["enable_thinking"] is True
+    assert seen["payload"]["stream"] is True
+    assert seen["payload"]["max_tokens"] == 32768
+    assert "temperature" not in seen["payload"]
+
+
+@pytest.mark.asyncio
+async def test_qwen_matching_normalizes_provider_requirement_and_suggestion_labels(monkeypatch):
+    content = json.dumps({
+        "score": {"skills": 0, "projectExperience": 0, "workContent": 0, "educationExperience": 0, "softSkills": 0, "composite": 0},
+        "requirements": [{
+            "requirementId": "req001",
+            "jobRequirementText": "Java",
+            "requirementType": "MANDATORY",
+            "matchStatus": "UNMET",
+            "matchType": "NO_MATCH",
+            "component": "SKILLS",
+            "componentScore": 0,
+            "evidence": [],
+            "evidenceStrength": "NONE",
+            "gap": "需要补充证据",
+            "suggestionState": "NEEDS_USER_CONFIRMATION",
+        }],
+        "suggestions": [{
+            "suggestionId": "sug001",
+            "requirementId": "req001",
+            "state": "NEEDS_USER_CONFIRMATION",
+            "proposedText": "请补充可验证的 Java 项目证据。",
+            "evidenceIds": [],
+        }],
+    }, ensure_ascii=False)
+
+    async def handler(request):
+        return _qwen_stream_response(content)
+
+    monkeypatch.setattr(settings, "model_max_tokens", 100000)
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://maas.qianwenaiapi.com/compatible-mode/v1", "model": "qwen3.8-flash", "apiKey": "fixture-api-secret-123"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.complete_structured({"resumeText": "x", "jobDescriptionText": "Java backend requirements", "evidence": []})
+
+    assert result.requirements[0].requirement_id == "requirement001"
+    assert result.suggestions[0].suggestion_id == "suggestion001"
+    assert result.suggestions[0].requirement_id == "requirement001"
+
+
+@pytest.mark.asyncio
+async def test_qwen_matching_rejects_duplicate_provider_requirement_labels(monkeypatch):
+    requirement = {
+        "requirementId": "req001", "jobRequirementText": "Java", "requirementType": "MANDATORY",
+        "matchStatus": "UNMET", "matchType": "NO_MATCH", "component": "SKILLS",
+        "componentScore": 0, "evidence": [], "evidenceStrength": "NONE",
+        "gap": "需要补充证据", "suggestionState": "NEEDS_USER_CONFIRMATION",
+    }
+    content = json.dumps({
+        "score": {"skills": 0, "projectExperience": 0, "workContent": 0, "educationExperience": 0, "softSkills": 0, "composite": 0},
+        "requirements": [requirement, {**requirement, "jobRequirementText": "MySQL"}],
+        "suggestions": [],
+    }, ensure_ascii=False)
+
+    async def handler(_request):
+        return _qwen_stream_response(content)
+
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://maas.qianwenaiapi.com/compatible-mode/v1", "model": "qwen3.8-flash", "apiKey": "fixture-api-secret-123"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ModelOutputInvalid):
+        await client.complete_structured({"resumeText": "x", "jobDescriptionText": "Java and MySQL requirements", "evidence": []})
+
+
+@pytest.mark.asyncio
 async def test_provider_retries_once_when_json_mode_returns_empty_content():
     calls = 0
 
@@ -1011,6 +1245,132 @@ async def test_interview_feedback_normalizes_provider_claim_labels_without_apply
 
 
 @pytest.mark.asyncio
+async def test_qwen_feedback_normalizes_alternate_feedback_shape_safely(monkeypatch):
+    alternate = {
+        "feedbackId": "feedback001",
+        "answerId": "answer001",
+        "state": "READY",
+        "relevance": "HIGH",
+        "completeness": "MEDIUM",
+        "technicalAccuracy": "HIGH",
+        "factualConsistency": "HIGH",
+        "clarity": "MEDIUM",
+        "evidenceIds": [],
+        "riskFlags": ["需要补充技术取舍"],
+        "claims": [{
+            "claimId": "claim001",
+            "text": "模型生成的待确认表述",
+            "supportLevel": "UNVERIFIED",
+            "notes": "需要用户确认",
+        }],
+        "improvementSuggestion": "补充可验证的技术取舍。",
+        "suggestedAnswer": "我会说明职责和技术取舍，并只使用已有事实。",
+        "answerComparison": "当前回答覆盖了职责，但缺少技术取舍。",
+        "version": "1",
+    }
+    seen = {}
+
+    async def handler(request):
+        seen["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(alternate, ensure_ascii=False)}}]},
+        )
+
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://maas.qianwenaiapi.com/compatible-mode/v1", "model": "qwen3.8-max", "apiKey": "fixture-api-secret-123"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.complete_interview_structured(
+        "Return exactly one interview JSON object.", {"answerId": "answer001"}, InterviewFeedbackPayload,
+    )
+
+    assert result.state == "FEEDBACK_READY"
+    assert result.version == 1
+    assert result.risk_flags[0].message == "需要补充技术取舍"
+    assert result.claims[0].claim_text == "模型生成的待确认表述"
+    assert result.claims[0].state == "NEEDS_USER_CONFIRMATION"
+    assert result.claims[0].applied is False
+    assert seen["payload"]["enable_thinking"] is False
+
+
+@pytest.mark.asyncio
+async def test_deepseek_feedback_does_not_accept_qwen_state_alias(monkeypatch):
+    async def handler(_request):
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": json.dumps({
+            "feedbackId": "feedback001", "answerId": "answer001", "state": "READY",
+            "relevance": "HIGH", "completeness": "HIGH", "technicalAccuracy": "HIGH",
+            "factualConsistency": "HIGH", "clarity": "HIGH", "evidenceIds": [],
+            "riskFlags": [], "claims": [], "improvementSuggestion": "补充证据", "version": 1,
+        }, ensure_ascii=False)}}]})
+
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://api.deepseek.com", "model": "deepseek-flash", "apiKey": "fixture-api-secret-123"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ModelOutputInvalid):
+        await client.complete_interview_structured(
+            "Return exactly one interview JSON object.", {"answerId": "answer001"}, InterviewFeedbackPayload,
+        )
+
+
+@pytest.mark.asyncio
+async def test_qwen_feedback_does_not_turn_failed_state_into_ready(monkeypatch):
+    async def handler(_request):
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": json.dumps({
+            "feedbackId": "feedback001", "answerId": "answer001", "state": "FAILED",
+            "relevance": "HIGH", "completeness": "HIGH", "technicalAccuracy": "HIGH",
+            "factualConsistency": "HIGH", "clarity": "HIGH", "evidenceIds": [],
+            "riskFlags": [], "claims": [], "improvementSuggestion": "补充证据", "version": 1,
+        }, ensure_ascii=False)}}]})
+
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://maas.qianwenaiapi.com/compatible-mode/v1", "model": "qwen3.8-max", "apiKey": "fixture-api-secret-123"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ModelOutputInvalid):
+        await client.complete_interview_structured(
+            "Return exactly one interview JSON object.", {"answerId": "answer001"}, InterviewFeedbackPayload,
+        )
+
+
+@pytest.mark.asyncio
+async def test_qwen_flash_accepts_sse_over_one_megabyte_without_exposing_reasoning(monkeypatch):
+    content = "{\"score\":{\"skills\":0,\"projectExperience\":0,\"workContent\":0,\"educationExperience\":0,\"softSkills\":0,\"composite\":0},\"requirements\":[],\"suggestions\":[]}"
+    events = [
+        {"model": "qwen3.8-flash", "choices": [{"index": 0, "delta": {"reasoning_content": "r" * 1200}, "finish_reason": None}]}
+        for _ in range(1000)
+    ]
+    events.extend([
+        {"model": "qwen3.8-flash", "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}]},
+        {"model": "qwen3.8-flash", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+    ])
+    body = "".join(f"data: {json.dumps(event)}\n\n" for event in events) + "data: [DONE]\n\n"
+    assert len(body) > 1024 * 1024
+
+    async def handler(_request):
+        return httpx.Response(200, content=body.encode(), headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(settings, "model_thinking", "auto")
+    monkeypatch.setattr(OpenAICompatibleClient, "_validate_endpoint", staticmethod(lambda _url: None))
+    client = OpenAICompatibleClient(
+        {"baseUrl": "https://maas.qianwenaiapi.com/compatible-mode/v1", "model": "qwen3.8-flash", "apiKey": "fixture-api-secret-123"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.complete_structured({"resumeText": "x", "jobDescriptionText": "y", "evidence": []})
+
+    assert result.score.composite == 0
+
+
+@pytest.mark.asyncio
 async def test_provider_retries_reasoning_length_with_a_larger_budget(monkeypatch):
     calls = 0
     budgets = []
@@ -1430,7 +1790,7 @@ async def test_oversized_provider_response_is_rejected_before_its_unrelated_body
                         }
                     }
                 ],
-                "providerDebug": provider_marker + "x" * 1_048_576,
+                "providerDebug": provider_marker + "x" * (4 * 1_048_576),
             },
         )
 

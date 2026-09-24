@@ -2,12 +2,23 @@ from __future__ import annotations
 
 import hashlib
 from typing import Any
+from urllib.parse import urlsplit
 
 import rfc8785
 
 from .interview_models import InterviewCallback, InterviewFeedbackPayload, InterviewJob, InterviewQuestionSet
 from .openai_compatible import ModelEndpointRejected, ModelOutputInvalid, ModelUnavailable, OpenAICompatibleClient
 from .redaction import redact_text
+
+
+_QWEN_FLASH_INTERVIEW_CORRECTION = """The previous interview JSON was rejected by local validation. Return a new JSON object. Copy each requirementId and requirementText exactly from the supplied requirement context. Every evidenceIds entry must be an evidence ID attached to that same requirement; if unsure, return an empty evidenceIds array. Preserve all four question types and sequences, and return JSON only."""
+
+
+def _is_qwen38_flash_provider(provider) -> bool:
+    return (
+        (urlsplit(provider.base_url).hostname or "").strip().lower().rstrip(".") in {"maas.qianwenaiapi.com", "dashscope.aliyuncs.com"}
+        and provider.model.strip().lower().startswith("qwen3.8-flash")
+    )
 
 QUESTION_INSTRUCTION = """Return exactly one JSON object with this exact shape and no extra fields:
 {"questions":[{"questionId":"question001","sequence":1,"questionType":"BASIC_CONFIRMATION","difficulty":"BASIC","questionText":"...","requirementId":"requirement001","requirementText":"...","evidenceIds":["evidence001"],"generationReason":"...","confidence":0.8}]}
@@ -132,9 +143,21 @@ async def analyze_interview_job(job: InterviewJob | dict[str, Any]) -> dict[str,
     try:
         if parsed.work_type == "QUESTION_GENERATION":
             request = _redact_value(parsed.question_generation.model_dump(by_alias=True, mode="json"))
-            result = await OpenAICompatibleClient(parsed.provider, blocked_secrets=(parsed.callback_token,)).complete_interview_structured(
-                QUESTION_INSTRUCTION, request, InterviewQuestionSet)
-            _validate_question_evidence(result, parsed)
+            client = OpenAICompatibleClient(parsed.provider, blocked_secrets=(parsed.callback_token,))
+            async def complete_questions(correction_instruction: str | None = None):
+                if correction_instruction is None:
+                    return await client.complete_interview_structured(
+                        QUESTION_INSTRUCTION, request, InterviewQuestionSet)
+                return await client.complete_interview_structured(
+                    QUESTION_INSTRUCTION, request, InterviewQuestionSet, correction_instruction)
+            result = await complete_questions()
+            try:
+                _validate_question_evidence(result, parsed)
+            except ModelOutputInvalid:
+                if not _is_qwen38_flash_provider(parsed.provider):
+                    raise
+                result = await complete_questions(_QWEN_FLASH_INTERVIEW_CORRECTION)
+                _validate_question_evidence(result, parsed)
             payload = {**base, "outcome": "SUCCEEDED", "questions": result.model_dump(by_alias=True, mode="json")["questions"]}
         else:
             request = _redact_value(parsed.answer_analysis.model_dump(by_alias=True, mode="json"))

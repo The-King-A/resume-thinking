@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from urllib.parse import urlsplit
 
 import rfc8785
 
@@ -16,6 +17,16 @@ from .openai_compatible import (
 )
 from .redaction import redact_text
 from .matching import composite_score
+
+
+_QWEN_FLASH_EVIDENCE_CORRECTION = """The previous candidate was rejected by local evidence validation. Return one new JSON object. For every evidence reference, copy an exact evidenceId from the supplied evidence and keep sourceStart/sourceEnd strictly inside that same evidence item's supplied range. Do not cite unknown evidence. Every suggestion must reference an existing requirementId and only supplied evidenceIds; if a suggestion cannot satisfy those rules, return no suggestion. Preserve the exact contract and return JSON only."""
+
+
+def _is_qwen38_flash_provider(provider) -> bool:
+    return (
+        (urlsplit(provider.base_url).hostname or "").strip().lower().rstrip(".") in {"maas.qianwenaiapi.com", "dashscope.aliyuncs.com"}
+        and provider.model.strip().lower().startswith("qwen3.8-flash")
+    )
 
 
 def _hash_payload(payload: dict) -> str:
@@ -159,34 +170,45 @@ async def analyze_job(job: AnalysisJob | V3AnalysisJob | dict) -> dict:
             safe_excerpt = _redacted_range(extracted.text, redacted, allowed.source_start, allowed.source_end)
             evidence_payload.append({"evidenceId": str(allowed.evidence_id), "sourceLocation": allowed.source_location, "sourceStart": allowed.source_start, "sourceEnd": allowed.source_end, "excerpt": safe_excerpt})
         request = AnalysisRequest(jobFamily=job.job_family, resumeText=redacted.redacted_text, jobDescriptionText=redacted_job.redacted_text, evidence=evidence_payload)
-        result = await OpenAICompatibleClient(job.provider, blocked_secrets=(job.callback_token,)).complete_structured(request)
-        # Keep the callback boundary safe even when the client implementation
-        # is replaced or a test double returns an unredacted model object.
-        result = AnalysisResult.model_validate(
-            _sanitize_model_value(
-                result.model_dump(by_alias=True, mode="json"),
-                (job.provider.api_key, job.callback_token),
+        client = OpenAICompatibleClient(job.provider, blocked_secrets=(job.callback_token,))
+
+        async def complete_and_validate(correction_instruction: str | None = None) -> AnalysisResult:
+            if correction_instruction is None:
+                result = await client.complete_structured(request)
+            else:
+                result = await client.complete_structured(request, correction_instruction)
+            # Keep the callback boundary safe even when the client implementation
+            # is replaced or a test double returns an unredacted model object.
+            result = AnalysisResult.model_validate(
+                _sanitize_model_value(
+                    result.model_dump(by_alias=True, mode="json"),
+                    (job.provider.api_key, job.callback_token),
+                )
             )
-        )
-        result = _canonicalize_evidence_excerpts(
-            result,
-            extracted.text,
-            redacted,
-            job.allowed_evidence,
-        )
-        allowed_ids = {e.evidence_id for e in job.allowed_evidence}
-        requirement_ids = {req.requirement_id for req in result.requirements}
-        for suggestion in result.suggestions:
-            if suggestion.requirement_id not in requirement_ids or any(eid not in allowed_ids for eid in suggestion.evidence_ids):
-                raise ModelOutputInvalid("model output invalid")
-        expected = composite_score(skills=result.score.skills, projects=result.score.project_experience, work_content=result.score.work_content, education_experience=result.score.education_experience, soft_skills=result.score.soft_skills)
-        # Composite is a deterministic projection of the component scores.
-        # Provider-side rounding or floating-point arithmetic must not turn an
-        # otherwise valid evidence-backed result into a failed task.
-        result = result.model_copy(
-            update={"score": result.score.model_copy(update={"composite": expected})}
-        )
-        result = _renumber_result_ids(result)
+            result = _canonicalize_evidence_excerpts(
+                result,
+                extracted.text,
+                redacted,
+                job.allowed_evidence,
+            )
+            allowed_ids = {e.evidence_id for e in job.allowed_evidence}
+            requirement_ids = {req.requirement_id for req in result.requirements}
+            for suggestion in result.suggestions:
+                if suggestion.requirement_id not in requirement_ids or any(eid not in allowed_ids for eid in suggestion.evidence_ids):
+                    raise ModelOutputInvalid("model output invalid")
+            expected = composite_score(skills=result.score.skills, projects=result.score.project_experience, work_content=result.score.work_content, education_experience=result.score.education_experience, soft_skills=result.score.soft_skills)
+            # Composite is a deterministic projection of the component scores.
+            result = result.model_copy(
+                update={"score": result.score.model_copy(update={"composite": expected})}
+            )
+            return _renumber_result_ids(result)
+
+        try:
+            result = await complete_and_validate()
+        except ModelOutputInvalid:
+            if not _is_qwen38_flash_provider(job.provider):
+                raise
+            result = await complete_and_validate(_QWEN_FLASH_EVIDENCE_CORRECTION)
         callback = {**callback_base, "outcome": "SUCCEEDED", "result": result.model_dump(by_alias=True, mode="json")}
     except UnsupportedFile:
         callback = {**callback_base, "outcome": "FAILED", "errorCode": "UNSUPPORTED_FILE"}

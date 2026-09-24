@@ -111,6 +111,16 @@ Flash。`PYTHON_MODEL_THINKING=auto` 会让 Flash 与旧版 v4-flash 别名使�
 `reasoning_effort: "high"`），并保留配置的输出预算。这样 Pro 的报告、面试题和回答分析都会真正走 Pro 模型。
 如需显式覆盖思考策略，请设置 `PYTHON_MODEL_THINKING=enabled` 或 `disabled`，并让
 `PYTHON_MODEL_MAX_TOKENS` 覆盖思考和最终 JSON 的总输出预算，按所选模型上限调小。
+
+千问AI平台的 OpenAI 兼容地址使用
+`https://maas.qianwenaiapi.com/compatible-mode/v1`。对于 Qwen3.8、Qwen3.7、
+Qwen3.6、Qwen3.5、Qwen3 及平台直供的兼容思考模型，`PYTHON_MODEL_THINKING=auto`
+会发送官方要求的顶层 `enable_thinking=false`，保证匹配报告、面试题和回答分析使用稳定的
+非思考 JSON 输出；但 `qwen3.8-flash` 按官方结构化输出要求使用顶层
+`enable_thinking=true`、`stream=true` 并聚合 SSE 增量。不会把 `enable_thinking` 错误放进 DeepSeek 的 `thinking` 对象。Embedding、
+Rerank、Audio 和 Realtime 模型不是文本对话模型，不能用于本平台的结构化分析流程。
+Qwen 的大证据响应允许更大的受限响应体；若模型首次返回的证据范围或面试题引用未通过本地契约校验，
+Python 只会追加一次纠正请求，不会无限重试。
 Python 日志只记录请求模型、响应模型、完成原因和 usage 等元数据，可据此核对实际调用与计费模型，
 不会记录 API Key、简历正文或回答内容。客户端会拒绝 `finish_reason=length` 的不完整响应，
 不会把截断 JSON 当成成功结果。

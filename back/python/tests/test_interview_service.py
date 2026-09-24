@@ -94,6 +94,41 @@ async def test_question_evidence_must_belong_to_the_selected_requirement(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_qwen_flash_retries_question_generation_when_local_evidence_validation_fails(monkeypatch):
+    calls = 0
+
+    class RetryQuestionClient(QuestionClient):
+        async def complete_interview_structured(self, instruction, payload, model, correction_instruction=None):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return await WrongEvidenceClient().complete_interview_structured(instruction, payload, model)
+            return await super().complete_interview_structured(instruction, payload, model)
+
+    class WrongEvidenceClient(QuestionClient):
+        async def complete_interview_structured(self, *_args, **_kwargs):
+            return InterviewQuestionSet.model_validate({
+                "questions": [
+                    {"questionId": f"question00{index}", "sequence": index, "questionType": question_type,
+                     "difficulty": "BASIC" if index == 1 else "INTERMEDIATE", "questionText": "问题",
+                     "requirementId": "requirement001", "requirementText": "Java 服务开发",
+                     "evidenceIds": ["evidence999"], "generationReason": "核对", "confidence": .9}
+                    for index, question_type in enumerate((
+                        "BASIC_CONFIRMATION", "PROJECT_DEEP_DIVE", "JOB_SCENARIO", "SYNTHESIS_FOLLOW_UP"), 1)
+                ]
+            })
+
+    job = question_job()
+    job["provider"] = {"baseUrl": "https://maas.qianwenaiapi.com/compatible-mode/v1", "model": "qwen3.8-flash", "apiKey": "fixture-api-secret-123"}
+    monkeypatch.setattr("app.interview_service.OpenAICompatibleClient", RetryQuestionClient)
+
+    callback = await analyze_interview_job(job)
+
+    assert callback["outcome"] == "SUCCEEDED"
+    assert calls == 2
+
+
+@pytest.mark.asyncio
 async def test_feedback_generation_prompt_requires_the_complete_feedback_contract(monkeypatch):
     class FeedbackClient:
         instruction = None
