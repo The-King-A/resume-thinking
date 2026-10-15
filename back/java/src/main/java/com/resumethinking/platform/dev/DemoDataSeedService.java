@@ -4,6 +4,9 @@ import com.resumethinking.platform.auth.User;
 import com.resumethinking.platform.auth.UserRepository;
 import com.resumethinking.platform.auth.UserRole;
 import com.resumethinking.platform.crypto.AesGcmCryptoService;
+import com.resumethinking.platform.ids.BusinessIdType;
+import com.resumethinking.platform.ids.InMemoryReadableIdGenerator;
+import com.resumethinking.platform.ids.ReadableIdGenerator;
 import com.resumethinking.platform.resumes.Resume;
 import com.resumethinking.platform.resumes.ResumeAuditRepository;
 import com.resumethinking.platform.resumes.ResumeCache;
@@ -15,6 +18,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,9 +44,12 @@ public class DemoDataSeedService {
     private final ResumeAuditRepository audits;
     private final ResumeCache cache;
     private final Clock clock;
+    private final ReadableIdGenerator ids;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public DemoDataSeedService(UserRepository users, PasswordEncoder passwords, AesGcmCryptoService crypto,
-                               ResumeRepository resumes, ResumeAuditRepository audits, ResumeCache cache, Clock clock) {
+                               ResumeRepository resumes, ResumeAuditRepository audits, ResumeCache cache, Clock clock,
+                               ReadableIdGenerator ids) {
         this.users = users;
         this.passwords = passwords;
         this.crypto = crypto;
@@ -50,6 +57,13 @@ public class DemoDataSeedService {
         this.audits = audits;
         this.cache = cache;
         this.clock = clock;
+        this.ids = ids;
+    }
+
+    /** Test/embedding constructor; production wiring supplies the JDBC generator. */
+    public DemoDataSeedService(UserRepository users, PasswordEncoder passwords, AesGcmCryptoService crypto,
+                               ResumeRepository resumes, ResumeAuditRepository audits, ResumeCache cache, Clock clock) {
+        this(users, passwords, crypto, resumes, audits, cache, clock, new InMemoryReadableIdGenerator());
     }
 
     @Transactional
@@ -63,13 +77,17 @@ public class DemoDataSeedService {
                 new ResumeSpec(RESUME_ADMIN_DELETED, user, "Anonymous local demo resume 4", UserRole.USER, Lifecycle.ADMIN_SOFT_DELETED, admin.getId()),
                 new ResumeSpec(RESUME_ADMIN_ACTIVE, admin, "Anonymous local demo resume 5", UserRole.ADMIN, Lifecycle.ACTIVE, null),
                 new ResumeSpec(RESUME_ADMIN_ARCHIVED, admin, "Anonymous local demo resume 6", UserRole.ADMIN, Lifecycle.ADMIN_CACHE_ARCHIVED, null));
-        for (ResumeSpec spec : specs) verifyExistingResume(spec);
+        // V8 remapped legacy rows by creation time, so a migrated database
+        // can contain these stable demo records under different readable IDs.
+        // Resolve by owner and title before idempotent lifecycle reconciliation.
+        List<ResumeSpec> resolvedSpecs = specs.stream().map(this::resolveExistingId).toList();
+        for (ResumeSpec spec : resolvedSpecs) verifyExistingResume(spec);
 
         if (users.findByUsername("demo_user").isEmpty()) users.save(user);
         if (users.findByUsername("demo_admin").isEmpty()) users.save(admin);
 
         int created = 0;
-        for (ResumeSpec spec : specs) {
+        for (ResumeSpec spec : resolvedSpecs) {
             Optional<Resume> existing = resumes.findById(spec.id());
             if (existing.isPresent()) {
                 reconcileExistingResume(spec, existing.get());
@@ -87,7 +105,34 @@ public class DemoDataSeedService {
             }
             created++;
         }
-        return new SeedResult(created, specs.size() - created);
+        // The deterministic fixture inserts explicit IDs instead of calling
+        // next() for every row. Raise the same durable sequences before the
+        // transaction commits so the next real registration/upload cannot
+        // reuse user001 or resume001. GREATEST semantics preserve migrated
+        // databases whose sequences are already ahead of the fixture.
+        ids.ensureNextAtLeast(BusinessIdType.USER, 3);
+        ids.ensureNextAtLeast(BusinessIdType.RESUME, 7);
+        return new SeedResult(created, resolvedSpecs.size() - created);
+    }
+
+    private ResumeSpec resolveExistingId(ResumeSpec spec) {
+        Optional<Resume> byExpectedId = resumes.findById(spec.id());
+        if (byExpectedId.isPresent() && matchesSpecIdentity(spec, byExpectedId.get())) return spec;
+
+        List<Resume> matches = resumes.findByOwnerIdAndVisibilityStateIn(
+                        spec.owner().getId(), List.of(VisibilityState.values()), PageRequest.of(0, 10_000))
+                .getContent().stream()
+                .filter(resume -> resume.getTitle().equals(spec.title()))
+                .toList();
+        if (matches.size() == 1) return spec.withId(matches.get(0).getId());
+        if (byExpectedId.isPresent() || matches.size() > 1) {
+            throw new IllegalStateException("Conflicting local demo resume");
+        }
+        return spec;
+    }
+
+    private static boolean matchesSpecIdentity(ResumeSpec spec, Resume resume) {
+        return resume.getOwnerId().equals(spec.owner().getId()) && resume.getTitle().equals(spec.title());
     }
 
     private void reconcileExistingResume(ResumeSpec spec, Resume resume) {
@@ -109,7 +154,13 @@ public class DemoDataSeedService {
                 || byUsername.isPresent() && !byUsername.get().getId().equals(byEmail.get().getId())) {
             throw new IllegalStateException("Conflicting local demo account");
         }
-        if (byUsername.isEmpty()) return new User(id, username, email, passwords.encode(password), role);
+        if (byUsername.isEmpty()) {
+            // Never let a fixed demo ID overwrite an unrelated local account.
+            if (users.findById(id).isPresent()) {
+                throw new IllegalStateException("Conflicting local demo account");
+            }
+            return new User(id, username, email, passwords.encode(password), role);
+        }
         User account = byUsername.get();
         if (!account.getEmail().equals(email) || account.getRole() != role || !passwords.matches(password, account.getPasswordHash())) {
             throw new IllegalStateException("Conflicting local demo account");
@@ -166,7 +217,11 @@ public class DemoDataSeedService {
     public record SeedResult(int createdResumeCount, int reusedResumeCount) {}
 
     private record ResumeSpec(String id, User owner, String title, UserRole creatorRole, Lifecycle lifecycle,
-                              String lifecycleActorId) {}
+                              String lifecycleActorId) {
+        ResumeSpec withId(String resolvedId) {
+            return new ResumeSpec(resolvedId, owner, title, creatorRole, lifecycle, lifecycleActorId);
+        }
+    }
 
     private enum Lifecycle {
         ACTIVE(0, VisibilityState.ACTIVE, ""),

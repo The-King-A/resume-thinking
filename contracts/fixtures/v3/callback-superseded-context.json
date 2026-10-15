@@ -1,0 +1,8 @@
+{
+  "taskId": "task001",
+  "currentRevisionId": "revision002",
+  "currentAttempt": 2,
+  "callbackRevisionId": "revision001",
+  "callbackAttempt": 1,
+  "expectedJavaRejection": "STALE_ATTEMPT"
+}

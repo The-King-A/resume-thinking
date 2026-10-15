@@ -9,7 +9,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
-@RestController @RequestMapping("/api/v1/match-tasks")
+@RestController @RequestMapping("/api/v2/match-tasks")
 public class MatchTaskController {
     private final MatchTaskService service;
     public MatchTaskController(MatchTaskService service) { this.service = service; }

@@ -17,6 +17,9 @@ describe('friendlyError', () => {
 
   it('maps task failure codes without exposing the internal code', () => {
     expect(friendlyFailureCode('MODEL_OUTPUT_INVALID')).toBe('模型返回的数据无法解析，请稍后重试。')
+    expect(friendlyFailureCode('PYTHON_SERVICE_UNAVAILABLE')).toBe('分析服务不可用，请确认 Python 分析服务已启动后重试。')
+    expect(friendlyFailureCode('PYTHON_SERVICE_AUTHENTICATION_FAILED')).toBe('分析服务内部授权配置不一致，请检查后重试。')
+    expect(friendlyFailureCode('CALLBACK_DELIVERY_FAILED')).toBe('分析回调超时，可以稍后重新发起匹配。')
     expect(friendlyFailureCode('INTERNAL_ONLY_CODE')).toBe('匹配任务处理失败，请稍后重试。')
     expect(friendlyFailureCode('INTERNAL_ONLY_CODE')).not.toContain('INTERNAL_ONLY_CODE')
   })

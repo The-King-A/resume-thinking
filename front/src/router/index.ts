@@ -2,6 +2,12 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { registerAuthSessionExpiredHandler } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { UserRole } from '../api/contracts'
+import RouteUnavailableView from '../views/RouteUnavailableView.vue'
+
+function retryPath(fullPath: string) {
+  if (!fullPath.startsWith('/') || fullPath.startsWith('//') || fullPath.startsWith('/route-unavailable')) return '/resumes'
+  return fullPath
+}
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -9,8 +15,11 @@ export const router = createRouter({
     { path: '/', redirect: '/resumes' },
     { path: '/login', component: () => import('../views/LoginView.vue'), meta: { guest: true } },
     { path: '/register', component: () => import('../views/RegisterView.vue'), meta: { guest: true } },
+    { path: '/forgot-password', component: () => import('../views/ForgotPasswordView.vue') },
+    { path: '/route-unavailable', name: 'route-unavailable', component: RouteUnavailableView },
     { path: '/profiles', component: () => import('../views/ModelProfilesView.vue'), meta: { requiresAuth: true } },
     { path: '/resumes', component: () => import('../views/ResumeListView.vue'), meta: { requiresAuth: true } },
+    { path: '/resumes/:resumeId/rematch', component: () => import('../views/ResumeRematchView.vue'), meta: { requiresAuth: true } },
     { path: '/match', component: () => import('../views/UploadMatchView.vue'), meta: { requiresAuth: true } },
     { path: '/matches/:taskId', component: () => import('../views/MatchResultView.vue'), meta: { requiresAuth: true } },
     { path: '/recovery', component: () => import('../views/RecoveryView.vue'), meta: { requiresAuth: true } },
@@ -29,6 +38,18 @@ router.beforeEach((to) => {
   if (to.meta.guest && auth.isAuthenticated) return '/profiles'
   const roles = to.meta.roles as UserRole[] | undefined
   if (roles && (!auth.user || !roles.includes(auth.user.role))) return '/resumes'
+})
+
+let recoveringRouteError = false
+router.onError((_error, to) => {
+  if (recoveringRouteError || to.name === 'route-unavailable') return
+  recoveringRouteError = true
+  void router.replace({
+    name: 'route-unavailable',
+    query: { retry: retryPath(to.fullPath) },
+  }).catch(() => undefined).finally(() => {
+    recoveringRouteError = false
+  })
 })
 
 export default router

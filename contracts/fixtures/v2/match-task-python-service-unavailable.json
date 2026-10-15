@@ -1,0 +1,13 @@
+{
+  "id": "task201",
+  "resumeId": "resume201",
+  "llmProfileId": "profile201",
+  "jobFamily": "JAVA_BACKEND",
+  "state": "FAILED",
+  "attempt": 1,
+  "resumeVersion": 0,
+  "failureCode": "PYTHON_SERVICE_UNAVAILABLE",
+  "resultAvailable": false,
+  "createdAt": "2026-09-01T00:00:00Z",
+  "updatedAt": "2026-09-01T00:00:05Z"
+}

@@ -1,7 +1,7 @@
 package com.resumethinking.platform.ids;
 
 public enum BusinessIdType {
-    USER("user"), PROFILE("profile"), RESUME("resume"), TASK("task"),
+    USER("user"), PROFILE("profile"), RESUME("resume"), REVISION("revision"), TASK("task"),
     EVIDENCE("evidence"), RESULT("result"), CALLBACK("callback"), AUDIT("audit");
 
     public final String prefix;

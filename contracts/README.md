@@ -192,6 +192,7 @@ Python 只对传输失败和 Java 5xx 响应重试，并保留原始 `callbackId
 | `VERSION_CONFLICT` | 乐观锁版本已过期。 | 否；请先刷新 |
 | `RESOURCE_NOT_FOUND` | 资源未知或对当前操作者不可见。 | 否 |
 | `RESUME_ARCHIVED` | 执行仅限活动状态的操作前必须先恢复简历。 | 否 |
+| `RESUME_NOT_EFFECTIVE` | 简历尚未完成带证据的有效匹配，不能恢复到有效简历列表。 | 否 |
 | `RESUME_SOFT_DELETED` | 简历已软删除，不能接受请求的操作。 | 否 |
 | `TASK_GONE` | 任务已删除、归档或以其他方式被阻止。 | 否 |
 | `STALE_ATTEMPT` | 回调与任务的当前 `attempt`（尝试次数）不匹配。 | 否 |
@@ -204,6 +205,26 @@ Python 只对传输失败和 Java 5xx 响应重试，并保留原始 `callbackId
 | `TASK_NOT_READY` | 任务尚未产生结果。 | 延迟轮询后可以 |
 
 ## 校验与测试样例
+
+## v3 Effective Resume Lifecycle
+
+`v3` is additive: Java remains the public API boundary while Python receives only
+the internal analysis message. Initial and re-match submissions use multipart
+requests and are restricted to `JAVA_BACKEND`. A resume exposes its effective
+revision and latest successful task as metadata; the match-context endpoint does
+not return resume contents. Internal v3 jobs and callbacks require the same
+`revisionId`, and callbacks remain strict, token-bearing transport messages that
+are never exposed through public API responses. Publication states distinguish
+unrequested, pending, published, and duplicate-title rejection outcomes.
+
+For v3 callbacks, `payloadHash` covers the complete RFC 8785 canonical callback
+after omitting only `payloadHash`; the required `revisionId` remains in the
+canonical body and is therefore hash-bound. The v2 hash representation remains
+unchanged for compatibility.
+
+The v3 fixtures use only synthetic metadata and redacted transport placeholders.
+They do not contain resume contents, provider keys, encrypted values, provider
+diagnostics, or usable callback credentials.
 
 运行当前契约检查：
 

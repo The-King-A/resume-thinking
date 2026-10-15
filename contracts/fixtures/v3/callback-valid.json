@@ -1,0 +1,52 @@
+{
+  "taskId": "task002",
+  "revisionId": "revision002",
+  "attempt": 1,
+  "callbackId": "callback002",
+  "callbackToken": "REDACTED_CALLBACK_TOKEN_NOT_A_VALUE",
+  "payloadHash": "a3bd6496b4dd7216b23eeb9b1e19e728a93e1e604d1390175121c6b55a92b939",
+  "outcome": "SUCCEEDED",
+  "result": {
+    "score": {
+      "skills": 0.9,
+      "projectExperience": 0.8,
+      "workContent": 0.7,
+      "educationExperience": 0.6,
+      "softSkills": 0.7,
+      "composite": 0.795
+    },
+    "requirements": [
+      {
+        "requirementId": "requirement001",
+        "jobRequirementText": "Demonstrate reliable Java service testing practices.",
+        "requirementType": "MANDATORY",
+        "matchStatus": "SATISFIED",
+        "matchType": "EXACT",
+        "component": "SKILLS",
+        "componentScore": 0.9,
+        "evidence": [
+          {
+            "evidenceId": "evidence001",
+            "sourceStart": 0,
+            "sourceEnd": 18,
+            "excerpt": "Synthetic evidence excerpt.",
+            "confidence": 0.95
+          }
+        ],
+        "evidenceStrength": "HIGH",
+        "gap": null,
+        "suggestionState": "SUPPORTED_FACT"
+      }
+    ],
+    "suggestions": [
+      {
+        "suggestionId": "suggestion001",
+        "requirementId": "requirement001",
+        "state": "SUPPORTED_FACT",
+        "proposedText": "Emphasize verified Java service testing.",
+        "evidenceIds": ["evidence001"]
+      }
+    ]
+  },
+  "correlationId": "00000000-0000-4000-8000-000000000102"
+}

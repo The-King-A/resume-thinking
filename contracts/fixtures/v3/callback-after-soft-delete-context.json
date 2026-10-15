@@ -1,0 +1,7 @@
+{
+  "resumeId": "resume006",
+  "resumeStatus": 1,
+  "taskId": "task006",
+  "revisionId": "revision006",
+  "expectedJavaRejection": "TASK_GONE"
+}

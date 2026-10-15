@@ -1,0 +1,7 @@
+{
+  "code": "INVALID_CONFIRMATION",
+  "message": "The deletion confirmation does not match.",
+  "correlationId": "00000000-0000-4000-8000-000000000110",
+  "retryable": false,
+  "detailCode": null
+}

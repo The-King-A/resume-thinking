@@ -14,3 +14,14 @@ front/dist/
 playwright-report/
 test-results/
 contracts/node_modules/
+.idea/
+*.iml
+.vscode/
+database/backups/
+redis/backups/
+*.rdb
+*.aof
+*.dump
+*.bak
+*.log
+coverage/

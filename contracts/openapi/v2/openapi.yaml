@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Resume Matching Platform Java API
-  version: 2.0.0
+  version: 2.1.4
   license:
     name: UNLICENSED
     identifier: LicenseRef-UNLICENSED
@@ -73,7 +73,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/InvalidCredentials'
 
   /api/v2/auth/password-reset:
     post:
@@ -216,6 +216,35 @@ paths:
         '404':
           $ref: '#/components/responses/ResourceNotFound'
 
+  /api/v2/llm-profiles/scan:
+    post:
+      tags: [LLM Profiles]
+      summary: Scan an OpenAI-compatible provider model list without saving a profile
+      operationId: scanLlmProfileModels
+      description: |
+        Validates the endpoint and calls the provider from Java using the write-only key.
+        This operation does not create, update, select, test, or otherwise persist a profile.
+        Provider failures return a safe 200 response with available set to false.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LlmProfileScanRequest'
+      responses:
+        '200':
+          description: Safe provider availability and available model names. Provider failures use available false.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmProfileTestResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
   /api/v2/llm-profiles/{profileId}/test:
     parameters:
       - $ref: '#/components/parameters/ProfileId'
@@ -225,7 +254,7 @@ paths:
       operationId: testLlmProfile
       responses:
         '200':
-          description: Safe connection status and available model names.
+          description: Safe connection status and available model names. Provider failures use available false.
           content:
             application/json:
               schema:
@@ -236,8 +265,6 @@ paths:
           $ref: '#/components/responses/ResourceNotFound'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
-        '503':
-          $ref: '#/components/responses/ModelUnavailable'
 
   /api/v2/resumes:
     get:
@@ -377,7 +404,7 @@ paths:
         '404':
           $ref: '#/components/responses/ResourceNotFound'
         '409':
-          $ref: '#/components/responses/VersionConflict'
+          $ref: '#/components/responses/RestoreConflict'
 
   /api/v2/admin/recovery/resumes:
     get:
@@ -468,7 +495,7 @@ paths:
         '404':
           $ref: '#/components/responses/ResourceNotFound'
         '409':
-          $ref: '#/components/responses/VersionConflict'
+          $ref: '#/components/responses/RestoreConflict'
 
   /api/v2/match-tasks:
     post:
@@ -608,6 +635,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+    InvalidCredentials:
+      description: The supplied username/email or password did not authenticate. This response is identical for an unknown account and an incorrect password.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InvalidCredentialsError'
     Forbidden:
       description: The authenticated actor lacks the required role.
       content:
@@ -633,6 +666,12 @@ components:
             $ref: '#/components/schemas/ApiError'
     VersionConflict:
       description: The optimistic-lock version is stale.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    RestoreConflict:
+      description: The restore conflicts with a stale version, an existing effective resume title, or a resume that has no effective matching version. A duplicate title uses detailCode DUPLICATE_RESUME_TITLE and field title; a resume without any effective matching version uses code RESUME_NOT_EFFECTIVE.
       content:
         application/json:
           schema:
@@ -690,19 +729,24 @@ components:
           enum:
             - VALIDATION_ERROR
             - AUTHENTICATION_REQUIRED
+            - INVALID_CREDENTIALS
             - FORBIDDEN
             - DUPLICATE_RESOURCE
             - INVALID_CONFIRMATION
             - VERSION_CONFLICT
             - RESOURCE_NOT_FOUND
             - RESUME_ARCHIVED
+            - RESUME_NOT_EFFECTIVE
             - RESUME_SOFT_DELETED
             - TASK_GONE
             - STALE_ATTEMPT
             - IDEMPOTENCY_CONFLICT
             - MODEL_UNAVAILABLE
+            - PYTHON_SERVICE_UNAVAILABLE
+            - PYTHON_SERVICE_AUTHENTICATION_FAILED
             - MODEL_OUTPUT_INVALID
             - MODEL_ENDPOINT_REJECTED
+            - CALLBACK_DELIVERY_FAILED
             - UNSUPPORTED_FILE
             - PAYLOAD_TOO_LARGE
             - TASK_NOT_READY
@@ -716,11 +760,22 @@ components:
           format: uuid
         retryable:
           type: boolean
+        detailCode:
+          type: [string, 'null']
+          enum: [DUPLICATE_RESUME_TITLE, null]
         details:
           type: array
           description: Safe validation details without protected content.
           items:
             $ref: '#/components/schemas/ValidationDetail'
+      allOf:
+        - if:
+            required: [detailCode]
+            properties:
+              detailCode: { const: DUPLICATE_RESUME_TITLE }
+          then:
+            properties:
+              code: { const: DUPLICATE_RESOURCE }
     ValidationDetail:
       type: object
       additionalProperties: false
@@ -740,6 +795,14 @@ components:
           properties:
             code:
               const: RESOURCE_NOT_FOUND
+    InvalidCredentialsError:
+      allOf:
+        - $ref: '#/components/schemas/ApiError'
+        - type: object
+          required: [code]
+          properties:
+            code:
+              const: INVALID_CREDENTIALS
     UserRole:
       type: string
       enum: [USER, ADMIN]
@@ -886,6 +949,24 @@ components:
         selected:
           type: boolean
           default: false
+    LlmProfileScanRequest:
+      type: object
+      additionalProperties: false
+      required: [endpointUrl, apiKey]
+      properties:
+        endpointUrl:
+          type: string
+          format: uri
+          minLength: 1
+          maxLength: 2048
+          description: OpenAI-compatible endpoint base URL; private targets are rejected in production.
+        apiKey:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          pattern: '\S'
+          writeOnly: true
+          description: Write-only provider key used only for this transient scan and must contain a non-whitespace character.
     UpdateLlmProfileRequest:
       type: object
       additionalProperties: false
@@ -906,10 +987,9 @@ components:
           maxLength: 200
         apiKey:
           type: string
-          minLength: 1
           maxLength: 4096
           writeOnly: true
-          description: Optional replacement key. Omit it to retain the encrypted key already stored.
+          description: Optional replacement key. Omit it or provide a blank value to retain the encrypted key already stored.
         selected:
           type: boolean
           default: false
@@ -962,6 +1042,10 @@ components:
         diagnostic:
           type: [string, 'null']
           description: Sanitized diagnostic only; never provider secrets or raw response content.
+        diagnosticCode:
+          type: [string, 'null']
+          enum: [INVALID_API_KEY, PROVIDER_FORBIDDEN, PROVIDER_ENDPOINT_NOT_FOUND, PROVIDER_RATE_LIMITED, PROVIDER_UNAVAILABLE, PROVIDER_RESPONSE_INVALID, null]
+          description: Stable safe provider failure code. Null when the connection is available.
     UploadResumeRequest:
       type: object
       additionalProperties: false
@@ -1104,7 +1188,7 @@ components:
           minimum: 0
         failureCode:
           type: [string, 'null']
-          enum: [MODEL_UNAVAILABLE, MODEL_OUTPUT_INVALID, MODEL_ENDPOINT_REJECTED, UNSUPPORTED_FILE, TASK_GONE, STALE_ATTEMPT, null]
+          enum: [MODEL_UNAVAILABLE, PYTHON_SERVICE_UNAVAILABLE, PYTHON_SERVICE_AUTHENTICATION_FAILED, MODEL_OUTPUT_INVALID, MODEL_ENDPOINT_REJECTED, CALLBACK_DELIVERY_FAILED, UNSUPPORTED_FILE, TASK_GONE, STALE_ATTEMPT, null]
         resultAvailable:
           type: boolean
         createdAt:

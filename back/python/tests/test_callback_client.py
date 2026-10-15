@@ -3,12 +3,30 @@ import httpx
 import pytest
 
 from app.callback_client import CallbackClient
-from app.settings import settings
+from app.settings import is_usable_internal_service_token, settings
 
 
 @pytest.fixture(autouse=True)
 def valid_internal_service_token(monkeypatch):
     monkeypatch.setattr(settings, "internal_service_token", "t" * 32)
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "",
+        "t" * 31,
+        "t" * 31 + " ",
+        "t" * 16 + "\t" + "t" * 16,
+        "可" * 32,
+    ],
+)
+def test_internal_service_token_policy_rejects_weak_or_non_header_safe_values(token):
+    assert is_usable_internal_service_token(token) is False
+
+
+def test_internal_service_token_policy_accepts_printable_ascii_at_minimum_length():
+    assert is_usable_internal_service_token("t" * 32) is True
 
 
 @pytest.mark.asyncio
@@ -50,6 +68,18 @@ async def test_callback_stops_on_task_gone():
 
     assert not await CallbackClient(transport=httpx.MockTransport(handler), attempts=3).post("http://127.0.0.1/callback", {})
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_callback_rejects_a_success_http_status_when_java_did_not_accept_the_callback():
+    async def handler(_request):
+        return httpx.Response(200, json={"code": "MODEL_OUTPUT_INVALID", "accepted": False})
+
+    ok = await CallbackClient(transport=httpx.MockTransport(handler), attempts=2).post(
+        "http://127.0.0.1/callback", {"callbackId": "callback001"}
+    )
+
+    assert ok is False
 
 
 @pytest.mark.asyncio

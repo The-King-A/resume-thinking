@@ -1,0 +1,13 @@
+{
+  "id": "task202",
+  "resumeId": "resume202",
+  "llmProfileId": "profile202",
+  "jobFamily": "JAVA_BACKEND",
+  "state": "TIMED_OUT",
+  "attempt": 1,
+  "resumeVersion": 0,
+  "failureCode": "CALLBACK_DELIVERY_FAILED",
+  "resultAvailable": false,
+  "createdAt": "2026-09-01T00:00:00Z",
+  "updatedAt": "2026-09-01T00:05:01Z"
+}

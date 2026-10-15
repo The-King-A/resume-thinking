@@ -171,6 +171,10 @@ The frozen v3 contract contains these protected lifecycle operations:
   the current owner; administrators receive the existing permitted scope.
 - `GET /api/v3/resumes/{resumeId}/match-context`: owner-scoped effective or
   pending candidate metadata used to prefill retry/re-match controls.
+- `DELETE /api/v3/resumes/{resumeId}`: owner-scoped confirmed deletion for an
+  effective or pending candidate, using the existing exact confirmation text
+  and expected-version rule. It blocks pending tasks before commit and never
+  exposes a pending candidate in an effective list.
 
 The v3 `Resume` response includes `effectiveRevisionId`,
 `latestSuccessfulTaskId`, and publication metadata. The latest report action
@@ -220,6 +224,8 @@ Tests must fail first for:
 - an unchanged-document re-match updating the latest report only on success;
 - late callbacks after delete, archive, or supersession being safely blocked;
 - owner/admin report authorization and pending-candidate retry authorization;
+- owner-confirmed deletion of a failed pending candidate and rejection of its
+  later callback;
 - duplicate title races at publication, soft-delete title reuse, and restore
   conflicts; and
 - Chinese list actions, re-match form behavior, report navigation, and top

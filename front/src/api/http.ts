@@ -15,6 +15,14 @@ export const normalizeApiBaseUrl = (value: string | undefined | null) => {
 export const http = axios.create({ baseURL: normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL) })
 export const registerAuthSessionClearer = (clearer: () => void) => { clearSession = clearer }
 export const registerAuthSessionExpiredHandler = (handler: () => void) => { sessionExpired = handler }
+const isLoginRequest = (config: AxiosRequestConfig | undefined) => {
+  if (!config?.url) return false
+  try {
+    return new URL(config.url, config.baseURL ?? DEFAULT_API_BASE_URL).pathname.replace(/\/+$/, '') === '/api/v2/auth/login'
+  } catch {
+    return false
+  }
+}
 export const tokenStorage = {
   get: () => localStorage.getItem(TOKEN_KEY),
   set: (token: string) => localStorage.setItem(TOKEN_KEY, token),
@@ -29,7 +37,7 @@ http.interceptors.response.use(undefined, (error) => {
   const status = error.response?.status ?? 0
   const data = error.response?.data
   if (data && typeof data.code === 'string' && typeof data.message === 'string' && typeof data.correlationId === 'string' && typeof data.retryable === 'boolean') {
-    if (status === 401 && data.code === 'AUTHENTICATION_REQUIRED') {
+    if (status === 401 && data.code === 'AUTHENTICATION_REQUIRED' && !isLoginRequest(error.config ?? error.response?.config)) {
       tokenStorage.clear()
       localStorage.removeItem('resume-matching.identity')
       clearSession?.()

@@ -1,9 +1,14 @@
 package com.resumethinking.platform.dev;
 
 import com.resumethinking.platform.auth.User;
+import com.resumethinking.platform.auth.AuthService;
+import com.resumethinking.platform.auth.JwtService;
+import com.resumethinking.platform.auth.RegisterCommand;
 import com.resumethinking.platform.auth.UserRepository;
 import com.resumethinking.platform.auth.UserRole;
 import com.resumethinking.platform.crypto.AesGcmCryptoService;
+import com.resumethinking.platform.ids.BusinessIdType;
+import com.resumethinking.platform.ids.InMemoryReadableIdGenerator;
 import com.resumethinking.platform.resumes.Resume;
 import com.resumethinking.platform.resumes.ResumeAuditRepository;
 import com.resumethinking.platform.resumes.ResumeCache;
@@ -19,7 +24,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.PageRequest;
@@ -33,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DemoDataSeedServiceTest {
     private static final Instant NOW = Instant.parse("2026-08-28T00:00:00Z");
+    private static final String JWT_KEY = "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=";
     private final InMemoryUserRepository users = new InMemoryUserRepository();
     private final ResumeRepository.InMemory resumes = new ResumeRepository.InMemory();
     private final ResumeAuditRepository.InMemory audits = new ResumeAuditRepository.InMemory();
@@ -147,7 +152,7 @@ class DemoDataSeedServiceTest {
                 userSoftDelete.newVisibilityState(), userSoftDelete.occurredAt(), userSoftDelete.correlationId()));
         int adminSoftDeleteIndex = auditIndex(VisibilityState.ADMIN_SOFT_DELETED);
         ResumeAuditRepository.ResumeLifecycleAudit adminSoftDelete = audits.all().get(adminSoftDeleteIndex);
-        UUID preservedAdminActor = UUID.randomUUID();
+        String preservedAdminActor = "user999";
         assertThat(preservedAdminActor).isNotEqualTo(resume(adminSoftDelete.resumeId()).getSoftDeletedBy());
         audits.all().set(adminSoftDeleteIndex, new ResumeAuditRepository.ResumeLifecycleAudit(
                 adminSoftDelete.resumeId(), preservedAdminActor, adminSoftDelete.action(),
@@ -226,11 +231,44 @@ class DemoDataSeedServiceTest {
         assertThat(cache.events).filteredOn(event -> event.startsWith("evict:")).hasSize(4);
     }
 
+    @Test
+    void advancesReadableSequencesForTheNextRegistrationAndUpload() {
+        var ids = new InMemoryReadableIdGenerator();
+        var freshService = new DemoDataSeedService(users, passwords, crypto, resumes, audits, cache,
+                Clock.fixed(NOW, ZoneOffset.UTC), ids);
+
+        freshService.seed(credentials);
+
+        var auth = new AuthService(users, passwords, new JwtService(JWT_KEY), ids);
+        var registered = auth.register(new RegisterCommand("after-seed", "after-seed@example.test",
+                "after-seed-password", UserRole.USER));
+        assertThat(registered.id()).isEqualTo("user003");
+
+        var lifecycle = new com.resumethinking.platform.resumes.ResumeLifecycleService(
+                resumes, cache, audits, Clock.fixed(NOW, ZoneOffset.UTC),
+                com.resumethinking.platform.resumes.ResumeTaskBlocker.NOOP, ids);
+        var uploaded = lifecycle.upload(registered.id(), UserRole.USER, "after-seed resume",
+                Resume.SourceType.TXT, new byte[]{1, 2, 3}, new byte[12]);
+        assertThat(uploaded.getId()).isEqualTo("resume007");
+    }
+
+    @Test
+    void refusesToOverwriteAnUnrelatedAccountUsingAReservedDemoId() {
+        users.save(new User("user001", "existing", "existing@example.test", "hash", UserRole.USER));
+
+        assertThatThrownBy(() -> service.seed(credentials))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Conflicting local demo account");
+        assertThat(users.findById("user001")).hasValueSatisfying(account ->
+                assertThat(account.getUsername()).isEqualTo("existing"));
+        assertThat(allResumes()).isEmpty();
+    }
+
     private List<Resume> allResumes() {
         return resumes.findByVisibilityStateIn(List.of(VisibilityState.values()), PageRequest.of(0, 20)).getContent();
     }
 
-    private Resume resume(UUID id) {
+    private Resume resume(String id) {
         return resumes.findById(id).orElseThrow();
     }
 
@@ -242,10 +280,10 @@ class DemoDataSeedServiceTest {
     }
 
     private static final class InMemoryUserRepository implements UserRepository {
-        private final Map<UUID, User> values = new HashMap<>();
+        private final Map<String, User> values = new HashMap<>();
 
         @Override public User save(User user) { values.put(user.getId(), user); return user; }
-        @Override public Optional<User> findById(UUID id) { return Optional.ofNullable(values.get(id)); }
+        @Override public Optional<User> findById(String id) { return Optional.ofNullable(values.get(id)); }
         @Override public Optional<User> findByUsername(String username) {
             return values.values().stream().filter(user -> user.getUsername().equals(username)).findFirst();
         }
@@ -255,11 +293,14 @@ class DemoDataSeedServiceTest {
     }
 
     private static final class RecordingCache implements ResumeCache {
-        private final Map<UUID, Resume> values = new HashMap<>();
+        private final Map<String, Resume> values = new HashMap<>();
         private final List<String> events = new ArrayList<>();
 
         @Override public void put(Resume resume) { values.put(resume.getId(), resume); events.add("put:" + resume.getId()); }
-        @Override public void evict(String key) { values.remove(UUID.fromString(key.substring("resume:view:".length()))); events.add("evict:" + key); }
-        @Override public Optional<Resume> get(UUID id) { return Optional.ofNullable(values.get(id)); }
+        @Override public void evict(String key) {
+            values.remove(key);
+            events.add("evict:" + key);
+        }
+        @Override public Optional<Resume> get(String id) { return Optional.ofNullable(values.get(id)); }
     }
 }

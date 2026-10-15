@@ -40,7 +40,7 @@ PowerShell 启动器和可选的 Playwright 生命周期测试。这些检查调
 ## 验证运行
 
 ```powershell
-C:\Users\theking.guo\AppData\Local\Programs\Python\Python311\python.exe -m pytest tests/integration/assert_mvp_flow.py -q
+py -3.11 -m pytest tests/integration/assert_mvp_flow.py -q
 $tokens=$null; $errors=$null
 [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path tests/integration/run_mvp_flow.ps1),[ref]$tokens,[ref]$errors) | Out-Null
 ```

@@ -17,6 +17,7 @@ import java.io.ByteArrayOutputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -25,6 +26,130 @@ class MatchTaskServiceTest {
     private final String userId = TestIds.user();
     private final String resumeId = TestIds.resume();
     private final String profileId = TestIds.profile();
+
+    @Test
+    void v2CompletedTaskAndResultRemainReadableWhileAReplacementRevisionIsPending() {
+        LegacyV2Fixture fixture = legacyV2Fixture("pending-v2-read-01");
+        fixture.task().markSucceeded();
+        fixture.results().save(new AnalysisResult(fixture.task().getId(), fixture.resume().getId(),
+                fixture.task().getRevisionId(), fixture.task().getResumeVersion(),
+                fixture.task().getJobDescriptionText(), null, java.util.List.of(), java.util.List.of(),
+                fixture.now(), "SUCCEEDED", null));
+
+        stageReplacement(fixture, "Updated CV");
+
+        assertThat(fixture.task().getSubmissionFingerprint()).isNull();
+        assertThat(fixture.service().getTask(fixture.task().getId(), userId, UserRole.USER))
+                .isSameAs(fixture.task());
+        assertThat(fixture.service().getResult(fixture.task().getId(), userId, UserRole.USER).revisionId())
+                .isEqualTo(fixture.task().getRevisionId());
+    }
+
+    @Test
+    void v2ProcessingTaskAcceptsCallbackWhileAReplacementRevisionIsPending() {
+        LegacyV2Fixture fixture = legacyV2Fixture("pending-v2-callback-01");
+        String evidenceId = fixture.task().getAllowedEvidence().iterator().next();
+        var reference = new AnalysisCallbackRequest.EvidenceReference(evidenceId, 0, 13,
+                "Java services", .95);
+        var requirement = new AnalysisCallbackRequest.RequirementMatch("requirement901", "Reliable Java delivery",
+                "MANDATORY", "SATISFIED", "EXACT", "SKILLS", .8, java.util.List.of(reference), "HIGH", null,
+                "SUPPORTED_FACT");
+        var result = new AnalysisCallbackRequest.AnalysisResultPayload(
+                new AnalysisCallbackRequest.ScoreBreakdown(.8, .8, .8, .8, .8, .8),
+                java.util.List.of(requirement), java.util.List.of());
+        var callback = new AnalysisCallbackRequest(fixture.task().getId(), fixture.task().getAttempt(),
+                fixture.task().getCallbackId(), fixture.task().callbackTokenForTests(), "", "SUCCEEDED",
+                result, null, UUID.randomUUID()).withComputedPayloadHash();
+
+        stageReplacement(fixture, "Updated CV");
+
+        assertThat(fixture.task().getSubmissionFingerprint()).isNull();
+        assertThat(fixture.service().acceptCallback(callback).code()).isEqualTo("ACCEPTED");
+        assertThat(fixture.task().getState()).isEqualTo(MatchTask.State.SUCCEEDED);
+    }
+
+    @Test
+    void historicalTaskWithoutRevisionStillFallsBackToResumeVersion() {
+        Instant now = Instant.parse("2026-01-01T00:00:00Z");
+        var resumes = new ResumeRepository.InMemory();
+        Resume resume = Resume.active(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER, now, 0L);
+        resumes.save(resume);
+        var tasks = new MatchTaskRepository.InMemory();
+        MatchTask task = new MatchTask(TestIds.task(), resumeId, profileId, userId, resume.getVersion(),
+                "Build reliable software with clear communication and practical testing.",
+                "historical-version-01", "token-token-token-token-token-token", Set.of(), now);
+        tasks.save(task);
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(),
+                new ResumeAuditRepository.InMemory(), Clock.fixed(now, ZoneOffset.UTC)), null, tasks,
+                new PythonAnalysisClient.Noop());
+
+        assertThat(task.getRevisionId()).isNull();
+        assertThat(service.getTask(task.getId(), userId, UserRole.USER)).isSameAs(task);
+
+        ResumeRevision candidate = new ResumeRevision("revision999", resumeId, 1, "Updated CV", "updated cv",
+                Resume.SourceType.TXT, "v1", new byte[]{1}, new byte[12], ResumeRevision.State.PENDING, now);
+        resume.stageRevision(candidate, now);
+        resumes.save(resume);
+
+        assertThatThrownBy(() -> service.getTask(task.getId(), userId, UserRole.USER))
+                .isInstanceOf(TaskGoneException.class);
+    }
+
+    @Test
+    void v2TaskAndSuccessfulResultPersistTheEffectiveRevisionBinding() {
+        Instant now = Instant.parse("2026-01-01T00:00:00Z");
+        var resumes = new ResumeRepository.InMemory();
+        var revisions = new ResumeRevisionRepository.InMemory();
+        var crypto = new com.resumethinking.platform.crypto.AesGcmCryptoService(
+                "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
+        var ids = new com.resumethinking.platform.ids.InMemoryReadableIdGenerator();
+        var lifecycle = new ResumeLifecycleService(resumes, new ResumeCache.Noop(),
+                new ResumeAuditRepository.InMemory(), Clock.fixed(now, ZoneOffset.UTC),
+                ResumeTaskBlocker.NOOP, ids, null, revisions);
+        var encrypted = crypto.encryptBytes("Java services".getBytes(StandardCharsets.UTF_8));
+        Resume resume = lifecycle.upload(userId, UserRole.USER, "CV", Resume.SourceType.TXT,
+                encrypted.ciphertext(), encrypted.nonce());
+        var results = new AnalysisResultRepository.InMemory();
+        var evidence = new AnalysisEvidenceRepository.InMemory();
+        var service = new MatchTaskService(lifecycle, null, new MatchTaskRepository.InMemory(),
+                new PythonAnalysisClient.Noop(), results, new CallbackReceiptRepository.InMemory(), evidence,
+                crypto, null, null, ids, revisions);
+
+        MatchTask task = service.createTask(new CreateMatchTaskCommand(userId, resume.getId(), profileId,
+                "Build reliable software with clear communication and practical testing.",
+                "v2-revision-key-01"));
+        String evidenceId = task.getAllowedEvidence().iterator().next();
+        var reference = new AnalysisCallbackRequest.EvidenceReference(evidenceId, 0, 13,
+                "Java services", .95);
+        var requirement = new AnalysisCallbackRequest.RequirementMatch("requirement901", "Reliable Java delivery",
+                "MANDATORY", "SATISFIED", "EXACT", "SKILLS", .8, java.util.List.of(reference), "HIGH", null,
+                "SUPPORTED_FACT");
+        var result = new AnalysisCallbackRequest.AnalysisResultPayload(
+                new AnalysisCallbackRequest.ScoreBreakdown(.8, .8, .8, .8, .8, .8),
+                java.util.List.of(requirement), java.util.List.of());
+        var callback = new AnalysisCallbackRequest(task.getId(), task.getAttempt(), task.getCallbackId(),
+                task.callbackTokenForTests(), "", "SUCCEEDED", result, null, UUID.randomUUID())
+                .withComputedPayloadHash();
+
+        assertThat(task.getRevisionId()).isEqualTo(resume.getEffectiveRevisionId()).isNotNull();
+        assertThat(service.acceptCallback(callback).code()).isEqualTo("ACCEPTED");
+        assertThat(results.findByTaskId(task.getId()).orElseThrow().revisionId())
+                .isEqualTo(resume.getEffectiveRevisionId()).isNotNull();
+    }
+
+    @Test
+    void compatibilityTaskConstructorsDoNotReuseOneCallbackId() {
+        var first = new MatchTask("task901", resumeId, profileId, userId, 0L,
+                "Build reliable software with clear communication and practical testing.",
+                "compat-key-000001", "token-token-token-token-token-token", Set.of(), Instant.now());
+        var second = new MatchTask("task902", resumeId, profileId, userId, 0L,
+                "Build reliable software with clear communication and practical testing.",
+                "compat-key-000002", "token-token-token-token-token-token", Set.of(), Instant.now());
+
+        assertThat(first.callbackId()).isEqualTo("callback901");
+        assertThat(second.callbackId()).isEqualTo("callback902");
+        assertThat(first.callbackId()).isNotEqualTo(second.callbackId());
+    }
 
     @Test
     void duplicateSubmissionReturnsOriginalTaskForSameOwnerAndIdempotencyKey() {
@@ -43,6 +168,23 @@ class MatchTaskServiceTest {
                 "Build reliable software with clear communication and practical testing.", "same-key-00000001"));
 
         assertThat(second.id()).isEqualTo(first.id());
+    }
+
+    @Test
+    void createTaskUsesManagedInstanceReturnedByJpaSave() {
+        var resumes = new ResumeRepository.InMemory();
+        resumes.save(Resume.active(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER,
+                Instant.parse("2026-01-01T00:00:00Z"), 0L));
+        var tasks = new JpaMergeLikeTasks();
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory(),
+                        Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC)),
+                null, tasks, new PythonAnalysisClient.Noop());
+
+        var task = service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
+                "Build reliable software with clear communication and practical testing.", "jpa-merge-task-0001"));
+
+        assertThat(task.state()).isEqualTo(MatchTask.State.PROCESSING);
+        assertThat(tasks.saveCalls).isEqualTo(3);
     }
     @Test
     void dispatchUsesDecryptedResumeBytesAndBoundedEvidence() throws Exception {
@@ -83,6 +225,43 @@ class MatchTaskServiceTest {
     }
 
     @Test
+    void pythonWorkerDispatchFailureUsesDedicatedPublicTaskFailureCode() {
+        var crypto = new com.resumethinking.platform.crypto.AesGcmCryptoService("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
+        var encrypted = crypto.encrypt("Java\nTesting");
+        var resumes = new ResumeRepository.InMemory();
+        resumes.save(new Resume(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER,
+                encrypted.ciphertext(), encrypted.nonce(), Instant.now(), "v1"));
+        var tasks = new MatchTaskRepository.InMemory();
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()),
+                new TestProfileService(userId, profileId), tasks, new UnavailablePythonClient(),
+                new AnalysisResultRepository.InMemory(), new CallbackReceiptRepository.InMemory(), new AnalysisEvidenceRepository.InMemory(), crypto);
+
+        var task = service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
+                "Build reliable software with clear communication and practical testing.", "python-unavailable-01"));
+
+        assertThat(task.getState()).isEqualTo(MatchTask.State.FAILED);
+        assertThat(task.getFailureCode()).isEqualTo("PYTHON_SERVICE_UNAVAILABLE");
+    }
+
+    @Test
+    void pythonWorkerAuthenticationFailureUsesAConfigurationSpecificTaskFailureCode() {
+        var crypto = new com.resumethinking.platform.crypto.AesGcmCryptoService("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
+        var encrypted = crypto.encrypt("Java\nTesting");
+        var resumes = new ResumeRepository.InMemory();
+        resumes.save(new Resume(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER,
+                encrypted.ciphertext(), encrypted.nonce(), Instant.now(), "v1"));
+        var service = new MatchTaskService(new ResumeLifecycleService(resumes, new ResumeCache.Noop(), new ResumeAuditRepository.InMemory()),
+                new TestProfileService(userId, profileId), new MatchTaskRepository.InMemory(), new AuthenticationRejectedPythonClient(),
+                new AnalysisResultRepository.InMemory(), new CallbackReceiptRepository.InMemory(), new AnalysisEvidenceRepository.InMemory(), crypto);
+
+        var task = service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
+                "Build reliable software with clear communication and practical testing.", "python-auth-failure-01"));
+
+        assertThat(task.getState()).isEqualTo(MatchTask.State.FAILED);
+        assertThat(task.getFailureCode()).isEqualTo("PYTHON_SERVICE_AUTHENTICATION_FAILED");
+    }
+
+    @Test
     void blockedTaskIsGoneFromTaskAndResultReads() {
         var resumes = new ResumeRepository.InMemory();
         var resume = Resume.active(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER, Instant.now(), 0L); resumes.save(resume);
@@ -93,7 +272,7 @@ class MatchTaskServiceTest {
     }
 
     @Test
-    void softDeletedResumeHidesTaskAndResultUntilFreshTaskAfterRestore() {
+    void softDeletedResumeHidesRevisionTaskAndResultOnlyWhileTheResumeIsHidden() {
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
         var resumes = new ResumeRepository.InMemory();
         var resume = Resume.active(resumeId, userId, "CV", Resume.SourceType.TXT, UserRole.USER, now, 0L);
@@ -119,7 +298,8 @@ class MatchTaskServiceTest {
         assertThatThrownBy(() -> service.getTask(task.id(), TestIds.user(), UserRole.ADMIN)).isInstanceOf(TaskGoneException.class);
 
         lifecycle.recover(resumeId, userId, UserRole.USER, resume.getVersion());
-        assertThatThrownBy(() -> service.getResult(task.id(), userId, UserRole.USER)).isInstanceOf(TaskGoneException.class);
+        assertThat(service.getTask(task.id(), userId, UserRole.USER)).isSameAs(task);
+        assertThat(service.getResult(task.id(), userId, UserRole.USER).taskId()).isEqualTo(task.id());
 
         var restoredTask = service.createTask(new CreateMatchTaskCommand(userId, resumeId, profileId,
                 "Build reliable software with clear communication and practical testing.", "soft-read-key-0002"));
@@ -260,6 +440,8 @@ class MatchTaskServiceTest {
         var result = new AnalysisCallbackRequest.AnalysisResultPayload(score, java.util.List.of(), java.util.List.of());
         var callback = new AnalysisCallbackRequest(task.id(), 1, task.callbackId(), task.callbackTokenForTests(), "", "SUCCEEDED", result, null, UUID.randomUUID()).withComputedPayloadHash();
         assertThat(service.acceptCallback(callback).code()).isEqualTo("MODEL_OUTPUT_INVALID");
+        assertThat(task.getState()).isEqualTo(MatchTask.State.FAILED);
+        assertThat(task.getFailureCode()).isEqualTo("MODEL_OUTPUT_INVALID");
     }
 
     @Test
@@ -440,6 +622,78 @@ class MatchTaskServiceTest {
         private InternalAnalysisJob job;
         CapturingClient() { super(URI.create("http://127.0.0.1:1")); }
         @Override public void dispatch(InternalAnalysisJob job) { this.job = job; }
+    }
+
+    private static final class UnavailablePythonClient extends PythonAnalysisClient {
+        UnavailablePythonClient() { super(URI.create("http://127.0.0.1:1")); }
+        @Override public void dispatch(InternalAnalysisJob job) { throw new ServiceUnavailableException(); }
+    }
+
+    private static final class AuthenticationRejectedPythonClient extends PythonAnalysisClient {
+        AuthenticationRejectedPythonClient() { super(URI.create("http://127.0.0.1:1")); }
+        @Override public void dispatch(InternalAnalysisJob job) { throw new InternalAuthenticationException(); }
+    }
+
+    private LegacyV2Fixture legacyV2Fixture(String idempotencyKey) {
+        Instant now = Instant.parse("2026-01-01T00:00:00Z");
+        var resumes = new ResumeRepository.InMemory();
+        var revisions = new ResumeRevisionRepository.InMemory();
+        var tasks = new MatchTaskRepository.InMemory();
+        var results = new AnalysisResultRepository.InMemory();
+        var evidence = new AnalysisEvidenceRepository.InMemory();
+        var ids = new com.resumethinking.platform.ids.InMemoryReadableIdGenerator();
+        var crypto = new com.resumethinking.platform.crypto.AesGcmCryptoService(
+                "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
+        var encrypted = crypto.encryptBytes("Java services".getBytes(StandardCharsets.UTF_8));
+        var lifecycle = new ResumeLifecycleService(resumes, new ResumeCache.Noop(),
+                new ResumeAuditRepository.InMemory(), Clock.fixed(now, ZoneOffset.UTC),
+                ResumeTaskBlocker.NOOP, ids, null, revisions);
+        Resume resume = lifecycle.upload(userId, UserRole.USER, "CV", Resume.SourceType.TXT,
+                encrypted.ciphertext(), encrypted.nonce());
+        var service = new MatchTaskService(lifecycle, null, tasks, new PythonAnalysisClient.Noop(), results,
+                new CallbackReceiptRepository.InMemory(), evidence, crypto, null, null, ids, revisions);
+        MatchTask task = service.createTask(new CreateMatchTaskCommand(userId, resume.getId(), profileId,
+                "Build reliable software with clear communication and practical testing.", idempotencyKey));
+        return new LegacyV2Fixture(now, resume, resumes, revisions, results, service, task);
+    }
+
+    private static void stageReplacement(LegacyV2Fixture fixture, String title) {
+        ResumeRevision candidate = new ResumeRevision("revision999", fixture.resume().getId(), 2, title,
+                ResumeLifecycleService.normalizeTitle(title), Resume.SourceType.TXT, "v1", new byte[]{1},
+                new byte[12], ResumeRevision.State.PENDING, fixture.now());
+        fixture.revisions().save(candidate);
+        fixture.resume().stageRevision(candidate, fixture.now().plusSeconds(1));
+        fixture.resumes().save(fixture.resume());
+    }
+
+    private record LegacyV2Fixture(Instant now, Resume resume, ResumeRepository.InMemory resumes,
+                                   ResumeRevisionRepository.InMemory revisions,
+                                   AnalysisResultRepository.InMemory results, MatchTaskService service,
+                                   MatchTask task) {}
+
+    /** Models Spring Data's merge contract for an assigned string identifier. */
+    private static final class JpaMergeLikeTasks implements MatchTaskRepository {
+        private MatchTask managed;
+        private int saveCalls;
+
+        @Override public MatchTask save(MatchTask task) { return saveAndFlush(task); }
+
+        @Override public MatchTask saveAndFlush(MatchTask task) {
+            saveCalls++;
+            if (managed == null) {
+                managed = new MatchTask(task.getId(), task.getCallbackId(), task.getResumeId(), task.getLlmProfileId(),
+                        task.getCreatorId(), task.getResumeVersion(), task.getJobFamily(), task.getJobDescriptionText(),
+                        task.getIdempotencyKey(), task.callbackTokenForTests(), task.getAllowedEvidence(), task.getCreatedAt());
+                return managed;
+            }
+            if (task != managed) throw new OptimisticLockingFailureException("detached task merge used after version advance");
+            return managed;
+        }
+
+        @Override public Optional<MatchTask> findById(String id) { return Optional.ofNullable(managed); }
+        @Override public Optional<MatchTask> findByCreatorIdAndIdempotencyKey(String owner, String key) { return Optional.empty(); }
+        @Override public Optional<MatchTask> findByIdForUpdate(String id) { return Optional.ofNullable(managed); }
+        @Override public java.util.List<MatchTask> findByResumeIdAndStateInForUpdate(String id, java.util.Collection<MatchTask.State> states) { return java.util.List.of(); }
     }
 
     private static byte[] zipDocument(byte[] xml) throws Exception {

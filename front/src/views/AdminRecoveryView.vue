@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import RecoveryDialog from '../components/RecoveryDialog.vue'
 import { lifecycleApi } from '../api/lifecycle'
-import type { RestoreResumeRequest, Resume } from '../api/contracts'
+import { ApiError, type RestoreResumeRequest, type Resume } from '../api/contracts'
+import { friendlyError, lifecycleMessages } from '../i18n/messages'
+import { showTopNotification } from '../ui/notifications'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
+const router = useRouter()
 const resumes = ref<Resume[]>([])
 const selected = ref<Resume | null>(null)
 const ownerFilter = ref('')
@@ -16,6 +20,27 @@ const page = ref(1)
 const totalPages = ref(1)
 const isAdmin = computed(() => auth.user?.role === 'ADMIN')
 const stateLabel = (state: Resume['visibilityState']) => state.includes('ARCHIVED') ? '已归档' : '已软删除'
+
+function report(message: string, type: 'success' | 'error') {
+  try { showTopNotification(message, type) } catch { /* Notification rendering must not change recovery state. */ }
+}
+
+function restoreError(caught: unknown) {
+  // Older V2 servers may omit the detail code, but a title detail is only
+  // meaningful as a duplicate when the response is the documented 409
+  // duplicate-resource envelope. Do not turn ordinary title validation into
+  // a collision message.
+  if (caught instanceof ApiError && caught.status === 409 && caught.payload.code === 'DUPLICATE_RESOURCE'
+      && (caught.payload.detailCode === 'DUPLICATE_RESUME_TITLE'
+        || caught.payload.details?.some((detail) => detail.field === 'title'))) {
+    return lifecycleMessages.restoreDuplicateTitle
+  }
+  if (caught instanceof ApiError && (caught.code === 'RESUME_NOT_EFFECTIVE'
+      || caught.payload.detailCode === 'RESUME_NOT_EFFECTIVE')) {
+    return lifecycleMessages.resumeNotEffective
+  }
+  return friendlyError(caught, '无法恢复此简历，请刷新页面并确认当前版本。')
+}
 
 async function loadRecoverable(nextPage = page.value) {
   if (auth.user?.role !== 'ADMIN') return
@@ -36,12 +61,27 @@ async function restore(payload: RestoreResumeRequest) {
   restoring.value = true
   error.value = ''
   const id = selected.value.id
+  const title = selected.value.title
+  let restored = false
   try {
     await lifecycleApi.restoreAdminResume(id, payload)
     resumes.value = resumes.value.filter((item) => item.id !== id)
     selected.value = null
-  } catch { error.value = '无法恢复此简历，请刷新页面并确认当前版本。' }
+    restored = true
+  } catch (caught) {
+    error.value = restoreError(caught)
+    report(error.value, 'error')
+  }
   finally { restoring.value = false }
+
+  // Keep navigation failures separate from the restore transaction: a
+  // successful database restore must never be reported as a failed restore.
+  if (restored) {
+    report(`已恢复“${title}”简历。`, 'success')
+    if (router) {
+      try { await Promise.resolve(router.push('/resumes')) } catch { /* The row is already restored; the user can use the link manually. */ }
+    }
+  }
 }
 
 onMounted(loadRecoverable)
@@ -49,7 +89,7 @@ onMounted(loadRecoverable)
 
 <template>
   <main class="workspace">
-      <header class="workspace-header"><div><p class="eyebrow">管理员</p><h1>跨用户恢复</h1><p class="muted">每条管理员可见记录都会显示所属用户信息。</p></div><RouterLink to="/resumes">有效简历</RouterLink></header>
+      <header class="workspace-header"><div><p class="eyebrow">管理员</p><h1>跨用户恢复</h1><p class="muted">每条管理员可见记录都会显示所属用户信息。</p></div><RouterLink class="workspace-command workspace-command-primary" to="/resumes">有效简历</RouterLink></header>
     <section v-if="!isAdmin" class="empty-state" role="alert"><h2>需要管理员权限</h2><p>当前账号无法访问此恢复页面。</p></section>
     <template v-else>
       <form class="filter-bar" @submit.prevent="loadRecoverable(1)"><label>所属用户 ID<input v-model="ownerFilter" placeholder="可选，输入完整的所属用户 ID" /></label><button type="submit" :disabled="loading">筛选</button></form>
@@ -58,7 +98,7 @@ onMounted(loadRecoverable)
       <p v-if="loading" class="status-panel">正在加载管理员恢复记录…</p>
       <section v-else-if="resumes.length" class="record-list" aria-label="管理员恢复记录">
         <article v-for="resume in resumes" :key="resume.id" class="record-row">
-          <div><strong>{{ resume.title }}</strong><span class="owner-context">所属用户：{{ resume.ownerId }}</span><span>{{ stateLabel(resume.visibilityState) }} · {{ resume.sourceType }} · 第 {{ resume.version }} 版</span></div>
+          <div><strong><code class="record-id">{{ resume.id }}</code>{{ resume.title }}</strong><span class="owner-context">所属用户：{{ resume.ownerId }}</span><span>{{ stateLabel(resume.visibilityState) }} · {{ resume.sourceType }} · 第 {{ resume.version }} 版</span></div>
           <button type="button" @click="selected = resume">恢复</button>
         </article>
       </section>

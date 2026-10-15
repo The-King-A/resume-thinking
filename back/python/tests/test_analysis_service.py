@@ -44,6 +44,36 @@ class FailingClient(CapturingClient):
         raise ModelOutputInvalid("provider output invalid")
 
 
+class MisquotedEvidenceClient(CapturingClient):
+    async def complete_structured(self, request):
+        type(self).request = request
+        return AnalysisResult.model_validate({
+            "score": {"skills": 0.8, "projectExperience": 0, "workContent": 0, "educationExperience": 0, "softSkills": 0, "composite": 0.32},
+            "requirements": [{
+                "requirementId": "requirement001",
+                "jobRequirementText": "Java",
+                "requirementType": "MANDATORY",
+                "matchStatus": "SATISFIED",
+                "matchType": "EXACT",
+                "component": "SKILLS",
+                "componentScore": 0.8,
+                "evidence": [{
+                    "evidenceId": request.evidence[0].evidence_id,
+                    "sourceStart": request.evidence[0].source_start,
+                    "sourceEnd": request.evidence[0].source_end,
+                    # Providers sometimes add an ellipsis or normalize
+                    # whitespace even though the range itself is valid.
+                    "excerpt": "Java...",
+                    "confidence": 0.9,
+                }],
+                "evidenceStrength": "HIGH",
+                "gap": None,
+                "suggestionState": "NEEDS_USER_CONFIRMATION",
+            }],
+            "suggestions": [],
+        })
+
+
 def _job(text: str, start: int, end: int, location: str = "txt:0"):
     return {
         "taskId": "task001", "callbackId": "callback001", "attempt": 1, "resumeVersion": 0, "sourceType": "TXT",
@@ -166,11 +196,11 @@ async def test_evidence_source_location_must_match(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_composite_score_must_match_frozen_weights(monkeypatch):
+async def test_composite_score_is_recomputed_from_frozen_weights(monkeypatch):
     monkeypatch.setattr("app.analysis_service.OpenAICompatibleClient", WrongCompositeClient)
     callback = await analyze_job(_job("alpha", 0, 5))
-    assert callback["outcome"] == "FAILED"
-    assert callback["errorCode"] == "MODEL_OUTPUT_INVALID"
+    assert callback["outcome"] == "SUCCEEDED"
+    assert callback["result"]["score"]["composite"] == 0
 
 
 @pytest.mark.asyncio
@@ -235,6 +265,38 @@ async def test_model_evidence_must_have_non_empty_range_and_rebuilt_excerpt(monk
             })
     monkeypatch.setattr("app.analysis_service.OpenAICompatibleClient", InvalidEvidenceClient)
     callback = await analyze_job(_job("alpha", 0, 5))
+    assert callback["outcome"] == "FAILED"
+    assert callback["errorCode"] == "MODEL_OUTPUT_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_valid_model_evidence_range_rebuilds_provider_excerpt(monkeypatch):
+    monkeypatch.setattr("app.analysis_service.OpenAICompatibleClient", MisquotedEvidenceClient)
+
+    callback = await analyze_job(_job("Java backend", 0, 12))
+
+    assert callback["outcome"] == "SUCCEEDED"
+    assert callback["result"]["requirements"][0]["evidence"][0]["excerpt"] == "Java backend"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "start,end",
+    [(0, 99), (12, 13)],
+)
+async def test_invalid_model_evidence_range_remains_rejected(monkeypatch, start, end):
+    class InvalidRangeClient(MisquotedEvidenceClient):
+        async def complete_structured(self, request):
+            result = await super().complete_structured(request)
+            payload = result.model_dump(by_alias=True, mode="json")
+            payload["requirements"][0]["evidence"][0]["sourceStart"] = start
+            payload["requirements"][0]["evidence"][0]["sourceEnd"] = end
+            return AnalysisResult.model_validate(payload)
+
+    monkeypatch.setattr("app.analysis_service.OpenAICompatibleClient", InvalidRangeClient)
+
+    callback = await analyze_job(_job("Java backend", 0, 12))
+
     assert callback["outcome"] == "FAILED"
     assert callback["errorCode"] == "MODEL_OUTPUT_INVALID"
 

@@ -1,0 +1,12 @@
+{
+  "code": "RESUME_NOT_EFFECTIVE",
+  "message": "The resume has no effective matching version.",
+  "correlationId": "00000000-0000-4000-8000-000000000111",
+  "retryable": false,
+  "details": [
+    {
+      "field": "resumeId",
+      "reason": "The resume cannot be restored until an effective version exists."
+    }
+  ]
+}

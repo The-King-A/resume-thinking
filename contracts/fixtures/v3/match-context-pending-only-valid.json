@@ -1,0 +1,8 @@
+{
+  "title": "Fixture pending resume",
+  "effectiveRevisionId": null,
+  "pendingRevisionId": "revision003",
+  "latestSuccessfulTaskId": null,
+  "llmProfileId": "profile002",
+  "jobDescriptionText": "Maintain safe Java integrations with deterministic callback handling."
+}

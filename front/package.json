@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
+    "test": "vitest run",
+    "test:browser": "playwright test",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@iarna/toml": "^2.2.5",
     "axios": "^1.20.0",
     "element-plus": "^2.14.5",
     "pinia": "^4.0.3",

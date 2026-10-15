@@ -54,4 +54,23 @@ class ReadableIdGeneratorTest {
             pool.shutdownNow();
         }
     }
+
+    @Test
+    void canRaiseTheNextValueWithoutRewindingAnExistingSequence() {
+        ReadableIdGenerator generator = new InMemoryReadableIdGenerator();
+
+        generator.ensureNextAtLeast(BusinessIdType.USER, 7);
+        assertThat(generator.next(BusinessIdType.USER)).isEqualTo("user007");
+
+        generator.ensureNextAtLeast(BusinessIdType.USER, 2);
+        assertThat(generator.next(BusinessIdType.USER)).isEqualTo("user008");
+    }
+
+    @Test
+    void validatesRevisionBusinessIds() {
+        ReadableIdGenerator.validate(BusinessIdType.REVISION, "revision001");
+
+        assertThat(new InMemoryReadableIdGenerator().next(BusinessIdType.REVISION))
+                .isEqualTo("revision001");
+    }
 }

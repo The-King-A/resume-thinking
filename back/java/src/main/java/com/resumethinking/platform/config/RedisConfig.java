@@ -11,11 +11,16 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import java.time.Clock;
 import java.time.Duration;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.data.redis.core.ScanOptions;
+import org.springframework.data.redis.core.Cursor;
 
 @Configuration
 public class RedisConfig {
     @Bean public Clock clock(){ return Clock.systemUTC(); }
     @Bean public ResumeCache resumeCache(RedisTemplate<String,Object> template, Clock clock){ return new RedisResumeCache(template,clock); }
+    @Bean public ApplicationRunner legacyResumeCacheCleanup(ResumeCache cache){ return arguments -> cache.clearLegacyKeys(); }
     static final class RedisResumeCache implements ResumeCache {
         private final RedisTemplate<String,Object> template; private final Clock clock;
         RedisResumeCache(RedisTemplate<String,Object> template, Clock clock){this.template=template;this.clock=clock;}
@@ -23,9 +28,21 @@ public class RedisConfig {
             if (resume.getVisibilityState()!=VisibilityState.ACTIVE || resume.getVisibleUntil()==null) return;
             Duration ttl=Duration.between(clock.instant(),resume.getVisibleUntil());
             if (ttl.isZero() || ttl.isNegative()) return;
-            template.opsForValue().set("resume:view:"+resume.getId(), ResumeView.from(resume), ttl);
+            template.opsForValue().set(ResumeCache.key(resume.getId()), ResumeView.from(resume), ttl);
         }
-        public void evict(String key){ template.delete(key); }
+        public void evict(String resumeId){ template.delete(ResumeCache.key(resumeId)); }
+        public void clearLegacyKeys(){
+            try {
+                template.execute((RedisCallback<Void>) connection -> {
+                    try (Cursor<byte[]> cursor = connection.scan(ScanOptions.scanOptions().match(ResumeCache.LEGACY_KEY_PATTERN).count(100).build())) {
+                        while (cursor.hasNext()) connection.keyCommands().del(cursor.next());
+                    }
+                    return null;
+                });
+            } catch (RuntimeException ignored) {
+                // Redis is derived storage; cleanup must not block a durable application start.
+            }
+        }
     }
     @Bean public RedisTemplate<String,Object> redisTemplate(org.springframework.data.redis.connection.RedisConnectionFactory factory, ObjectMapper objectMapper){
         RedisTemplate<String,Object> t=new RedisTemplate<>(); t.setConnectionFactory(factory); t.setKeySerializer(new StringRedisSerializer()); t.setHashKeySerializer(new StringRedisSerializer());

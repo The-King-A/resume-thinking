@@ -1,6 +1,8 @@
 package com.resumethinking.platform.matching;
 import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.resumethinking.platform.ids.BusinessIdType;
+import com.resumethinking.platform.ids.ReadableIdGenerator;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -12,10 +14,13 @@ final class CallbackPayloadHash {
 
  static String compute(AnalysisCallbackRequest request) {
   try {
+   if (request == null || request.callbackToken() == null || request.outcome() == null || request.correlationId() == null) {
+    throw new IllegalArgumentException("callback envelope is incomplete");
+   }
    ObjectNode object = MAPPER.createObjectNode();
-   object.put("taskId", request.taskId().toString());
+   object.put("taskId", requireBusinessId(BusinessIdType.TASK, request.taskId()));
    object.put("attempt", request.attempt());
-   object.put("callbackId", request.callbackId().toString());
+   object.put("callbackId", requireBusinessId(BusinessIdType.CALLBACK, request.callbackId()));
    object.put("callbackToken", request.callbackToken());
    object.put("outcome", request.outcome());
    object.put("correlationId", request.correlationId().toString());
@@ -27,6 +32,13 @@ final class CallbackPayloadHash {
   } catch (Exception e) {
    throw new IllegalArgumentException("VALIDATION_ERROR", e);
   }
+ }
+
+ private static String requireBusinessId(BusinessIdType type, String value) {
+  if (!ReadableIdGenerator.isValid(type, value)) {
+   throw new IllegalArgumentException("invalid " + type.prefix + " business id");
+  }
+  return value;
  }
 
  private static String canonicalize(JsonNode node) {

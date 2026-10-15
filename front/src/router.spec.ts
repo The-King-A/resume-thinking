@@ -27,9 +27,24 @@ describe('authentication expiry navigation', () => {
   })
 
   it('registers the resume lifecycle routes', () => {
-    for (const path of ['/resumes', '/match', '/matches/task001', '/recovery', '/admin/recovery']) {
+    for (const path of ['/resumes', '/match', '/resumes/resume001/rematch', '/matches/task001', '/recovery', '/admin/recovery', '/forgot-password']) {
       expect(router.resolve(path).matched.length).toBeGreaterThan(0)
     }
+  })
+
+  it('loads the re-match route for an authenticated user', async () => {
+    await router.push('/resumes/resume001/rematch')
+    expect(router.currentRoute.value.path).toBe('/resumes/resume001/rematch')
+  })
+
+  it('keeps password recovery accessible to an active local session', async () => {
+    await router.push('/forgot-password')
+    expect(router.currentRoute.value.path).toBe('/forgot-password')
+  })
+
+  it('keeps login guest-only for an active local session', async () => {
+    await router.push('/login')
+    expect(router.currentRoute.value.path).toBe('/profiles')
   })
 
   it('redirects a USER away from administrator recovery', async () => {

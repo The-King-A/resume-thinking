@@ -3,8 +3,9 @@ export type UserRole = 'USER' | 'ADMIN'
 export interface User { id: string; username: string; email: string; role: UserRole; createdAt: string }
 export interface RegisterRequest { username: string; email: string; password: string; role: UserRole }
 export interface LoginRequest { identifier: string; password: string }
+export interface PasswordResetRequest { identifier: string; newPassword: string }
 export interface AuthResponse { accessToken: string; tokenType: 'Bearer'; expiresIn: number; user: User }
-export interface ApiErrorPayload { code: string; message: string; correlationId: string; retryable: boolean; details?: Array<{ field: string; reason: string }> }
+export interface ApiErrorPayload { code: string; message: string; correlationId: string; retryable: boolean; detailCode?: string | null; details?: Array<{ field: string; reason: string }> }
 export class ApiError extends Error {
   readonly payload: ApiErrorPayload
   readonly status: number
@@ -12,9 +13,16 @@ export class ApiError extends Error {
   get code() { return this.payload.code }
 }
 export interface CreateLlmProfileRequest { displayName: string; endpointUrl: string; modelName: string; apiKey: string; selected?: boolean }
+export interface LlmProfileScanRequest { endpointUrl: string; apiKey: string }
 export interface UpdateLlmProfileRequest { displayName: string; endpointUrl: string; modelName: string; apiKey?: string; selected?: boolean }
 export interface LlmProfile { id: string; displayName: string; endpointUrl: string; modelName: string; hasApiKey: boolean; selected: boolean; lastTestStatus?: 'SUCCEEDED' | 'FAILED' | null; lastTestedAt?: string | null; createdAt: string; updatedAt: string }
-export interface LlmProfileTestResponse { available: boolean; testedAt: string; models?: string[]; diagnostic?: string | null }
+export interface LlmProfileTestResponse {
+  available: boolean
+  testedAt: string
+  models?: string[]
+  diagnostic?: string | null
+  diagnosticCode?: 'INVALID_API_KEY' | 'PROVIDER_FORBIDDEN' | 'PROVIDER_ENDPOINT_NOT_FOUND' | 'PROVIDER_RATE_LIMITED' | 'PROVIDER_UNAVAILABLE' | 'PROVIDER_RESPONSE_INVALID' | null
+}
 
 export type SourceType = 'TXT' | 'DOCX'
 export type JobFamily = 'JAVA_BACKEND'
@@ -54,10 +62,55 @@ export interface MatchTask {
   state: TaskState
   attempt: number
   resumeVersion: number
-  failureCode?: 'MODEL_UNAVAILABLE' | 'MODEL_OUTPUT_INVALID' | 'MODEL_ENDPOINT_REJECTED' | 'UNSUPPORTED_FILE' | 'TASK_GONE' | 'STALE_ATTEMPT' | null
+  failureCode?: 'MODEL_UNAVAILABLE' | 'MODEL_OUTPUT_INVALID' | 'MODEL_ENDPOINT_REJECTED' | 'UNSUPPORTED_FILE' | 'TASK_GONE' | 'STALE_ATTEMPT' | 'PYTHON_SERVICE_UNAVAILABLE' | 'PYTHON_SERVICE_AUTHENTICATION_FAILED' | 'CALLBACK_DELIVERY_FAILED' | null
   resultAvailable?: boolean
   createdAt: string
   updatedAt: string
+}
+export type PublicationState = 'NOT_REQUESTED' | 'PENDING' | 'PUBLISHED' | 'REJECTED_DUPLICATE_TITLE'
+export interface V3MatchTask extends MatchTask {
+  revisionId: string
+  publicationState: PublicationState
+  resultAvailable: boolean
+}
+export interface InitialMatchSubmissionRequest {
+  file: File
+  title?: string
+  llmProfileId: string
+  jobFamily: JobFamily
+  jobDescriptionText: string
+  idempotencyKey: string
+}
+export interface RematchSubmissionRequest {
+  expectedEffectiveRevisionId: string
+  file?: File
+  title?: string
+  llmProfileId: string
+  jobFamily: JobFamily
+  jobDescriptionText: string
+  idempotencyKey: string
+}
+export interface EffectiveResume {
+  id: string
+  ownerId: string
+  title: string
+  sourceType: SourceType
+  status: 0
+  version: number
+  effectiveRevisionId: string | null
+  pendingRevisionId: string | null
+  latestSuccessfulTaskId: string | null
+  createdAt: string
+  updatedAt: string
+}
+export interface EffectiveResumePage { items: EffectiveResume[]; page: number; pageSize: number; totalItems: number; totalPages: number }
+export interface ResumeMatchContext {
+  title: string
+  effectiveRevisionId: string | null
+  pendingRevisionId: string | null
+  latestSuccessfulTaskId: string | null
+  llmProfileId: string
+  jobDescriptionText: string
 }
 export interface Evidence {
   id: string

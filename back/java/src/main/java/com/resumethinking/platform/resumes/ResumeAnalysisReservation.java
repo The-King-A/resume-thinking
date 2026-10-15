@@ -1,4 +1,5 @@
 package com.resumethinking.platform.resumes;
 
 
-public record ResumeAnalysisReservation(String resumeId, long resumeVersion, Resume.SourceType sourceType) {}
+public record ResumeAnalysisReservation(String resumeId, String revisionId, long resumeVersion,
+                                        Resume.SourceType sourceType) {}

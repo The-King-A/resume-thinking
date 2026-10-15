@@ -1,0 +1,15 @@
+{
+  "id": "task003",
+  "resumeId": "resume003",
+  "revisionId": "revision003",
+  "llmProfileId": "profile001",
+  "jobFamily": "JAVA_BACKEND",
+  "state": "SUCCEEDED",
+  "publicationState": "REJECTED_DUPLICATE_TITLE",
+  "attempt": 1,
+  "resumeVersion": 1,
+  "failureCode": null,
+  "resultAvailable": true,
+  "createdAt": "2026-09-02T00:00:00Z",
+  "updatedAt": "2026-09-02T00:00:00Z"
+}

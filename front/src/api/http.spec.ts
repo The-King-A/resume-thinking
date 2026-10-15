@@ -6,7 +6,7 @@ import { DEFAULT_API_BASE_URL, http, normalizeApiBaseUrl, registerAuthSessionExp
 import { useAuthStore } from '../stores/auth'
 
 describe('http auth failure handling', () => {
-  it('clears token and identity only for confirmed authentication failures', async () => {
+  it('does not clear a session when the login endpoint rejects credentials', async () => {
     setActivePinia(createPinia())
     const auth = useAuthStore()
     localStorage.setItem('resume-matching.token', 'token')
@@ -15,14 +15,66 @@ describe('http auth failure handling', () => {
     auth.bindHttpSession()
     const expired = vi.fn()
     registerAuthSessionExpiredHandler(expired)
-    const response = { status: 401, data: { code: 'FORBIDDEN', message: 'no', correlationId: 'c', retryable: false }, config: {} }
     const interceptor = http.interceptors.response.handlers?.[0]?.rejected
     if (!interceptor) throw new Error('response interceptor missing')
+
+    const response = {
+      status: 401,
+      data: { code: 'AUTHENTICATION_REQUIRED', message: 'no', correlationId: 'c', retryable: false },
+      config: { method: 'post', url: '/api/v2/auth/login' },
+    }
+
     await expect(interceptor({ response })).rejects.toBeInstanceOf(ApiError)
     expect(tokenStorage.get()).toBe('token')
     expect(localStorage.getItem('resume-matching.identity')).toBe('{"id":"user001"}')
-    const authResponse = { ...response, config: { url: '/api/v2/auth/login' }, data: { ...response.data, code: 'AUTHENTICATION_REQUIRED' } }
-    await expect(interceptor({ response: authResponse })).rejects.toBeInstanceOf(ApiError)
+    expect(auth.user).toEqual({ id: 'user001', username: 'user', email: 'user@example.com', role: 'USER', createdAt: '' })
+    expect(expired).not.toHaveBeenCalled()
+  })
+
+  it('does not clear a session when the login endpoint returns the current invalid-credentials code', async () => {
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+    localStorage.setItem('resume-matching.token', 'token')
+    localStorage.setItem('resume-matching.identity', '{"id":"user001"}')
+    auth.user = { id: 'user001', username: 'user', email: 'user@example.com', role: 'USER', createdAt: '' }
+    auth.bindHttpSession()
+    const expired = vi.fn()
+    registerAuthSessionExpiredHandler(expired)
+    const interceptor = http.interceptors.response.handlers?.[0]?.rejected
+    if (!interceptor) throw new Error('response interceptor missing')
+
+    const response = {
+      status: 401,
+      data: { code: 'INVALID_CREDENTIALS', message: 'no', correlationId: 'c', retryable: false },
+      config: { method: 'post', url: '/api/v2/auth/login' },
+    }
+
+    await expect(interceptor({ response })).rejects.toBeInstanceOf(ApiError)
+    expect(tokenStorage.get()).toBe('token')
+    expect(localStorage.getItem('resume-matching.identity')).toBe('{"id":"user001"}')
+    expect(auth.user).toEqual({ id: 'user001', username: 'user', email: 'user@example.com', role: 'USER', createdAt: '' })
+    expect(expired).not.toHaveBeenCalled()
+  })
+
+  it('clears token and identity for a confirmed authentication failure from a protected endpoint', async () => {
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+    localStorage.setItem('resume-matching.token', 'token')
+    localStorage.setItem('resume-matching.identity', '{"id":"user001"}')
+    auth.user = { id: 'user001', username: 'user', email: 'user@example.com', role: 'USER', createdAt: '' }
+    auth.bindHttpSession()
+    const expired = vi.fn()
+    registerAuthSessionExpiredHandler(expired)
+    const interceptor = http.interceptors.response.handlers?.[0]?.rejected
+    if (!interceptor) throw new Error('response interceptor missing')
+
+    const response = {
+      status: 401,
+      data: { code: 'AUTHENTICATION_REQUIRED', message: 'no', correlationId: 'c', retryable: false },
+      config: { method: 'get', url: '/api/v2/llm-profiles' },
+    }
+
+    await expect(interceptor({ response })).rejects.toBeInstanceOf(ApiError)
     expect(tokenStorage.get()).toBeNull()
     expect(localStorage.getItem('resume-matching.identity')).toBeNull()
     expect(auth.user).toBeNull()

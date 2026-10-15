@@ -1,0 +1,13 @@
+{
+  "id": "resume002",
+  "ownerId": "user001",
+  "title": "Fixture pending resume",
+  "sourceType": "DOCX",
+  "status": 0,
+  "version": 1,
+  "effectiveRevisionId": null,
+  "pendingRevisionId": "revision002",
+  "latestSuccessfulTaskId": null,
+  "createdAt": "2026-09-02T00:00:00Z",
+  "updatedAt": "2026-09-02T00:00:00Z"
+}

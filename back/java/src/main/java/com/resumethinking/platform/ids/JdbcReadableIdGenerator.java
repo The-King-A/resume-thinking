@@ -17,10 +17,7 @@ public final class JdbcReadableIdGenerator implements ReadableIdGenerator {
     @Override
     public String next(BusinessIdType type) {
         Objects.requireNonNull(type, "business id type must not be null");
-        if (!TransactionSynchronizationManager.isActualTransactionActive()
-                || TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
-            throw new IllegalStateException("readable id generation requires an active write transaction");
-        }
+        requireWriteTransaction();
 
         jdbc.update("INSERT INTO id_sequences(sequence_name, next_value) VALUES (?, 1) "
                 + "ON DUPLICATE KEY UPDATE sequence_name = VALUES(sequence_name)", type.prefix);
@@ -33,5 +30,26 @@ public final class JdbcReadableIdGenerator implements ReadableIdGenerator {
         jdbc.update("UPDATE id_sequences SET next_value = ? WHERE sequence_name = ?",
                 sequence + 1, type.prefix);
         return ReadableIdGenerator.format(type, sequence);
+    }
+
+    @Override
+    public void ensureNextAtLeast(BusinessIdType type, long nextValue) {
+        Objects.requireNonNull(type, "business id type must not be null");
+        if (nextValue < 1) {
+            throw new IllegalArgumentException("business id sequence must be at least 1");
+        }
+        requireWriteTransaction();
+        // INSERT also repairs a missing row on a manually-created v2 schema;
+        // the duplicate-key branch only raises the value and never rewinds it.
+        jdbc.update("INSERT INTO id_sequences(sequence_name, next_value) VALUES (?, ?) "
+                        + "ON DUPLICATE KEY UPDATE next_value = GREATEST(next_value, ?)",
+                type.prefix, nextValue, nextValue);
+    }
+
+    private static void requireWriteTransaction() {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+            throw new IllegalStateException("readable id generation requires an active write transaction");
+        }
     }
 }

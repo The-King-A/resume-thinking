@@ -7,6 +7,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+import com.resumethinking.platform.resumes.DuplicateResumeTitleException;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -15,7 +16,9 @@ class ApiExceptionHandlerTest {
   @GetMapping("/jpa-lock") String jpa(){throw new OptimisticLockException("stale");}
   @GetMapping("/spring-lock") String spring(){throw new ObjectOptimisticLockingFailureException("resume", "stale");}
   @GetMapping("/unsupported-file") String unsupported(){throw new IllegalArgumentException("UNSUPPORTED_FILE");}
-  @GetMapping("/payload-too-large") String tooLarge(){throw new IllegalArgumentException("PAYLOAD_TOO_LARGE");}
+   @GetMapping("/payload-too-large") String tooLarge(){throw new IllegalArgumentException("PAYLOAD_TOO_LARGE");}
+   @GetMapping("/api/v2/duplicate-title") String duplicateTitle(){throw new DuplicateResumeTitleException();}
+   @GetMapping("/api/v1/duplicate-title") String legacyDuplicateTitle(){throw new DuplicateResumeTitleException();}
  }
  @Test void optimisticLockFailuresUseVersionConflictEnvelope() throws Exception {
   MockMvc mvc=MockMvcBuilders.standaloneSetup(new FailingController()).setControllerAdvice(new ApiExceptionHandler()).build();
@@ -27,5 +30,22 @@ class ApiExceptionHandlerTest {
    MockMvc mvc=MockMvcBuilders.standaloneSetup(new FailingController()).setControllerAdvice(new ApiExceptionHandler()).build();
    mvc.perform(get("/unsupported-file")).andExpect(status().isUnsupportedMediaType()).andExpect(jsonPath("$.code").value("UNSUPPORTED_FILE"));
    mvc.perform(get("/payload-too-large")).andExpect(status().isPayloadTooLarge()).andExpect(jsonPath("$.code").value("PAYLOAD_TOO_LARGE"));
-  }
+   }
+
+   @Test void v2DuplicateResumeTitlePreservesDetailCode() throws Exception {
+    MockMvc mvc=MockMvcBuilders.standaloneSetup(new FailingController()).setControllerAdvice(new ApiExceptionHandler()).build();
+    mvc.perform(get("/api/v2/duplicate-title"))
+      .andExpect(status().isConflict())
+      .andExpect(jsonPath("$.code").value("DUPLICATE_RESOURCE"))
+      .andExpect(jsonPath("$.detailCode").value("DUPLICATE_RESUME_TITLE"))
+      .andExpect(jsonPath("$.details[0].field").value("title"));
+   }
+
+   @Test void v1DuplicateResumeTitleKeepsLegacyEnvelope() throws Exception {
+    MockMvc mvc=MockMvcBuilders.standaloneSetup(new FailingController()).setControllerAdvice(new ApiExceptionHandler()).build();
+    mvc.perform(get("/api/v1/duplicate-title"))
+      .andExpect(status().isConflict())
+      .andExpect(jsonPath("$.code").value("DUPLICATE_RESOURCE"))
+      .andExpect(jsonPath("$.detailCode").doesNotExist());
+   }
 }

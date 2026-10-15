@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.callback_client import CallbackClient
 from app.main import app
-from app.models import AnalysisJob
+from app.models import AnalysisJob, V3AnalysisJob
 from app.settings import is_allowed_callback_url, settings
 
 
@@ -78,6 +78,77 @@ def test_analysis_job_accepts_the_released_java_backend_job_family():
     parsed = AnalysisJob.model_validate(payload)
 
     assert parsed.model_dump(by_alias=True)["jobFamily"] == "JAVA_BACKEND"
+
+
+def test_v3_analysis_job_requires_internal_authentication_and_accepts_a_valid_job(monkeypatch):
+    payload = {**_job(), "revisionId": "revision001"}
+
+    async def fake_analyze_job(_job):
+        return {"callbackId": "callback001", "revisionId": "revision001"}
+
+    class FakeCallbackClient:
+        async def post(self, _url, _callback):
+            return True
+
+    monkeypatch.setattr("app.main.analyze_job", fake_analyze_job)
+    monkeypatch.setattr("app.main.CallbackClient", FakeCallbackClient)
+
+    assert V3AnalysisJob.model_validate(payload).revision_id == "revision001"
+    response = TestClient(app).post(
+        "/internal/v3/analysis-jobs",
+        headers={"X-Internal-Service-Token": "t" * 32},
+        json=payload,
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {"status": "accepted", "taskId": "task001"}
+
+
+@pytest.mark.parametrize("headers", [{}, {"X-Internal-Service-Token": "invalid"}])
+def test_v3_analysis_job_rejects_missing_or_invalid_internal_authentication(headers):
+    response = TestClient(app).post("/internal/v3/analysis-jobs", headers=headers, json={**_job(), "revisionId": "revision001"})
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "AUTHENTICATION_REQUIRED"
+
+
+def test_v3_analysis_job_route_rejects_python_field_names():
+    payload = _job()
+    payload["revision_id"] = "revision001"
+
+    response = TestClient(app).post(
+        "/internal/v3/analysis-jobs",
+        headers={"X-Internal-Service-Token": "t" * 32},
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda payload: payload["document"].update({"contentBase64": "not@base64"}),
+        lambda payload: payload["provider"].update({"baseUrl": "http://provider.invalid"}),
+    ],
+)
+def test_v3_analysis_job_route_enforces_frozen_document_and_provider_constraints(monkeypatch, mutate):
+    payload = {**_job(), "revisionId": "revision001"}
+    mutate(payload)
+
+    async def fake_analyze_job(_job):
+        return {"callbackId": "callback001", "revisionId": "revision001"}
+
+    monkeypatch.setattr("app.main.analyze_job", fake_analyze_job)
+    response = TestClient(app).post(
+        "/internal/v3/analysis-jobs",
+        headers={"X-Internal-Service-Token": "t" * 32},
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
 
 
 def test_analysis_job_rejects_wrong_internal_service_auth():
